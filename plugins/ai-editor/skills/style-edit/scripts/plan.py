@@ -27,8 +27,16 @@ HOLD_TAIL_S = 0.3      # a caption stays up this long after its last word
 CARD_LEAD_S = 0.1      # a card lands this long before its word
 ENTRANCES = ("pop", "slide", "fade", "scale")
 # Above the head in a vertical frame, the right side in a wide one.
-DEFAULT_BOX = {"9:16": [12, 4, 76, 22], "16:9": [54, 10, 40, 48]}
-ANIMS = ("counter", "steps", "versus", "logo", "keyword")   # remotion/src/Anims.tsx
+DEFAULT_BOX = {"9:16": [10, 15, 74, 20], "16:9": [54, 10, 40, 48]}
+# Where the app's own UI sits, in percent: left, top, right, bottom. Vertical: the
+# TikTok/Reels/Shorts top bar, the like/comment/share rail on the right and the
+# caption/username block at the bottom. Wide: YouTube's progress bar.
+SAFE = {"9:16": (6, 14, 14, 22), "16:9": (3, 5, 3, 10)}
+LOGO_S = 1.2           # a logo stays up this long
+LOGO_BOX_H = 11        # logo tile height, % of the frame
+TOP_CARD_MAX_H = {"9:16": 22, "16:9": 80}   # a top card taller than this reaches the head
+SCENES = ("flow", "race", "pile")   # picture scenes: parts land on their own words
+ANIMS = ("counter", "steps", "versus", "logo", "keyword") + SCENES   # remotion/src/Anims.tsx
 MIN_CARD_S = 0.5       # a card cut shorter than this by the next one is dropped
 
 
@@ -117,6 +125,38 @@ def card_defaults(style):
     return top.get("hold_s") or 2.5, ent, top.get("box")
 
 
+def safe_box(box, aspect):
+    """Move then shrink a card box so none of it sits under the app's UI."""
+    l, t, r, b = SAFE[aspect]
+    x, y, w, h = box
+    # ponytail: fixed height cap, not a head measurement; measure the head if framings vary a lot
+    w, h = min(w, 100 - l - r), min(h, 100 - t - b, TOP_CARD_MAX_H[aspect] if y < 50 else 100)
+    x = min(max(x, l), 100 - r - w)
+    y = min(max(y, t), 100 - b - h)
+    return [x, y, w, h]
+
+
+def logo_items(visuals, edit_dir, cap_y, aspect):
+    """logo beats -> small logo cards just above the captions. They run in their own lane,
+    so a logo can land while a bigger card is up. capture.mjs fetches the files."""
+    out = []
+    for v in visuals:
+        if v.get("kind") != "logo":
+            continue
+        slug = re.sub(r"[^a-z0-9]+", "-", (v.get("brand") or v["word"]).lower()).strip("-")
+        src = next((f"images/logo-{slug}.{e}" for e in ("svg", "png")
+                    if edit_dir and (edit_dir / f"images/logo-{slug}.{e}").exists()), None)
+        if not src:
+            print(f"warning: no logo file for '{slug}', run capture.mjs first; skipped", file=sys.stderr)
+            continue
+        w = LOGO_BOX_H * (16 / 9 if aspect == "9:16" else 9 / 16)   # a square tile
+        item = {k: v[k] for k in ("word", "nth", "entrance") if k in v}
+        item.update({"anim": {"type": "logo", "props": {"src": src}}, "hold_s": v.get("hold_s", LOGO_S),
+                     "box": v.get("box") or [50 - w / 2, cap_y - LOGO_BOX_H - 5, w, LOGO_BOX_H], "lane": "logo"})
+        out.append(item)
+    return out
+
+
 def anim_items(visuals):
     """The built-animation beats of visuals.json as card items. Capture beats reach the
     plan through images.json (capture.mjs writes them there)."""
@@ -133,21 +173,72 @@ def anim_items(visuals):
     return out
 
 
+def scene_parts(cards, words, edit_dir):
+    """Fill in a scene's props, anywhere they nest: "icon" / "logo" -> "src" (the file capture.mjs
+    fetched), "word" / "off_word" -> "at" / "off_at", seconds after the card lands. A word is the
+    first time it is said once the card is up ("nth" picks a later time). No word: the scene staggers."""
+    slug = lambda s: re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+    def walk(node, card):
+        if isinstance(node, list):
+            for x in node:
+                walk(x, card)
+            return
+        if not isinstance(node, dict):
+            return
+        if "icon" in node and "src" not in node:
+            node["src"] = f"images/icon-{slug(node['icon'])}.svg"
+        if "logo" in node and "src" not in node:
+            s = slug(node["logo"])
+            src = next((f"images/logo-{s}.{e}" for e in ("svg", "png")
+                        if edit_dir and (Path(edit_dir) / f"images/logo-{s}.{e}").exists()), None)
+            if src:
+                node["src"] = src
+            else:
+                print(f"warning: no logo file for '{s}', run capture.mjs first", file=sys.stderr)
+        for key, out in (("word", "at"), ("off_word", "off_at")):
+            if key not in node:
+                continue
+            target = clean(node[key]).lower()
+            hits = [w for w in words if clean(w["text"]).lower() == target and w["start"] >= card["start"]]
+            n = node.get("nth", 1)
+            if len(hits) < n:
+                print(f"warning: '{node[key]}' is not said during the '{card['trigger_word']}' scene", file=sys.stderr)
+                continue
+            node[out] = round(hits[n - 1]["start"] - card["start"], 3)
+            if card["start"] + node[out] > card["end"]:
+                print(f"warning: '{node[key]}' lands after the '{card['trigger_word']}' scene ends; raise hold_s",
+                      file=sys.stderr)
+        for v in node.values():
+            walk(v, card)
+
+    for c in cards:
+        if (c.get("anim") or {}).get("type") in SCENES:
+            c["anim"] = json.loads(json.dumps(c["anim"]))   # never write back into visuals
+            walk(c["anim"]["props"], c)
+    return cards
+
+
 def place_cards(images, words, duration, style, aspect):
     """images: image items and anim items (anim_items). Each group without "nth" takes the
     next time its word is said after that group's previous card."""
     hold, ent, box = card_defaults(style)
-    cards = []
-    for group in ([i for i in images if "anim" not in i], [i for i in images if "anim" in i]):
-        cards += _place(group, words, duration, hold, ent, box, aspect)
-    cards.sort(key=lambda c: c["start"])
-    for a, b in zip(cards, cards[1:]):     # never two cards at once
-        a["end"] = min(a["end"], b["start"])
-    for c in cards:
-        if c["end"] - c["start"] < MIN_CARD_S:
-            print(f"warning: '{c['trigger_word']}' card cut to {c['end'] - c['start']:.2f} s by the next one, dropped",
-                  file=sys.stderr)
-    return [c for c in cards if c["end"] - c["start"] >= MIN_CARD_S]
+    out = []
+    logos = [i for i in images if i.get("lane") == "logo"]
+    images = [i for i in images if i.get("lane") != "logo"]
+    for lane in ([i for i in images if "anim" not in i] + [i for i in images if "anim" in i], logos):
+        cards = []
+        for group in ([i for i in lane if "anim" not in i], [i for i in lane if "anim" in i]):
+            cards += _place(group, words, duration, hold, ent, box, aspect)
+        cards.sort(key=lambda c: c["start"])
+        for a, b in zip(cards, cards[1:]):     # never two cards at once in a lane
+            a["end"] = min(a["end"], b["start"])
+        for c in cards:
+            if c["end"] - c["start"] < MIN_CARD_S:
+                print(f"warning: '{c['trigger_word']}' card cut to {c['end'] - c['start']:.2f} s by the next one, dropped",
+                      file=sys.stderr)
+        out += [c for c in cards if c["end"] - c["start"] >= MIN_CARD_S]
+    return sorted(out, key=lambda c: c["start"])
 
 
 def _place(images, words, duration, hold, ent, box, aspect):
@@ -167,13 +258,59 @@ def _place(images, words, duration, hold, ent, box, aspect):
         card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
         card.update({"start": start, "end": round(min(duration, start + (im.get("hold_s") or hold)), 3),
                      "trigger_word": im["word"], "entrance": im.get("entrance", ent),
-                     "box": im.get("box") or box or DEFAULT_BOX[aspect]})
+                     "box": safe_box(im.get("box") or box or DEFAULT_BOX[aspect], aspect)})
         cards.append(card)
         after = start
     return cards
 
 
-def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=()):
+HEAD_GAP = 2           # % kept between a card and the head (a zoom punch grows the head a little)
+MIN_CARD_H = 9         # a card squeezed shorter than this above the head is dropped instead
+
+
+def head_during(heads, step, start, end):
+    """Union of the head boxes sampled while a card is up, as (left, top, right, bottom)."""
+    bs = [h["box"] for h in heads if h["box"] and start - step <= h["t"] <= end]
+    if not bs:
+        return None
+    return (min(b[0] for b in bs), min(b[1] for b in bs),
+            max(b[0] + b[2] for b in bs), max(b[1] + b[3] for b in bs))
+
+
+def avoid_heads(cards, face, cap_y, aspect):
+    """Keep every card off the speaker's head (face.json from face.py). A top card shrinks to
+    the band above the head; a logo drops below the chin or moves beside the head. A card
+    that cannot fit is dropped: covering the face is worse than losing the visual."""
+    if not face:
+        return cards
+    l_safe, _, r_safe, _ = SAFE[aspect]
+    out = []
+    for c in cards:
+        hd = head_during(face["heads"], face.get("step_s", 0.5), c["start"], c["end"])
+        x, y, w, h = c["box"]
+        if hd is None or not (x < hd[2] and x + w > hd[0] and y < hd[3] and y + h > hd[1]):
+            out.append(c)
+            continue
+        left, top, right, bottom = hd
+        new = None
+        if (c.get("anim") or {}).get("type") == "logo" and h < 20:
+            if bottom + HEAD_GAP + h <= cap_y - 1:
+                new = [x, bottom + HEAD_GAP, w, h]
+            elif 100 - r_safe - (right + HEAD_GAP) >= w:
+                new = [right + HEAD_GAP, (top + bottom - h) / 2, w, h]
+            elif left - HEAD_GAP - l_safe >= w:
+                new = [left - HEAD_GAP - w, (top + bottom - h) / 2, w, h]
+        elif top - HEAD_GAP - y >= MIN_CARD_H:
+            new = [x, y, w, top - HEAD_GAP - y]
+        if new is None:
+            print(f"warning: no room off the head for the '{c['trigger_word']}' card, dropped", file=sys.stderr)
+            continue
+        c["box"] = [round(v, 1) for v in new]
+        out.append(c)
+    return out
+
+
+def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edit_dir=None):
     words = [w for w in words if w.get("type", "word") == "word" and w["text"].strip()]
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
@@ -181,13 +318,20 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=()):
     fps = round(meta["fps"]) or 30
     duration = meta["duration"]
     cap = dict(style.get("captions") or {})
+    _, top, _, bottom = SAFE[aspect]
+    cap["y_pct"] = min(max(cap.get("y_pct") or 70, top + 5), 100 - bottom - 4)   # clear of the app's UI
     chunks = chunk_captions(words, cap.get("words_per_caption") or 3, cap.get("case", "sentence")) \
         if cap.get("present", True) else []
+    fj = edit_dir and Path(edit_dir) / "face.json"
+    face = json.loads(fj.read_text()) if fj and fj.exists() else None
     return {"video": meta["video"], "width": width, "height": height, "fps": fps,
             "durationInFrames": int(duration * fps),
             "captions": {"style": cap, "chunks": chunks},
             "zooms": place_zooms(style.get("zoom") or {}, words, duration, list(cuts)),
-            "cards": place_cards(list(images) + anim_items(visuals), words, duration, style, aspect)}
+            "cards": scene_parts(avoid_heads(place_cards(list(images) + anim_items(visuals)
+                                             + logo_items(visuals, edit_dir, cap["y_pct"], aspect),
+                                             words, duration, style, aspect),
+                                 face, cap["y_pct"], aspect), words, edit_dir)}
 
 
 def probe(video):
@@ -219,6 +363,16 @@ def cut_points(edit_dir):
 
 
 def demo():
+    face = {"step_s": 0.5, "heads": [{"t": 0.0, "box": [30, 30, 40, 30]}, {"t": 0.5, "box": [30, 31, 40, 30]}]}
+    top = {"start": 0.0, "end": 1.0, "box": [10, 15, 74, 22], "trigger_word": "a"}
+    logo = {"start": 0.0, "end": 1.0, "box": [42, 50, 16, 9], "trigger_word": "b", "anim": {"type": "logo"}}
+    tiny = {"start": 0.0, "end": 1.0, "box": [10, 25, 74, 22], "trigger_word": "c"}
+    got = avoid_heads([top, logo, tiny], face, 68, "9:16")
+    assert got[0]["box"] == [10, 15, 74, 13], got[0]["box"]           # shrunk to above the head
+    lx, _, lw, _ = got[1]["box"]
+    assert (lx + lw <= 30 or lx >= 70) and len(got) == 2, got         # logo beside the head; tiny dropped
+    assert safe_box([6, 3, 88, 27], "9:16") == [6, 14, 80, 22], safe_box([6, 3, 88, 27], "9:16")
+    assert safe_box([50, 90, 20, 10], "9:16")[1] == 68
     words = []
     t = 0.0
     for i, text in enumerate("so this is how I edit. every video gets zooms and captions now. try notion today."
@@ -259,6 +413,13 @@ def demo():
     assert abs(a[0]["start"] - (zooms_w["start"] - 0.1)) < 1e-6 and "src" not in a[0]
     assert a[0]["anim"] == {"type": "keyword", "props": {"text": "zooms"}}
     assert a[0]["end"] <= a[1]["start"], "two cards at once"
+    sc = [{"word": "every", "kind": "anim", "type": "flow", "hold_s": 3,
+           "props": {"nodes": [{"icon": "mail", "word": "video"}, {"label": "x", "word": "zooms", "off_word": "captions"}]}}]
+    f = next(c for c in build(style, words, meta, visuals=sc)["cards"] if c["anim"]["type"] == "flow")
+    every = next(w for w in words if w["text"] == "every")
+    n0, n1 = f["anim"]["props"]["nodes"]
+    assert n0["src"] == "images/icon-mail.svg" and abs(n0["at"] - (every["start"] + 0.35 - f["start"])) < 1e-6, f
+    assert n1["off_at"] > n1["at"] > n0["at"] and "at" not in sc[0]["props"]["nodes"][0], f
     print("demo ok")
 
 
@@ -281,7 +442,7 @@ def main():
     vis = edit_dir / "visuals.json"
     visuals = json.loads(vis.read_text()) if vis.exists() else []
     plan = build(json.loads(Path(a.style).read_text()), json.loads(Path(a.words).read_text()),
-                 probe(video), images, a.aspect, cut_points(edit_dir), visuals)
+                 probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir)
     out = Path(a.out) if a.out else edit_dir / "plan.json"
     out.write_text(json.dumps(plan, indent=1))
     print(f"{out}: {plan['width']}x{plan['height']}, {plan['durationInFrames'] / plan['fps']:.1f} s, "

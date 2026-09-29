@@ -371,6 +371,7 @@ def enforce_splice_budget(cuts, words, model_cuts, budget, lvl=None, noise_db=No
         prev_end, nxt = splice_neighbours(c, kept, lvl, noise_db)
         if prev_end is None or nxt is None:
             continue
+        c["_next"] = nxt["start"]   # the audible onset: the frame clamp must not reach back past it
         left, right = max(0.0, c["start"] - prev_end), max(0.0, nxt["start"] - c["end"])
         if left + right <= budget + 1e-6:
             continue
@@ -397,6 +398,10 @@ def splice_gaps(cuts, words, model_cuts, lvl=None, noise_db=None):
 
 # --- 5. frames ------------------------------------------------------------------
 
+MIN_KEPT_S = 0.2
+END_TAIL_S = 0.4   # room after the final word, so the video does not stop mid-release
+
+
 def kept_frames(cuts, fps, dur):
     """Cuts -> kept [start_frame, end_frame) pairs. Cut start floored (a flub's
     onset starts before its label; rounding later re-admits it), cut end ceiled
@@ -412,7 +417,8 @@ def kept_frames(cuts, fps, dur):
         a = max(a, cursor)
         if b <= a:
             continue
-        if a > cursor:
+        # A sliver between two cuts is the tail of a flub the transcriber mislabelled, not a word.
+        if a > cursor and (not kept and cursor == 0 or a - cursor >= MIN_KEPT_S * fps):
             kept.append([cursor, a])
         cursor = b
     if cursor < total:
@@ -492,6 +498,9 @@ def main():
                     + silence_cuts(words, gap_max, gap_keep, heard)
                     + lead_trail_cuts(kept_words, dur, gap_keep))
     allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, noise)
+    if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out
+        last = max(w["end"] for w in kept_words)
+        allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
     frames = kept_frames(allcuts, fps, dur)
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)

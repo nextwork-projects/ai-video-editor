@@ -26,7 +26,7 @@ VPY = VENV / ("Scripts/python.exe" if OS == "Windows" else "bin/python")
 PLUGIN = Path(__file__).resolve().parents[3]          # plugins/ai-editor
 REMOTION_SRC = PLUGIN / "remotion"
 REMOTION_HOME = HOME / "remotion"
-PACKAGES = ["faster-whisper", "av<16", "numpy", "pillow>=10.1", "yt-dlp"]
+PACKAGES = ["faster-whisper", "av<16", "numpy", "pillow>=10.1", "yt-dlp", "opencv-python-headless>=4.8"]
 MODEL = os.environ.get("AI_EDITOR_WHISPER_MODEL", "small")
 NODE_MIN = 20
 
@@ -86,7 +86,7 @@ def checks():
     rows.append(("git", bool(version(["git", "--version"])), "", fix("git")))
     py_self = "py" if OS == "Windows" else "python3"
     here = Path(__file__).resolve()
-    rows.append(("python packages", venv_has("faster_whisper") and venv_has("yt_dlp"),
+    rows.append(("python packages", venv_has("faster_whisper") and venv_has("yt_dlp") and venv_has("cv2"),
                  str(VENV), f'{py_self} "{here}" venv'))
     rows.append(("transcription model", model_cached(), f"faster-whisper {MODEL}",
                  f'{py_self} "{here}" model'))

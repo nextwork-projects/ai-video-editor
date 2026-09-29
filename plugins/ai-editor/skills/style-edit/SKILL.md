@@ -63,8 +63,39 @@ transcript may misspell a name: anchor on its spelling, not the real one).
 - **capture** for a NAMED thing: a product, website, doc, post. The real page, cropped to the part
   that is the evidence. `"clip": [x, y, w, h]` in page px, or `"selector": "css"`. `"width"` sets the
   viewport (default 1000): a narrow one (400-550) reflows docs so their text reads on a phone.
+- **logo** every time a brand or product is named (`"brand": "claude"`, plus `"domain": "example.com"`
+  for brands Simple Icons lacks). A small logo tile pops above the caption for 1.2 s. Logos run in
+  their own lane, so one can land while a bigger card is up. Mark a named brand with a logo even
+  when it also gets a capture; skip generic words ("email", "AI").
 - **anim** for an EXPLAINING beat, one idea per card. Only words and numbers the speaker said. Never
-  invent a figure.
+  invent a figure. **Prefer a scene** (`flow`, `race`, `pile`): logos and icons that move, each part
+  landing on its own word. A text card (`counter`, `steps`, `versus`, `keyword`) is the last resort:
+  at most one or two per video, for a line with nothing to picture (a call to action).
+
+Scenes. A part is `{"icon": "mail"}` (any name on lucide.dev/icons), `{"logo": "claude"}` (plus
+`"domain"` for brands Simple Icons lacks) or `{"src": "images/x.png"}`, with an optional 1-2 word
+`label` and a `"word"` to land on (as captions.json spells it, the first time it is said once the
+card is up; `"nth"` for a later time). `"off_word"` dims a part again. A label can swap on words:
+`[{"text": "task"}, {"text": "small task", "word": "small"}]`. Set `hold_s` so the card is still up
+on its last word (plan.py warns when it is not).
+
+| scene | shows | props |
+|---|---|---|
+| `flow` | a process or a decision: nodes joined by arrows that draw in, each lighting on its word; the last node can split to 2-3 | `nodes`, optional `split`, `tag` |
+| `race` | "X times faster/cheaper": bars led by logos grow to the values said, the winner counts up | `rows` (`value`, optional `from`, `label`), `prefix`, `suffix` |
+| `pile` | volume: `count` icons fly from a `source` into 1-3 `stacks` | `icon`, `count`, `source`, `stacks`, `word` (when they start) |
+
+Every scene takes `tag: {"text": "< 5¢", "word": "cents"}`, a small badge for the one number said.
+
+```json
+{"word": "Before", "nth": 1, "kind": "anim", "type": "flow", "hold_s": 10,
+ "props": {"nodes": [{"icon": "list-todo", "label": "task", "word": "task"},
+                     {"logo": "typesafe", "domain": "typesafe.ai", "label": "jev", "word": "Jev"}],
+           "split": [{"logo": "claude", "label": "haiku", "word": "Haiku", "off_word": "harder,"},
+                     {"logo": "claude", "label": "opus", "word": "Opus"}]}}
+```
+
+Text cards:
 
 | type | props |
 |---|---|
@@ -74,24 +105,40 @@ transcript may misspell a name: anchor on its spelling, not the real one).
 | `logo` | `src` (an image in `images/`), `label` |
 | `keyword` | `text`, optional `sub` |
 
-Both kinds take `nth` (always set it), `box`, `hold_s`, `entrance`. About one visual every 4-6 s,
-never two at once, none in the first second unless it is the hook's subject. Leave `hold_s` out to
+All kinds take `nth` (always set it), `box`, `hold_s`, `entrance`. About one card every 4-6 s,
+never two cards at once, none in the first second unless it is the hook's subject. Leave `hold_s` out to
 use the creator's measured hold.
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/capture.mjs" edits/<name>
 ```
 
-Screenshots every capture beat into `images/capture-*.png` and lists them in `images.json` (your
+Fetches every logo into `images/logo-<brand>.svg|png` (Simple Icons, CC0, then the site's own icon)
+and every scene icon into `images/icon-<name>.svg` (Lucide, ISC),
+and screenshots every capture beat into `images/capture-*.png` and lists them in `images.json` (your
 own images there are kept). It uses the browser the renderer installs, so run `edit.py stills` once
 first on a fresh machine. Look at every capture: if a cookie banner or the wrong part of the page
 shows, change `clip`, `selector` or `wait_ms` and run it again.
 
+Nothing lands where the app draws its own buttons. On vertical video, `plan.py` keeps every card and
+the captions out of the top 14% (the top bar), the right 14% (the like and share rail) and the
+bottom 22% (the username and description), and caps a card at the top at 22% tall so it stays off
+the head.
+
 ## 4. Plan
 
+Find the speaker's head first, so no card or logo covers the face:
+
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/plan.py" creator-teardowns/<handle>/style.json edits/<name>/captions.json \
-  --images edits/<name>/images.json [--aspect 9:16|16:9]
+~/.ai-video-editor/venv/bin/python "${CLAUDE_SKILL_DIR}/scripts/face.py" edits/<name>   # Windows: Scripts\python.exe
+```
+
+It writes `edits/<name>/face.json`. `plan.py` reads it: a card at the top shrinks into the space
+above the head, a logo moves below the chin or beside the head, and a card that cannot fit is
+dropped with a warning. Covering the face is never the fallback.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/plan.py" creator-teardowns/<handle>/style.json edits/<name>/captions.json  [--aspect 9:16|16:9]
 ```
 
 Writes `edits/<name>/plan.json`. The output matches the cut's shape unless `--aspect` says
@@ -115,7 +162,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" stills edits/<name>
 ```
 
 The first run installs the renderer (a few minutes, once). Writes `stills/1-opening.png`,
-`2-caption.png`, `3-zoom.png`, then one still per card (`4-card.png`, `5-card.png`, ...). Look at
+`2-caption.png`, `3-zoom.png`, then one still per card (`4-card.png`, `5-card.png`, ...), and for
+each scene `N-card-early.png` and `N-card-late.png` so its motion can be judged. Look at
 every still yourself before showing them. Fix before showing if a caption or card covers the face, a
 zoom cuts off the head, a screenshot shows the wrong part of the page, or text is too small to read
 on a phone. Change `captions.y_pct` or `size_pct` in style.json, or a beat's `box` or `clip` in
@@ -160,8 +208,9 @@ Notes about what was cut go back to the cut skill.
 
 ## Files
 
-- `scripts/plan.py`: style.json + words.json (+ images.json) to plan.json. `plan.py demo` self-checks.
-- `scripts/capture.mjs`: visuals.json capture beats to screenshots + images.json. No dependencies.
+- `scripts/plan.py`: style.json + captions.json (+ images.json, visuals.json, face.json) to plan.json. `plan.py demo` self-checks.
+- `scripts/capture.mjs`: visuals.json to screenshots, logos and icons in `images/`. No dependencies.
+- `scripts/face.py`: the speaker's head per 0.5 s into face.json (OpenCV YuNet). `face.py demo` self-checks.
 - `scripts/edit.py`: stills, estimate and render. `edit.py demo` self-checks.
 - `../../remotion/`: the Remotion project, copied to `~/.ai-video-editor/remotion` (installed once,
   its source refreshed on every run). `src/Anims.tsx` holds the anim templates. It reads `edits/<name>/.render/`, which holds a copy of the cut

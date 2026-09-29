@@ -103,7 +103,7 @@ edits/<name>/
 
 ## visuals.json (Claude -> capture.mjs + plan.py)
 
-Written by Claude from words.json. One beat per visual, anchored to a word as words.json spells it.
+Written by Claude from captions.json. One beat per visual, anchored to a word as captions.json spells it.
 
 ```json
 [{"word": "notion", "nth": 1, "kind": "capture", "url": "https://www.notion.com",
@@ -118,7 +118,20 @@ Written by Claude from words.json. One beat per visual, anchored to a word as wo
 - `anim`: `type` one of `counter` (`to`, `from`, `prefix`, `suffix`, `label`, `decimals`), `steps`
   (`items`), `versus` (`a`, `b`, `a_label`, `b_label`), `logo` (`src`, `label`), `keyword` (`text`, `sub`).
   plan.py reads these straight from visuals.json.
-- Both: `nth`, `box`, `hold_s`, `entrance`, as in images.json.
+  Scenes (pictures that move, on a dark glass panel):
+  `flow` (`nodes`, optional `split` of 2-3 nodes off the last one, `tag`),
+  `race` (`rows` of `value`, optional `from`, `label`; `prefix`, `suffix`, `tag`),
+  `pile` (`icon`, `count`, `source`, `stacks` of 1-3, `word` for when items start flying, `tag`).
+  A part (node, row, stack, source, tag) takes `icon` (a Lucide name), `logo` (a brand, optional
+  `domain`) or `src` (an image in `images/`), `label` (a string, or `[{"text", "word"}]` that swaps
+  on each word), `word` (lands on that word; `nth` for a later time) and `off_word` (dims again).
+  plan.py writes `src` from `icon` / `logo` (`images/icon-<name>.svg`, `images/logo-<brand>.svg|png`)
+  and `at` / `off_at` in seconds after the card lands, from the first time the word is said once
+  the card is up. `capture.mjs` fetches every `icon` and `logo` named anywhere in anim props.
+- `logo`: `brand` (a Simple Icons slug, default the word), optional `domain` for the site-icon
+  fallback. `capture.mjs` writes `images/logo-<brand>.svg|png`; plan.py turns it into a small logo
+  card in its own lane above the captions.
+- All: `nth`, `box`, `hold_s`, `entrance`, as in images.json.
 
 ## plan.json (style-edit -> Remotion)
 

@@ -116,6 +116,65 @@ async function shoot(cdp, beat, out) {
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "beat";
 
+// Logos: Simple Icons first (CC0, brand-coloured SVG, thousands of brands), then the
+// site's own icon via Google's favicon service. Written to images/logo-<brand>.<ext>,
+// the path plan.py expects. A logo the user already put there is kept.
+const logoPath = (brand, ext) => `images/logo-${slug(brand)}.${ext}`;
+
+async function fetchLogos(edit, beats) {
+  let failed = 0;
+  for (const b of beats) {
+    const brand = b.brand || b.word;
+    if (["svg", "png"].some((e) => fs.existsSync(path.join(edit, logoPath(brand, e))))) continue;
+    const tries = [[`https://cdn.simpleicons.org/${slug(brand).replace(/-/g, "")}`, "svg"]];
+    if (b.domain) tries.push([`https://www.google.com/s2/favicons?domain=${b.domain}&sz=256`, "png"]);
+    let ok = false;
+    for (const [url, ext] of tries) {
+      const r = await fetch(url).catch(() => null);
+      if (!r || !r.ok) continue;
+      fs.writeFileSync(path.join(edit, logoPath(brand, ext)), Buffer.from(await r.arrayBuffer()));
+      console.log(`${logoPath(brand, ext)}  <- ${url}`);
+      ok = true;
+      break;
+    }
+    if (!ok) {
+      failed++;
+      console.error(`  no logo for '${brand}'${b.domain ? "" : ' (add "domain" to fall back to the site icon)'}`);
+    }
+  }
+  return failed;
+}
+
+// Icons for scenes: Lucide (ISC licence), one SVG per name, into images/icon-<name>.svg.
+async function fetchIcons(edit, names) {
+  let failed = 0;
+  for (const name of new Set(names)) {
+    const out = path.join(edit, `images/icon-${slug(name)}.svg`);
+    if (fs.existsSync(out)) continue;
+    const url = `https://cdn.jsdelivr.net/npm/lucide-static@latest/icons/${slug(name)}.svg`;
+    const r = await fetch(url).catch(() => null);
+    if (!r || !r.ok) {
+      failed++;
+      console.error(`  no icon '${name}' (names: lucide.dev/icons)`);
+      continue;
+    }
+    fs.writeFileSync(out, Buffer.from(await r.arrayBuffer()));
+    console.log(`images/icon-${slug(name)}.svg  <- ${url}`);
+  }
+  return failed;
+}
+
+// Every {"icon": ...} and {"logo": ..., "domain"?: ...} nested anywhere in the anim beats' props.
+const sceneRefs = (node, icons = [], logos = []) => {
+  if (Array.isArray(node)) node.forEach((x) => sceneRefs(x, icons, logos));
+  else if (node && typeof node === "object") {
+    if (typeof node.icon === "string") icons.push(node.icon);
+    if (typeof node.logo === "string") logos.push({ brand: node.logo, domain: node.domain });
+    Object.values(node).forEach((x) => sceneRefs(x, icons, logos));
+  }
+  return { icons, logos };
+};
+
 async function main() {
   const edit = process.argv[2];
   if (!edit) {
@@ -123,19 +182,22 @@ async function main() {
     process.exit(2);
   }
   const visuals = JSON.parse(fs.readFileSync(path.join(edit, "visuals.json"), "utf8"));
+  fs.mkdirSync(path.join(edit, "images"), { recursive: true });
+  const refs = sceneRefs(visuals.filter((v) => v.kind === "anim").map((v) => v.props));
+  let failed = await fetchLogos(edit, [...visuals.filter((v) => v.kind === "logo"), ...refs.logos]);
+  failed += await fetchIcons(edit, refs.icons);
   const beats = visuals.filter((v) => v.kind === "capture");
+  if (!beats.length) process.exit(failed ? 1 : 0);
   const bin = findBinary(SHELLS);
   if (!bin) {
     console.error(`ERROR: no Chrome Headless Shell under ${SHELLS}. Run edit.py stills once (it installs the renderer).`);
     process.exit(1);
   }
-  fs.mkdirSync(path.join(edit, "images"), { recursive: true });
   const listPath = path.join(edit, "images.json");
   // Keep the user's own images; replace captures from an earlier run.
   const images = (fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, "utf8")) : [])
     .filter((im) => !im.src.startsWith(PREFIX));
   const cdp = launch(bin);
-  let failed = 0;
   try {
     for (const [i, b] of beats.entries()) {
       const src = `${PREFIX}${i + 1}-${slug(b.word)}.png`;
@@ -155,7 +217,7 @@ async function main() {
     cdp.close();
   }
   fs.writeFileSync(listPath, JSON.stringify(images, null, 1));
-  console.log(`${listPath}: ${beats.length - failed} of ${beats.length} captures`);
+  console.log(`${listPath}: captures and logos done, ${failed} failed`);
   if (failed) process.exit(1);
 }
 

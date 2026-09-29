@@ -69,10 +69,10 @@ def prepare_public(edit, plan, tag):
                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-g", "15",
                         "-keyint_min", "15", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                         "-c:a", "copy", str(proxy)], check=True)
-    for c in plan["cards"]:
-        rel = c.get("src") or (c.get("anim") or {}).get("props", {}).get("src")   # a logo anim's image
-        if not rel:
-            continue
+    # Card images, plus every image an anim's props name (a logo card, a scene's icons and logos).
+    rels = [c["src"] for c in plan["cards"] if c.get("src")]
+    rels += re.findall(r'"(images/[^"]+)"', json.dumps([c.get("anim") for c in plan["cards"]]))
+    for rel in dict.fromkeys(rels):
         src = edit / rel
         if not src.exists():
             sys.exit(f"ERROR: card image {src} missing")
@@ -98,6 +98,9 @@ def still_frames(plan):
         frames["3-zoom"] = inside[0] if inside else mid(z)
     for i, c in enumerate(cards):
         frames[f"{4 + i}-card"] = max(c["start"], min(c["start"] + 1.6, c["end"] - 0.25))
+        if (c.get("anim") or {}).get("type") in ("flow", "race", "pile"):   # a scene moves: show it early and late too
+            frames[f"{4 + i}-card-early"] = c["start"] + 0.5
+            frames[f"{4 + i}-card-late"] = c["end"] - 0.3
     return {k: min(last, round(t * fps)) for k, t in frames.items()}
 
 

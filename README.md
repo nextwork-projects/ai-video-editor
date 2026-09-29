@@ -81,3 +81,6 @@ computer.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Assets fetched while editing: brand logos from [Simple Icons](https://simpleicons.org) (CC0), icons
+from [Lucide](https://lucide.dev) ([ISC licence](https://lucide.dev/license)).
