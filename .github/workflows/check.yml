@@ -1,0 +1,48 @@
+name: check
+
+# Runs the self-checks on Mac, Linux and Windows every Monday, and on every push.
+# The TikTok step can't fail the run: GitHub's servers are sometimes blocked by
+# TikTok. When it goes red for a few weeks running, yt-dlp needs an update.
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: python -m pip install yt-dlp numpy "pillow>=10.1"
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Self-checks
+        env:
+          T: plugins/creator-teardown/skills/creator-teardown/scripts
+          A: plugins/ai-editor/skills
+        run: |
+          python $T/fetch.py demo
+          python $T/editplan.py demo
+          python $T/visual.py demo
+          python $A/cut/scripts/test_build_timeline.py
+          python $A/style-edit/scripts/plan.py demo
+          python $A/style-edit/scripts/edit.py demo
+          python $A/setup/scripts/setup.py demo
+      - name: Doctor
+        env:
+          ELEVENLABS_API_KEY: placeholder-not-a-real-key-for-ci
+        run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py doctor
+      - name: List a TikTok profile
+        continue-on-error: true
+        run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py list tiktok --limit 3

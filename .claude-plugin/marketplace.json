@@ -1,0 +1,16 @@
+{
+  "name": "nextwork",
+  "owner": { "name": "NextWork", "url": "https://nextwork.ai" },
+  "plugins": [
+    {
+      "name": "creator-teardown",
+      "source": "./plugins/creator-teardown",
+      "description": "Break down any short-form creator's videos: view counts, word-level transcripts, measured pace, cuts, zooms and caption style."
+    },
+    {
+      "name": "ai-editor",
+      "source": "./plugins/ai-editor",
+      "description": "Edit your own talking-head video in a creator's measured style: retakes and pauses cut, then zooms, captions and cards rendered with Remotion on your laptop or AWS Lambda."
+    }
+  ]
+}

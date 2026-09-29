@@ -1,0 +1,9 @@
+{
+  "name": "creator-teardown",
+  "description": "Break down any short-form creator's videos: view counts, word-level transcripts, measured pace, cuts, zooms and caption style.",
+  "version": "2.0.0",
+  "author": { "name": "NextWork", "url": "https://nextwork.ai" },
+  "homepage": "https://github.com/nextwork-projects/ai-video-editor",
+  "repository": "https://github.com/nextwork-projects/ai-video-editor",
+  "license": "MIT"
+}

@@ -1,0 +1,5 @@
+.env
+creator-teardowns/
+__pycache__/
+.DS_Store
+edit-plans/
