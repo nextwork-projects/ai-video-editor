@@ -6,6 +6,7 @@ Three skills hand files to each other. These shapes are the only coupling. Chang
 creator-teardown  ->  creator-teardowns/<handle>/style.json
 cut               ->  edits/<name>/cut.mp4 + edits/<name>/words.json
 style-edit        <-  style.json + cut.mp4 + words.json (+ optional images)
+                  ->  edits/<name>/visuals.json -> images/capture-*.png + images.json
                   ->  edits/<name>/plan.json -> stills/ -> render.mp4
 ```
 
@@ -100,6 +101,25 @@ edits/<name>/
   words.json        words re-timed onto cut.mp4's timeline (same shape as Transcription)
 ```
 
+## visuals.json (Claude -> capture.mjs + plan.py)
+
+Written by Claude from words.json. One beat per visual, anchored to a word as words.json spells it.
+
+```json
+[{"word": "notion", "nth": 1, "kind": "capture", "url": "https://www.notion.com",
+  "clip": [0, 80, 900, 420], "width": 1000, "note": "why this beat"},
+ {"word": "faster", "nth": 1, "kind": "anim", "type": "counter",
+  "props": {"from": 0, "to": 10, "suffix": "x", "label": "faster"}, "hold_s": 2.5}]
+```
+
+- `capture`: `url`, optional `clip` `[x, y, w, h]` in page px or `selector` (CSS), `width` / `height`
+  (viewport px, default 1000 x 700), `wait_ms` (default 2500). `capture.mjs` writes
+  `images/capture-<i>-<word>.png` and replaces its earlier entries in `images.json`.
+- `anim`: `type` one of `counter` (`to`, `from`, `prefix`, `suffix`, `label`, `decimals`), `steps`
+  (`items`), `versus` (`a`, `b`, `a_label`, `b_label`), `logo` (`src`, `label`), `keyword` (`text`, `sub`).
+  plan.py reads these straight from visuals.json.
+- Both: `nth`, `box`, `hold_s`, `entrance`, as in images.json.
+
 ## plan.json (style-edit -> Remotion)
 
 ```json
@@ -111,8 +131,12 @@ edits/<name>/
                            "words": [{"text": "this", "start": 0.1, "end": 0.3}]}]},
   "zooms": [{"start": 3.2, "end": 7.9, "scale": 1.18, "kind": "punch", "ease_s": 0}],
   "cards": [{"src": "images/a.png", "start": 12.4, "end": 15.0, "trigger_word": "notion",
-             "entrance": "pop", "box": [10, 12, 80, 40]}]
+             "entrance": "pop", "box": [10, 12, 80, 40]},
+            {"anim": {"type": "counter", "props": {"to": 10, "suffix": "x"}}, "start": 18.0, "end": 20.5,
+             "trigger_word": "faster", "entrance": "pop", "box": [12, 4, 76, 22]}]
 }
 ```
+
+A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both.
 
 Times in seconds on cut.mp4's timeline. `box` is `[x, y, w, h]` in percent of the frame. Caption `size_pct` is measured on the frame's long side, so it reads the same in 9:16 and 16:9.

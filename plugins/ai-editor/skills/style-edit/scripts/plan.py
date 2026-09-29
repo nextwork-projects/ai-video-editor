@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn a creator's style.json + a cut's words.json into plan.json for the Remotion render.
 
-    python3 plan.py <style.json> <edits/NAME/words.json> [--images images.json]
+    python3 plan.py <style.json> <edits/NAME/words.json> [--images images.json (default: next to words.json)]
                     [--aspect auto|9:16|16:9] [--out edits/NAME/plan.json]
     python3 plan.py demo      self-check
 
@@ -9,6 +9,8 @@ cut.mp4 is read from the words.json folder (ffprobe gives its size, fps and leng
 images.json, optional: [{"src": "images/a.png", "word": "notion"}, ...]. src is relative
 to the edit folder. Optional per image: "nth" (which time the word is said, default the
 next one after the previous card), "box" [x, y, w, h] in percent, "entrance", "hold_s".
+visuals.json next to words.json, optional: its "anim" beats become animated cards
+(its "capture" beats arrive through images.json once capture.mjs has run).
 Shapes: docs/CONTRACTS.md. Stdlib only, deterministic.
 """
 import argparse
@@ -20,10 +22,14 @@ from pathlib import Path
 
 SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080)}
 PAUSE_S = 0.3          # a gap this long starts a new caption chunk
+MAX_WORD_S = 0.8       # longest a single spoken word is believed to last
+HOLD_TAIL_S = 0.3      # a caption stays up this long after its last word
 CARD_LEAD_S = 0.1      # a card lands this long before its word
 ENTRANCES = ("pop", "slide", "fade", "scale")
 # Above the head in a vertical frame, the right side in a wide one.
 DEFAULT_BOX = {"9:16": [12, 4, 76, 22], "16:9": [54, 10, 40, 48]}
+ANIMS = ("counter", "steps", "versus", "logo", "keyword")   # remotion/src/Anims.tsx
+MIN_CARD_S = 0.5       # a card cut shorter than this by the next one is dropped
 
 
 def clean(text):
@@ -54,7 +60,10 @@ def chunk_captions(words, n, mode):
     out = []
     for i, c in enumerate(chunks):
         nxt = chunks[i + 1][0]["start"] if i + 1 < len(chunks) else None
-        end = c[-1]["end"] + 0.4
+        # A transcriber can stretch one word over a pause or a misheard run; never hold past
+        # a plausible spoken length plus a short tail.
+        last = c[-1]
+        end = min(last["end"], last["start"] + MAX_WORD_S) + HOLD_TAIL_S
         if nxt is not None:
             end = min(end, nxt)
         ws = [{"text": cased(w["text"], mode), "start": w["start"], "end": w["end"]} for w in c]
@@ -108,8 +117,40 @@ def card_defaults(style):
     return top.get("hold_s") or 2.5, ent, top.get("box")
 
 
+def anim_items(visuals):
+    """The built-animation beats of visuals.json as card items. Capture beats reach the
+    plan through images.json (capture.mjs writes them there)."""
+    out = []
+    for v in visuals:
+        if v.get("kind") != "anim":
+            continue
+        if v.get("type") not in ANIMS:
+            print(f"warning: unknown anim type {v.get('type')!r} on '{v.get('word')}', skipped", file=sys.stderr)
+            continue
+        item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s") if k in v}
+        item["anim"] = {"type": v["type"], "props": v.get("props") or {}}
+        out.append(item)
+    return out
+
+
 def place_cards(images, words, duration, style, aspect):
+    """images: image items and anim items (anim_items). Each group without "nth" takes the
+    next time its word is said after that group's previous card."""
     hold, ent, box = card_defaults(style)
+    cards = []
+    for group in ([i for i in images if "anim" not in i], [i for i in images if "anim" in i]):
+        cards += _place(group, words, duration, hold, ent, box, aspect)
+    cards.sort(key=lambda c: c["start"])
+    for a, b in zip(cards, cards[1:]):     # never two cards at once
+        a["end"] = min(a["end"], b["start"])
+    for c in cards:
+        if c["end"] - c["start"] < MIN_CARD_S:
+            print(f"warning: '{c['trigger_word']}' card cut to {c['end'] - c['start']:.2f} s by the next one, dropped",
+                  file=sys.stderr)
+    return [c for c in cards if c["end"] - c["start"] >= MIN_CARD_S]
+
+
+def _place(images, words, duration, hold, ent, box, aspect):
     cards, after = [], -1.0
     for im in images:
         target = clean(im["word"]).lower()
@@ -119,22 +160,20 @@ def place_cards(images, words, duration, style, aspect):
         else:
             hits = [w for w in hits if w["start"] > after]
         if not hits:
-            print(f"warning: '{im['word']}' is never said after the previous card, skipped {im['src']}",
-                  file=sys.stderr)
+            print(f"warning: '{im['word']}' is never said after the previous card, "
+                  f"skipped {im.get('src') or im['anim']['type']}", file=sys.stderr)
             continue
         start = round(max(0.0, hits[0]["start"] - CARD_LEAD_S), 3)
-        cards.append({"src": im["src"], "start": start,
-                      "end": round(min(duration, start + (im.get("hold_s") or hold)), 3),
-                      "trigger_word": im["word"], "entrance": im.get("entrance", ent),
-                      "box": im.get("box") or box or DEFAULT_BOX[aspect]})
+        card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
+        card.update({"start": start, "end": round(min(duration, start + (im.get("hold_s") or hold)), 3),
+                     "trigger_word": im["word"], "entrance": im.get("entrance", ent),
+                     "box": im.get("box") or box or DEFAULT_BOX[aspect]})
+        cards.append(card)
         after = start
-    cards.sort(key=lambda c: c["start"])
-    for a, b in zip(cards, cards[1:]):     # never two cards at once
-        a["end"] = min(a["end"], b["start"])
     return cards
 
 
-def build(style, words, meta, images=(), aspect="auto", cuts=()):
+def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=()):
     words = [w for w in words if w.get("type", "word") == "word" and w["text"].strip()]
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
@@ -148,7 +187,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=()):
             "durationInFrames": int(duration * fps),
             "captions": {"style": cap, "chunks": chunks},
             "zooms": place_zooms(style.get("zoom") or {}, words, duration, list(cuts)),
-            "cards": place_cards(list(images), words, duration, style, aspect)}
+            "cards": place_cards(list(images) + anim_items(visuals), words, duration, style, aspect)}
 
 
 def probe(video):
@@ -211,6 +250,15 @@ def demo():
     push = place_zooms({"per_min": 30, "kind": "push", "duration_s": 0.5, "on": "emphasis"},
                        [w for w in words], t, [])
     assert push and push[0]["ease_s"] == 0.5
+    vis = [{"word": "zooms", "kind": "anim", "type": "keyword", "props": {"text": "zooms"}},
+           {"word": "today", "kind": "anim", "type": "nope"},
+           {"word": "edit", "kind": "capture", "url": "https://example.com"}]
+    a = build(style, words, meta, imgs, visuals=vis)["cards"]
+    assert [c.get("src") or c["anim"]["type"] for c in a] == ["keyword", "images/n.png"], a
+    zooms_w = next(w for w in words if w["text"] == "zooms")
+    assert abs(a[0]["start"] - (zooms_w["start"] - 0.1)) < 1e-6 and "src" not in a[0]
+    assert a[0]["anim"] == {"type": "keyword", "props": {"text": "zooms"}}
+    assert a[0]["end"] <= a[1]["start"], "two cards at once"
     print("demo ok")
 
 
@@ -228,9 +276,12 @@ def main():
     video = edit_dir / "cut.mp4"
     if not video.exists():
         sys.exit(f"ERROR: no cut.mp4 in {edit_dir}. Run the cut skill first.")
-    images = json.loads(Path(a.images).read_text()) if a.images else []
+    img = Path(a.images) if a.images else edit_dir / "images.json"
+    images = json.loads(img.read_text()) if img.exists() else []
+    vis = edit_dir / "visuals.json"
+    visuals = json.loads(vis.read_text()) if vis.exists() else []
     plan = build(json.loads(Path(a.style).read_text()), json.loads(Path(a.words).read_text()),
-                 probe(video), images, a.aspect, cut_points(edit_dir))
+                 probe(video), images, a.aspect, cut_points(edit_dir), visuals)
     out = Path(a.out) if a.out else edit_dir / "plan.json"
     out.write_text(json.dumps(plan, indent=1))
     print(f"{out}: {plan['width']}x{plan['height']}, {plan['durationInFrames'] / plan['fps']:.1f} s, "

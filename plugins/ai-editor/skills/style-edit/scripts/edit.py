@@ -70,16 +70,20 @@ def prepare_public(edit, plan, tag):
                         "-keyint_min", "15", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                         "-c:a", "copy", str(proxy)], check=True)
     for c in plan["cards"]:
-        src = edit / c["src"]
+        rel = c.get("src") or (c.get("anim") or {}).get("props", {}).get("src")   # a logo anim's image
+        if not rel:
+            continue
+        src = edit / rel
         if not src.exists():
             sys.exit(f"ERROR: card image {src} missing")
-        (pub / c["src"]).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, pub / c["src"])
+        (pub / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, pub / rel)
     return pub
 
 
 def still_frames(plan):
-    """Frames that show each part of the edit: the opening, a caption, a zoom, a card."""
+    """Frames that show each part of the edit: the opening, a caption, a zoom, then every card
+    (4-card, 5-card, ...) once its entrance and animation have settled."""
     fps, last = plan["fps"], plan["durationInFrames"] - 1
     chunks, zooms, cards = plan["captions"]["chunks"], plan["zooms"], plan["cards"]
     busy = lambda t: any(z["start"] <= t < z["end"] for z in zooms) or any(c["start"] <= t < c["end"] for c in cards)
@@ -92,8 +96,8 @@ def still_frames(plan):
         z = zooms[0]
         inside = [mid(c) for c in chunks if z["start"] <= mid(c) < z["end"]]
         frames["3-zoom"] = inside[0] if inside else mid(z)
-    if cards:
-        frames["4-card"] = min(cards[0]["start"] + 0.6, cards[0]["end"] - 0.2)
+    for i, c in enumerate(cards):
+        frames[f"{4 + i}-card"] = max(c["start"], min(c["start"] + 1.6, c["end"] - 0.25))
     return {k: min(last, round(t * fps)) for k, t in frames.items()}
 
 
@@ -127,9 +131,9 @@ def estimate(plan_path, pub):
 def demo():
     plan = {"fps": 30, "durationInFrames": 900,
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
-            "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}]}
+            "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}, {"start": 25, "end": 26}]}
     f = still_frames(plan)
-    assert f == {"1-opening": 15, "2-caption": 165, "3-zoom": 45, "4-card": 618}, f
+    assert f == {"1-opening": 15, "2-caption": 165, "3-zoom": 45, "4-card": 648, "5-card": 772}, f
     assert "crop=1080:1920" in proxy_filter(1920, 1080, 1080, 1920)
     assert "gblur" in proxy_filter(1080, 1920, 1920, 1080)
     assert proxy_filter(3840, 2160, 1920, 1080).startswith("scale=1920:1080")

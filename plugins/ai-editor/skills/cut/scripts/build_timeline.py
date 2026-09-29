@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile the edit: quoted removals + transcript -> kept spans, frame-accurate.
 
-    python3 build_timeline.py <source> <edit_dir> [--style style.json] [--dry-run]
+    python3 build_timeline.py <source> <edit_dir> [--max-pause S] [--dry-run]
 
 Reads   <edit_dir>/words.raw.json   the transcript of the source
         <edit_dir>/spans.json       what to remove, QUOTED from the transcript
@@ -33,7 +33,7 @@ The mechanical jobs this does so nobody types a timestamp:
   4. Frames. Boundaries are quantized to frames: start floored, end ceiled, and
      the end clamped so it never reaches into the next kept word's frame.
 
-Pause target: pace.max_pause_s from --style, else --max-pause (default 0.30 s).
+Pause target: --max-pause (default 0.15 s), tightened to two thirds of it (0.10 s).
 Exit codes: 0 ok, 1 error
 """
 import argparse
@@ -49,7 +49,8 @@ from textnorm import load_words, locate  # noqa: E402
 
 KINDS = {"retake", "false_start", "filler", "meta", "audio_event", "redundant"}
 CONF = {"high", "medium", "low"}
-DEFAULT_MAX_PAUSE = 0.30
+DEFAULT_MAX_PAUSE = 0.15
+GAP_QUIET_DB = 12.0   # a word gap counts as a pause only if it stays this far under speech
 
 
 def run(cmd):
@@ -94,6 +95,8 @@ def resolve_spans(spans, toks):
                 errs.append(f"span[{i}] {text[:50]!r}: occurrence {k + 1} but it appears {len(hits)}x")
                 continue
             a, b = hits[k]
+        elif "after" in sp:
+            a, b = hits[0]    # the first match after that second
         elif len(hits) > 1:
             where = ", ".join(f"{toks[x]['start']:.2f}s" for x, _ in hits[:6])
             errs.append(f"span[{i}] {text[:50]!r}: appears {len(hits)}x ({where}). "
@@ -201,6 +204,19 @@ def audible_end(lvl, noise_db, t):
     return None if i < 0 else min(t, (i + 1) * RMS_WIN_S)
 
 
+ONSET_MARGIN_S = 0.04   # soft onsets (p, f, h) start under the threshold
+
+
+def audible_start(lvl, noise_db, t, limit):
+    """When the audio first has energy at or after t. Whisper labels a word as
+    starting early, folding the silence before it in; a splice budgeted from the
+    label leaves that silence in the cut."""
+    i, end = max(0, int(t / RMS_WIN_S)), min(len(lvl), int(limit / RMS_WIN_S))
+    while i < end and lvl[i] <= noise_db:
+        i += 1
+    return None if i >= end else max(t, i * RMS_WIN_S - ONSET_MARGIN_S)
+
+
 def derive_noise_db(lvl):
     """(noise_db or None, diag)."""
     if len(lvl) < 50:
@@ -243,10 +259,34 @@ def detect_silence(src, noise_db, min_dur):
     return [tuple(s) for s in spans]
 
 
+def quiet_word_gaps(words, gap_max, lvl, speech_db):
+    """Gaps between words that the audio confirms are not speech. Breaths sit
+    above the silence threshold, so measured silence alone leaves every breath
+    in. A gap Whisper left by dropping a word is loud, so the level check keeps it."""
+    out = []
+    for p, n in zip(words, words[1:]):
+        a, b = p["end"], n["start"]
+        if b - a <= gap_max or not lvl:
+            continue
+        win = sorted(lvl[int(a / RMS_WIN_S):int(b / RMS_WIN_S)])
+        if win and win[int(0.9 * (len(win) - 1))] < speech_db - GAP_QUIET_DB:
+            out.append((a, b))
+    return out
+
+
+def merge_spans(spans):
+    out = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
 def silence_cuts(words, gap_max, gap_keep, heard):
-    """Tighten (never fully close) every measured silence longer than gap_max.
-    Gaps between tokens are NOT used: Whisper sometimes drops a spoken word, and
-    the gap it leaves is speech, not silence."""
+    """Tighten (never fully close) every silence longer than gap_max: measured
+    silence plus the audio-checked word gaps from quiet_word_gaps."""
     out = []
     for a, b in heard:
         if b - a <= gap_max:
@@ -314,6 +354,10 @@ def splice_neighbours(c, kept, lvl, noise_db):
             floor_t = max((w["start"] for w in kept if w["start"] < c["start"]), default=0.0)
             left = max(min(left, a), floor_t)
     nxt = min((w for w in kept if w["end"] > c["end"]), key=lambda w: w["start"], default=None)
+    if nxt is not None and lvl and noise_db is not None:
+        on = audible_start(lvl, noise_db, max(nxt["start"], c["end"]), nxt["end"])
+        if on is not None and on > nxt["start"]:
+            nxt = {**nxt, "start": on}
     return left, nxt
 
 
@@ -406,7 +450,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source")
     ap.add_argument("edit_dir")
-    ap.add_argument("--style", help="style.json; its pace.max_pause_s is the pause target")
     ap.add_argument("--max-pause", type=float, default=None,
                     help=f"longest pause left between phrases (default {DEFAULT_MAX_PAUSE})")
     ap.add_argument("--pad", type=float, default=0.10, help="kept round each cut (s)")
@@ -424,11 +467,8 @@ def main():
     sp = d / "spans.json"
     model_cuts = resolve_spans(json.loads(sp.read_text()) if sp.exists() else [], toks)
 
-    max_pause = a.max_pause
-    if a.style:
-        max_pause = json.loads(Path(a.style).read_text()).get("pace", {}).get("max_pause_s", max_pause)
-    max_pause = max_pause or DEFAULT_MAX_PAUSE
-    gap_max, gap_keep, splice_max = max_pause, round(0.75 * max_pause, 3), max_pause
+    max_pause = a.max_pause or DEFAULT_MAX_PAUSE
+    gap_max, gap_keep, splice_max = max_pause, round(2 / 3 * max_pause, 3), max_pause
 
     fps, dur = probe(a.source)
     lvl = window_rms_db(a.source)
@@ -445,7 +485,9 @@ def main():
     if not heard:
         sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
 
+    speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
     kept_words = [w for w in words if not covered_by(w, model_cuts)]
+    heard = merge_spans(heard + quiet_word_gaps(kept_words, gap_max, lvl, speech_db))
     allcuts = merge(snap_and_pad(model_cuts, words, a.pad)
                     + silence_cuts(words, gap_max, gap_keep, heard)
                     + lead_trail_cuts(kept_words, dur, gap_keep))

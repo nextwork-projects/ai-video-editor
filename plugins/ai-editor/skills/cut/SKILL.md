@@ -52,11 +52,11 @@ cuts.
 
 ```bash
 python3 "$S/build_timeline.py" <source> edits/<name> --dry-run
-python3 "$S/build_timeline.py" <source> edits/<name> [--style creator-teardowns/<handle>/style.json]
+python3 "$S/build_timeline.py" <source> edits/<name>
 ```
 
-The pause target is `pace.max_pause_s` from `--style`, else `--max-pause` (default 0.30 s). Every
-pause longer than that is shortened. `--dry-run` prints the cut list and the resulting length.
+Every pause longer than `--max-pause` (default 0.15 s) is shortened to 0.10 s. Breaths count as
+pauses: a gap between words is cut when the audio in it stays well under speech level. `--dry-run` prints the cut list and the resulting length.
 Fix any `ERROR` it prints (a quote that does not match, or a phrase that appears twice without
 `occurrence`), then run it for real.
 

@@ -15,6 +15,7 @@ import {
 } from "remotion";
 import { getAvailableFonts } from "@remotion/google-fonts";
 import { Lottie, LottieAnimationData } from "@remotion/lottie";
+import { Anim, AnimCard } from "./Anims";
 
 // Shapes follow docs/CONTRACTS.md "plan.json". Times are seconds on the cut's timeline.
 type Word = { text: string; start: number; end: number };
@@ -34,7 +35,8 @@ type CaptionStyle = {
 };
 type Zoom = { start: number; end: number; scale: number; kind: "punch" | "push"; ease_s: number };
 type Card = {
-  src: string;
+  src?: string; // an image or Lottie file, or
+  anim?: Anim; // a built animation (Anims.tsx)
   start: number;
   end: number;
   trigger_word?: string;
@@ -191,7 +193,14 @@ const LottieCard: React.FC<{ src: string }> = ({ src }) => {
   return data ? <Lottie animationData={data} style={{ width: "100%", height: "100%" }} /> : null;
 };
 
-const CardView: React.FC<{ card: Card; t: number }> = ({ card, t }) => {
+const AnimView: React.FC<{ card: Card; t: number; font?: string }> = ({ card, t, font }) => {
+  const { width, height } = useVideoConfig();
+  const family = useGoogleFont(font, 700);
+  const [, , w, h] = card.box;
+  return <AnimCard anim={card.anim!} t={t - card.start} w={(w / 100) * width} h={(h / 100) * height} family={family} />;
+};
+
+const CardView: React.FC<{ card: Card; t: number; font?: string }> = ({ card, t, font }) => {
   const { fps, height } = useVideoConfig();
   const f = Math.round((t - card.start) * fps);
   const s = spring({ frame: f, fps, config: { damping: 13, stiffness: 180, mass: 0.7 } });
@@ -222,11 +231,13 @@ const CardView: React.FC<{ card: Card; t: number }> = ({ card, t }) => {
         opacity: enter.opacity * out,
       }}
     >
-      {card.src.endsWith(".json") ? (
-        <LottieCard src={card.src} />
+      {card.anim ? (
+        <AnimView card={card} t={t} font={font} />
+      ) : card.src!.endsWith(".json") ? (
+        <LottieCard src={card.src!} />
       ) : (
         <Img
-          src={staticFile(card.src)}
+          src={staticFile(card.src!)}
           style={{
             maxWidth: "100%",
             maxHeight: "100%",
@@ -252,7 +263,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards }) => 
       {cards
         .filter((c) => t >= c.start && t < c.end)
         .map((c) => (
-          <CardView key={c.src + c.start} card={c} t={t} />
+          <CardView key={`${c.src ?? c.anim?.type}${c.start}`} card={c} t={t} font={captions.style.font_match} />
         ))}
       <Captions style={captions.style} chunks={captions.chunks} t={t} />
     </AbsoluteFill>
