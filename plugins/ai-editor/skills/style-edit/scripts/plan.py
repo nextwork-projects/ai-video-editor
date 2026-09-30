@@ -134,9 +134,11 @@ def safe_box(box, aspect):
     """Move then shrink a card box so none of it sits under the app's UI."""
     l, t, r, b = SAFE[aspect]
     x, y, w, h = box
+    if aspect == "9:16":    # vertical cards are centred on the frame, not on the gap between the UI
+        l = r = max(l, r)
     # ponytail: fixed height cap, not a head measurement; measure the head if framings vary a lot
     w, h = min(w, 100 - l - r), min(h, 100 - t - b, TOP_CARD_MAX_H[aspect] if y < 50 else 100)
-    x = min(max(x, l), 100 - r - w)
+    x = (100 - w) / 2 if aspect == "9:16" else min(max(x, l), 100 - r - w)
     y = min(max(y, t), 100 - b - h)
     return [x, y, w, h]
 
@@ -403,7 +405,8 @@ SPLIT_LOGO_S = 1.5     # a logo alone in the panel stays at least this long
 def split_art_box(seam):
     """The part of the top panel clear of the app's UI and the seam: every split card fills it."""
     l, t, r, _ = SAFE["9:16"]
-    return [l, t, 100 - l - r, seam - SPLIT_GAP - t]
+    m = max(l, r)       # equal side margins: the art is centred on the frame
+    return [m, t, 100 - 2 * m, seam - SPLIT_GAP - t]
 
 
 def speaker_frame(face, seam):
@@ -522,7 +525,7 @@ def demo():
     assert got[0]["box"] == [10, 15, 74, 13], got[0]["box"]           # shrunk to above the head
     lx, _, lw, _ = got[1]["box"]
     assert (lx + lw <= 30 or lx >= 70) and len(got) == 2, got         # logo beside the head; tiny dropped
-    assert safe_box([6, 3, 88, 27], "9:16") == [6, 14, 80, 22], safe_box([6, 3, 88, 27], "9:16")
+    assert safe_box([6, 3, 88, 27], "9:16") == [14.0, 14, 72, 22], safe_box([6, 3, 88, 27], "9:16")
     assert safe_box([50, 90, 20, 10], "9:16")[1] == 68
     words = []
     t = 0.0
@@ -579,7 +582,7 @@ def demo():
     lg = {"start": 5.0, "end": 6.2, "box": [1, 1, 1, 1], "trigger_word": "l", "lane": "logo", "anim": {"type": "logo"}}
     big = {"start": 0.0, "end": 4.0, "box": [1, 1, 1, 1], "trigger_word": "b"}
     art = split_art_box(50)
-    assert art == [6, 14, 80, 34]
+    assert art == [14, 14, 72, 34]   # centred: equal side margins
     sc2 = split_cards([big, lg, {**lg, "start": 3.5, "end": 4.7}], art)
     assert [c["box"] for c in sc2] == [art, art] and "lane" not in sc2[1] and sc2[1]["end"] == 6.5, sc2   # overlapping logo dropped
     vs = build(style, words, {**meta, "width": 1080, "height": 1920}, imgs, layout={"mode": "split"})

@@ -224,8 +224,15 @@ const Flow: React.FC<SP> = ({ anim, t, w, h, pal }) => {
   const G = 0.65; // gap between nodes, in node sizes
   const S = Math.min(w / (n + G * (n - 1) + (k ? G + 0.7 * 2.9 : 0)), h * (labelled ? 0.5 : 0.66));
   const ts = k ? Math.min(S * 0.7, h / (k * 1.3)) : 0;
-  const total = S * n + G * S * (n - 1) + (k ? G * S + ts * 2.9 : 0);
-  const x0 = (w - total) / 2;
+  // The split column is a tile plus its label; a label never shrinks under LABEL_MIN, so a long one
+  // is wider than the tile-based guess and would push the scene off centre.
+  // Centre what is actually drawn: the first node's label can overhang its tile on the left, and
+  // the split column is a tile plus a label. ponytail: 0.58 em per character, not a text measure.
+  const chars = (l: Part["label"]) => Math.max(0, ...(Array.isArray(l) ? l : [{ text: l ?? "" }]).map((v: any) => String(v?.text ?? v ?? "").length));
+  const overL = Math.max(0, chars(nodes[0].label) * Math.max(LABEL_MIN, S * 0.26) * 0.58 - S) / 2;
+  const colW = ts * 1.25 + Math.max(0, ...split.map((p) => chars(p.label))) * Math.max(LABEL_MIN, ts * 0.42) * 0.58;
+  const total = overL + S * n + G * S * (n - 1) + (k ? G * S + colW : 0);
+  const x0 = (w - total) / 2 + overL;
   const cy = h / 2 - (labelled ? S * 0.16 : 0);
   const cx = (i: number) => x0 + S / 2 + i * (1 + G) * S;
   const sx = x0 + n * S + (n - 1) * G * S + G * S;
