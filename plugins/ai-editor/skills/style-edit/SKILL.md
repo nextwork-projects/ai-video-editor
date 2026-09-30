@@ -1,6 +1,6 @@
 ---
 name: style-edit
-description: Edits the user's cut video in a creator's measured style. Takes cut.mp4 and words.json from the cut skill plus a creator's style.json from creator-teardown, plans the captions and zooms to match that creator, adds its own visuals timed to the spoken word (real screenshots of what is named, built animations for numbers, steps and comparisons, plus any images the user gives), shows stills for approval, then renders the finished video with Remotion on the laptop or on the user's own AWS Lambda. Output is 9:16 or 16:9. Use when the user says "edit this in the style of @creator", "make it look like <creator>'s videos", "add captions and zooms", "style my video", "add my images to the video", "render the edit", or has a cut and a style.json and wants the finished video. Runs after cut. Not for cutting mistakes out (that is cut) and not for measuring a creator (that is creator-teardown).
+description: Edits the user's cut video in a creator's measured style. Takes cut.mp4 and words.json from the cut skill plus a creator's style.json from creator-teardown, plans the captions and zooms to match that creator, adds its own visuals timed to the spoken word (real screenshots of what is named, built animations for numbers, steps and comparisons, plus any images the user gives), shows stills for approval, then renders the finished video with Remotion on the laptop, on GitHub Actions (free, in a private repo) or on the user's own AWS Lambda. Output is 9:16 or 16:9. Use when the user says "edit this in the style of @creator", "make it look like <creator>'s videos", "add captions and zooms", "style my video", "add my images to the video", "render the edit", or has a cut and a style.json and wants the finished video. Runs after cut. Not for cutting mistakes out (that is cut) and not for measuring a creator (that is creator-teardown).
 ---
 
 # Style edit
@@ -229,7 +229,7 @@ visuals.json, then capture and plan again.
 Show the user the four stills. **Do not render until they approve.** Their notes go back into
 style.json or images.json, then plan and stills again.
 
-## 6. Laptop or Lambda
+## 6. Laptop, GitHub Actions or Lambda
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" estimate edits/<name>
@@ -242,8 +242,14 @@ Laptop: about 2.3 min (measured 6.7 s for 60 frames, 1200 frames in all).
 Lambda: about 70 s on 8 Lambdas in us-east-1, about $0.010. A guess until a real render is measured.
 ```
 
-Give the user both lines and ask which one. Laptop is the default: free, and nothing to set up.
-Lambda runs on their own AWS account and costs money. Only offer it when their AWS credentials
+Give the user both lines, plus GitHub Actions, and ask which one.
+
+- **Laptop** is the default: free, and nothing to set up.
+- **GitHub Actions** is free and slower (one GitHub machine, about the laptop time or more, plus a
+  few minutes to install). It needs a GitHub account and `gh` logged in. It puts the footage in a
+  **private** GitHub repo. Say that plainly and ask before creating the repo. Private repos on the
+  free plan get 2,000 Actions minutes a month.
+- **Lambda** runs on their own AWS account and costs money. Only offer it when their AWS credentials
 work (`aws sts get-caller-identity`); if not, the setup skill's Lambda section sets them up.
 
 ## 7. Render
@@ -253,7 +259,22 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name>            # l
 python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --lambda   # AWS Lambda
 ```
 
-Both write `edits/<name>/render.mp4` and print how long it took. Lambda also prints what the render
+Both write `edits/<name>/render.mp4` and print how long it took.
+
+GitHub Actions, three steps. The repo name is the user's choice (`video-<name>` is a fine default):
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --github               # package
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-push edits/<name> --repo <repo>      # after the user says yes
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-fetch edits/<name> --repo <repo>    # waits, downloads
+```
+
+`render --github` writes `edits/<name>/github-render/` (renderer source, plan, workflow; no footage)
+and `edits/<name>/github-render-media.zip` (the footage). `github-push` exits 1 with
+`gh auth login --web` when they are not logged in: they run that in their own terminal. It refuses a
+public repo, creates the private one, commits, uploads the zip to the `media` release and starts the
+`render` workflow. Re-run it after a new plan: it pushes the changes, replaces the zip and starts a
+new run. `github-fetch` waits for the latest run and writes `edits/<name>/render-github.mp4`. Lambda also prints what the render
 really cost. The first Lambda render sets up the function and a storage bucket in their account;
 later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
 

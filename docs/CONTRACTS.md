@@ -179,6 +179,26 @@ volume 1; its level is baked into the file. Empty when style.json has `"sfx": fa
 
 Times in seconds on cut.mp4's timeline. `box` is `[x, y, w, h]` in percent of the frame. Caption `size_pct` is measured on the frame's long side, so it reads the same in 9:16 and 16:9.
 
+## github-render (edit.py render --github -> GitHub Actions)
+
+```
+edits/<name>/
+  github-render/              a git repo, pushed to the user's PRIVATE GitHub repo. No footage.
+    .github/workflows/render.yml   workflow_dispatch: npm ci, remotion browser ensure,
+                                   gh release download media, unzip into public/,
+                                   node render.mjs local public plan.json out/render.mp4,
+                                   upload-artifact "render" (7 days)
+    src/ package.json render.mjs tsconfig.json   the renderer, copied from the plugin
+    package-lock.json         from ~/.ai-video-editor/remotion when present (npm ci), else npm install
+    plan.json                 the plan (any plan-XYZ.json is written here as plan.json)
+    .gitignore README.md
+  github-render-media.zip     .render/ zipped (cut at output size, images/, .sfx/): the release
+                              asset "media" in that repo, up to 2 GB
+  render-github.mp4           written by edit.py github-fetch
+```
+
+A plan named plan-XYZ.json uses `github-render-XYZ/`, `github-render-XYZ-media.zip`, `render-github-XYZ.mp4`.
+
 ## taste (the user -> every skill)
 
 `~/.ai-video-editor/taste.md` (rules in words) and `~/.ai-video-editor/taste.json` (settings), written

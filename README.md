@@ -79,6 +79,7 @@ Everything lands in the folder you started in: `creator-teardowns/<handle>/` and
 | Transcription (default) | Free. Whisper runs on your computer. |
 | Transcription (optional) | ElevenLabs Scribe keeps every "um" and false start, so cuts are better. The free ElevenLabs plan covers a few hours a month. |
 | Render on your laptop | Free. |
+| Render on GitHub Actions | Free: 2,000 minutes a month on private repos. |
 | Render on AWS Lambda | Pay-as-you-go on your own AWS account. Claude quotes it before each render. |
 
 Remotion, the renderer, is free for individuals and companies of up to 3 people. Larger companies
@@ -92,6 +93,17 @@ across many machines and comes back in minutes.
 You need an AWS account with a card on it. Say **"set up Lambda rendering"** and Claude walks you
 through creating the access key, deploying the renderer to your account once, and checking it
 works. After that, pick **Lambda** when Claude asks where to render.
+
+## Render on GitHub Actions
+
+Free, no card. Slower than Lambda: one GitHub machine renders the whole video. You need a GitHub
+account and the GitHub CLI (`gh`); say **"set up GitHub rendering"** and Claude installs it and
+logs you in.
+
+Pick **GitHub Actions** when Claude asks where to render. Claude packs the renderer and your plan
+into a **private** repo in your account, uploads the footage to that repo as a release file,
+starts the render and downloads the finished video when it is done. Claude asks before creating
+the repo. The footage stays private to you.
 
 ## Troubleshooting
 

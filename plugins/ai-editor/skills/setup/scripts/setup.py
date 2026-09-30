@@ -105,6 +105,12 @@ def doctor():
     has_key = key.exists() and "ELEVENLABS_API_KEY=" in key.read_text()
     print(f"{'ok ' if has_key else '-- '}  {'elevenlabs key':<20} "
           f"{'found: better cuts' if has_key else 'optional, free Whisper is used without it'}")
+    gh = shutil.which("gh")
+    gh_ok = bool(gh) and run([gh, "auth", "status"]).returncode == 0
+    gh_fix = {"Darwin": "brew install gh", "Windows": "winget install --id GitHub.CLI"}.get(
+        OS, "see github.com/cli/cli/blob/trunk/docs/install_linux.md")
+    print(f"{'ok ' if gh_ok else '-- '}  {'github cli':<20} " + ("logged in: GitHub Actions renders" if gh_ok else
+          f"optional, for free GitHub Actions renders. {'run: gh auth login --web' if gh else 'install: ' + gh_fix}"))
     ready = all(r[1] for r in rows)
     print("Ready." if ready else "Not ready. Fix the lines above, top to bottom.")
     return 0 if ready else 1

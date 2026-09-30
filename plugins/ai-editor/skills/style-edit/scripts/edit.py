@@ -4,6 +4,9 @@
     python3 edit.py stills   edits/NAME [--plan plan.json] [--no-check]   runs check.py plan, then PNGs into edits/NAME/stills/
     python3 edit.py estimate edits/NAME [--plan plan.json]   laptop time (measured) + Lambda cost (guess)
     python3 edit.py render   edits/NAME [--plan plan.json] [--lambda]   -> edits/NAME/render.mp4
+    python3 edit.py render   edits/NAME [--plan plan.json] --github   -> edits/NAME/github-render/ + github-render-media.zip
+    python3 edit.py github-push  edits/NAME --repo NAME [--plan plan.json]   private repo + media release, starts a render
+    python3 edit.py github-fetch edits/NAME --repo NAME [--plan plan.json]   waits, then -> edits/NAME/render-github.mp4
     python3 edit.py demo     self-check
 
 A plan named plan-XYZ.json writes stills-XYZ/ and render-XYZ.mp4, so two aspects can sit side by side.
@@ -17,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
@@ -137,6 +141,156 @@ def estimate(plan_path, pub):
           f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost.")
 
 
+WORKFLOW = """name: render
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npx remotion browser ensure
+      - run: gh release download media -R "$GITHUB_REPOSITORY" -p {zip}
+        env:
+          GH_TOKEN: ${{{{ github.token }}}}
+      - run: unzip -q {zip} -d public && rm {zip}
+      - run: node render.mjs local public plan.json out/render.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: render
+          path: out/render.mp4
+          retention-days: 7
+"""
+
+README = """# {name}: render on GitHub Actions
+
+Made by the AI video editor (`edit.py render --github`). Keep this repo private: the footage is in
+it, as the `{zip}` asset of the `media` release.
+
+Actions > render > Run workflow renders `plan.json` with Remotion. The video is the `render`
+artifact on the finished run (kept 7 days). `edit.py github-fetch` downloads it.
+"""
+
+
+def gh_paths(edit, tag):
+    """(git folder, media zip) for one plan."""
+    return edit / f"github-render{tag}", edit / f"github-render{tag}-media.zip"
+
+
+def package_github(edit, plan_path, pub, tag):
+    """The renderer source + plan in a git folder (no media), the media zipped beside it."""
+    repo, zip_path = gh_paths(edit, tag)
+    shutil.rmtree(repo / "src", ignore_errors=True)
+    shutil.copytree(SRC / "src", repo / "src")
+    for f in ("package.json", "render.mjs", "tsconfig.json"):
+        shutil.copy2(SRC / f, repo / f)
+    lock = REMOTION / "package-lock.json"          # npm ci on the runner then matches this laptop
+    if lock.exists():
+        shutil.copy2(lock, repo / "package-lock.json")
+    shutil.copy2(plan_path, repo / "plan.json")
+    (repo / ".gitignore").write_text("node_modules/\nout/\npublic/\n*.mp4\n*.zip\n")
+    (repo / "README.md").write_text(README.format(name=edit.name, zip=zip_path.name))
+    wf = repo / ".github" / "workflows" / "render.yml"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text(WORKFLOW.format(zip=zip_path.name))
+    zip_path.unlink(missing_ok=True)
+    shutil.make_archive(str(zip_path.with_suffix("")), "zip", pub)
+    mb = lambda p: sum(f.stat().st_size for f in p.rglob("*") if f.is_file() and ".git" not in f.parts) / 1e6
+    print(f"{repo} ({mb(repo):.1f} MB)\n{zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB)")
+    return repo, zip_path
+
+
+def gh(*args, check=True, cwd=None):
+    r = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=cwd)
+    if check and r.returncode:
+        sys.exit(f"ERROR: gh {' '.join(args)}\n{r.stderr.strip()}")
+    return r
+
+
+def need_gh():
+    if not shutil.which("gh"):
+        sys.exit("ERROR: the GitHub CLI (gh) is missing. The setup skill's doctor prints the install command.")
+    if subprocess.run(["gh", "auth", "status"], capture_output=True).returncode:
+        print("Not logged in to GitHub. In your own terminal, run:\n  gh auth login --web")
+        sys.exit(1)
+
+
+def github_push(edit, repo_name, tag):
+    need_gh()
+    repo, zip_path = gh_paths(edit, tag)
+    if not (repo / ".github").exists() or not zip_path.exists():
+        sys.exit(f"ERROR: {repo} missing: run edit.py render {edit} --github first")
+    view = gh("repo", "view", repo_name, "--json", "isPrivate,nameWithOwner,url", check=False)
+    info = json.loads(view.stdout) if view.returncode == 0 else None
+    if info and not info["isPrivate"]:
+        sys.exit(f"ERROR: {info['nameWithOwner']} is public. The footage goes in this repo: use a private one.")
+    git = lambda *a, **kw: subprocess.run(["git", *a], cwd=repo, check=True, **kw)
+    if not (repo / ".git").exists():
+        git("init", "-q", "-b", "main")
+    gh("auth", "setup-git")                        # git pushes with the gh login
+    git("add", "-A")
+    if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo).returncode:
+        who = subprocess.run(["git", "config", "user.email"], cwd=repo, capture_output=True, text=True).stdout.strip()
+        ident = [] if who else ["-c", "user.name=ai-video-editor", "-c", "user.email=ai-video-editor@users.noreply.github.com"]
+        subprocess.run(["git", *ident, "commit", "-q", "-m", "Render plan"], cwd=repo, check=True)
+    if info is None:
+        print(f"creating private repo {repo_name}")
+        gh("repo", "create", repo_name, "--private", "--source", ".", "--push", cwd=repo)
+        info = json.loads(gh("repo", "view", repo_name, "--json", "isPrivate,nameWithOwner,url").stdout)
+    else:
+        if subprocess.run(["git", "remote", "get-url", "origin"], cwd=repo, capture_output=True).returncode:
+            git("remote", "add", "origin", info["url"] + ".git")
+        git("push", "-q", "-u", "origin", "HEAD:main")
+    full = info["nameWithOwner"]
+    print(f"uploading {zip_path.name} ({zip_path.stat().st_size / 1e6:.0f} MB)", flush=True)
+    if gh("release", "view", "media", "-R", full, check=False).returncode == 0:
+        gh("release", "upload", "media", str(zip_path), "--clobber", "-R", full)
+    else:
+        gh("release", "create", "media", str(zip_path), "--title", "media", "-R", full,
+           "--notes", "Footage for the render workflow. Keep this repo private.")
+    started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5))
+    for attempt in range(10):                      # a just-pushed workflow takes a few seconds to register
+        if gh("workflow", "run", "render.yml", "-R", full, check=attempt == 9).returncode == 0:
+            break
+        time.sleep(3)
+    # github-fetch downloads the run started here, never an older one.
+    (edit / f"github{tag}.json").write_text(json.dumps({"repo": full, "started": started}))
+    print(f"render started: {info['url']}/actions/workflows/render.yml")
+
+
+def github_fetch(edit, repo_name, tag):
+    need_gh()
+    meta = edit / f"github{tag}.json"
+    since = json.loads(meta.read_text())["started"] if meta.exists() else ""
+    runs = []
+    for _ in range(20):                            # the run triggered by github-push can take a moment to appear
+        runs = [r for r in json.loads(gh("run", "list", "-R", repo_name, "--workflow", "render.yml", "-L", "5",
+                                         "--json", "databaseId,url,createdAt").stdout) if r["createdAt"] >= since]
+        if runs:
+            break
+        time.sleep(3)
+    if not runs:
+        sys.exit("ERROR: no render run since the last push: run edit.py github-push first")
+    run_id = str(runs[0]["databaseId"])
+    print(f"waiting for {runs[0]['url']}", flush=True)
+    if subprocess.run(["gh", "run", "watch", run_id, "-R", repo_name, "--exit-status"]).returncode:
+        sys.exit(f"ERROR: the render failed. Open {runs[0]['url']} for the log.")
+    tmp = edit / f".github-download{tag}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    gh("run", "download", run_id, "-R", repo_name, "-n", "render", "-D", str(tmp))
+    out = edit / f"render-github{tag}.mp4"
+    shutil.move(str(tmp / "render.mp4"), out)
+    shutil.rmtree(tmp, ignore_errors=True)
+    dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                          str(out)], capture_output=True, text=True).stdout.strip()
+    print(f"{out} ({float(dur):.1f} s)")
+
+
 def demo():
     plan = {"fps": 30, "durationInFrames": 900,
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
@@ -149,6 +303,19 @@ def demo():
     assert "crop=1080:1920" in proxy_filter(1920, 1080, 1080, 1920)
     assert "gblur" in proxy_filter(1080, 1920, 1920, 1080)
     assert proxy_filter(3840, 2160, 1920, 1080).startswith("scale=1920:1080")
+    import tempfile, zipfile
+    with tempfile.TemporaryDirectory() as t:
+        edit, pub = Path(t) / "fake", Path(t) / "fake" / ".render"
+        (pub / "images").mkdir(parents=True)
+        (pub / "cut.mp4").write_bytes(b"x" * 100)
+        (pub / "images" / "a.png").write_bytes(b"png")
+        (edit / "plan.json").write_text('{"video": "cut.mp4"}')
+        repo, z = package_github(edit, edit / "plan.json", pub, "")
+        for f in (".github/workflows/render.yml", "plan.json", "package.json", "render.mjs", "src/index.ts"):
+            assert (repo / f).exists(), f
+        assert not list(repo.rglob("*.mp4")), "footage leaked into the git folder"
+        assert set(zipfile.ZipFile(z).namelist()) >= {"cut.mp4", "images/a.png"}, zipfile.ZipFile(z).namelist()
+        assert "-p github-render-media.zip" in (repo / ".github/workflows/render.yml").read_text()
     print("demo ok")
 
 
@@ -156,16 +323,22 @@ def main():
     if sys.argv[1:] == ["demo"]:
         return demo()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["stills", "estimate", "render"])
+    ap.add_argument("cmd", choices=["stills", "estimate", "render", "github-push", "github-fetch"])
     ap.add_argument("edit")
     ap.add_argument("--plan", default="plan.json")
     ap.add_argument("--lambda", dest="use_lambda", action="store_true")
+    ap.add_argument("--github", action="store_true", help="package for GitHub Actions instead of rendering here")
+    ap.add_argument("--repo", help="GitHub repo name (github-push, github-fetch)")
     ap.add_argument("--no-check", action="store_true", help="stills even when check.py plan finds a FAIL")
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
     plan = json.loads(plan_path.read_text())
     tag = plan_path.stem[len("plan"):]
+    if a.cmd.startswith("github-"):
+        if not a.repo:
+            sys.exit("ERROR: --repo NAME is required")
+        return (github_push if a.cmd == "github-push" else github_fetch)(edit, a.repo, tag)
     sync_renderer()
     pub = prepare_public(edit, plan, tag)
     if a.cmd == "stills":
@@ -177,6 +350,8 @@ def main():
         node("stills", pub, plan_path, edit / f"stills{tag}", *pairs)
     elif a.cmd == "estimate":
         estimate(plan_path, pub)
+    elif a.github:
+        package_github(edit, plan_path, pub, tag)
     elif a.use_lambda:
         node("lambda", pub, plan_path, edit / f"render{tag}.mp4", re.sub(r"[^a-z0-9-]+", "-", f"ai-editor-{edit.name}{tag}".lower()))
     else:
