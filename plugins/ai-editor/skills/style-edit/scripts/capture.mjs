@@ -35,10 +35,23 @@ const findBinary = (dir) => {
 // Minimal DevTools Protocol client over --remote-debugging-pipe (fd 3 in, fd 4 out, \0-framed JSON).
 function launch(bin) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "ai-editor-capture-"));
-  const proc = spawn(bin, ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio",
-    `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
-  let id = 0, buf = "";
+  // Linux: recent Ubuntu blocks the unprivileged namespaces Chrome's sandbox needs, so Chrome dies
+  // on start. Remotion's renderer launches this same binary without the sandbox too.
+  const flags = ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio",
+    ...(process.platform === "linux" ? ["--no-sandbox", "--disable-dev-shm-usage"] : [])];
+  const proc = spawn(bin, [...flags, `--user-data-dir=${profile}`, "about:blank"],
+    { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
+  let id = 0, buf = "", errTail = "";
   const waiting = new Map(), listeners = [];
+  proc.stdio[2].on("data", (d) => { errTail = (errTail + d.toString()).slice(-600); });
+  // If Chrome dies, fail every pending call with its last words instead of crashing on the pipe.
+  const died = (why) => {
+    for (const [, fail] of waiting.values()) fail(new Error(`Chrome stopped (${why}). ${errTail.trim().split("\n").pop() || ""}`));
+    waiting.clear();
+  };
+  proc.on("exit", (code, sig) => died(`exit ${code ?? sig}`));
+  proc.stdio[3].on("error", (e) => died(e.code || e.message));
+  proc.stdio[4].on("error", (e) => died(e.code || e.message));
   proc.stdio[4].on("data", (d) => {
     buf += d.toString();
     let i;
@@ -191,7 +204,11 @@ async function fetchLogos(edit, beats) {
   for (const b of beats) {
     const brand = b.brand || b.word;
     if (["svg", "png"].some((e) => fs.existsSync(path.join(edit, logoPath(brand, e))))) continue;
-    const tries = [[`https://cdn.simpleicons.org/${slug(brand).replace(/-/g, "")}`, "svg"]];
+    const si = slug(brand).replace(/-/g, "");
+    // cdn.simpleicons.org serves the brand colour but refuses some networks (cloud machines, some
+    // offices); the same icon set on jsDelivr always answers, in black.
+    const tries = [[`https://cdn.simpleicons.org/${si}`, "svg"],
+      [`https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/${si}.svg`, "svg"]];
     if (b.domain) tries.push([`https://www.google.com/s2/favicons?domain=${b.domain}&sz=256`, "png"]);
     let ok = false;
     for (const [url, ext] of tries) {

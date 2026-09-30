@@ -33,6 +33,9 @@ async function prepare(publicDir, planPath) {
   const inputProps = readPlan(planPath);
   const t0 = Date.now();
   const serveUrl = await bundle({ entryPoint: ENTRY, publicDir: path.resolve(publicDir) });
+  // The bundle is a temp folder holding a copy of the video and images (150 MB+ per render) that
+  // Remotion never deletes; left alone, a few dozen renders fill the disk.
+  process.on("exit", () => { try { fs.rmSync(serveUrl, { recursive: true, force: true }); } catch {} });
   const composition = await selectComposition({ serveUrl, id: ID, inputProps });
   return { serveUrl, composition, inputProps, bundleS: (Date.now() - t0) / 1000 };
 }

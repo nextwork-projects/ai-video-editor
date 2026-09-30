@@ -26,7 +26,11 @@ jobs:
           python-version: "3.12"
       - name: Install tools
         run: python -m pip install yt-dlp numpy "pillow>=10.1" opencv-python-headless
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      # setup-ffmpeg has no Apple Silicon build; macOS runners are arm64.
+      - if: runner.os != 'macOS'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - name: Self-checks
         env:
           T: plugins/creator-teardown/skills/creator-teardown/scripts
@@ -42,10 +46,6 @@ jobs:
           python $A/taste/scripts/taste.py demo
           python $A/style-edit/scripts/face.py demo
           python $A/style-edit/scripts/check.py demo
-      - name: Doctor
-        env:
-          ELEVENLABS_API_KEY: placeholder-not-a-real-key-for-ci
-        run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py doctor
       - name: List a TikTok profile
         continue-on-error: true
         run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py list tiktok --limit 3
@@ -72,7 +72,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      # setup-ffmpeg has no Apple Silicon build; macOS runners are arm64.
+      - if: runner.os != 'macOS'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - name: Install (setup skill)
         run: |
           S=plugins/ai-editor/skills/setup/scripts/setup.py
@@ -80,6 +84,10 @@ jobs:
           python $S model
           python $S remotion
       - name: Doctor
-        run: python plugins/ai-editor/skills/setup/scripts/setup.py doctor
+        env:
+          ELEVENLABS_API_KEY: placeholder-not-a-real-key-for-ci
+        run: |
+          python plugins/ai-editor/skills/setup/scripts/setup.py doctor
+          python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py doctor
       - name: End to end
         run: python tests/smoke.py
