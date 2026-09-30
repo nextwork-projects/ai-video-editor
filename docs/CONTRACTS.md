@@ -178,3 +178,9 @@ is relative to the edit folder: `edits/<name>/.sfx/`, written by `sfx.py build` 
 volume 1; its level is baked into the file. Empty when style.json has `"sfx": false` or `plan.py --no-sfx`.
 
 Times in seconds on cut.mp4's timeline. `box` is `[x, y, w, h]` in percent of the frame. Caption `size_pct` is measured on the frame's long side, so it reads the same in 9:16 and 16:9.
+
+## taste (the user -> every skill)
+
+`~/.ai-video-editor/taste.md` (rules in words) and `~/.ai-video-editor/taste.json` (settings), written
+by the taste skill. taste.json has the same shape as style.json plus `cut.max_pause`; `plan.py`
+lays it over style.json (taste wins) and `build_timeline.py` reads `cut.max_pause`.

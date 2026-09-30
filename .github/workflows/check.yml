@@ -39,7 +39,9 @@ jobs:
           python $A/style-edit/scripts/plan.py demo
           python $A/style-edit/scripts/edit.py demo
           python $A/setup/scripts/setup.py demo
+          python $A/taste/scripts/taste.py demo
           python $A/style-edit/scripts/face.py demo
+          python $A/style-edit/scripts/check.py demo
       - name: Doctor
         env:
           ELEVENLABS_API_KEY: placeholder-not-a-real-key-for-ci
@@ -47,3 +49,37 @@ jobs:
       - name: List a TikTok profile
         continue-on-error: true
         run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py list tiktok --limit 3
+
+  # The whole editor, installed from scratch the way a learner installs it, then run end to end
+  # on a made-up 4 s video: transcribe, capture, face, sound, plan both layouts, stills, render.
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      AI_EDITOR_WHISPER_MODEL: tiny
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install (setup skill)
+        run: |
+          S=plugins/ai-editor/skills/setup/scripts/setup.py
+          python $S venv
+          python $S model
+          python $S remotion
+      - name: Doctor
+        run: python plugins/ai-editor/skills/setup/scripts/setup.py doctor
+      - name: End to end
+        run: python tests/smoke.py

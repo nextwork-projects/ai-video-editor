@@ -25,6 +25,15 @@ folder Claude Code was started in. Never modify, move or copy the source file. P
 Python: `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
 If it is missing, run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
+## 0. Read the user's taste
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
+```
+
+Follow every rule in it; the scripts already read its settings. When the user reacts to the result
+("too slow", "captions too small"), save it with the taste skill before redoing the edit.
+
 ## 1. Transcribe
 
 ```bash

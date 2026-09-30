@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stills, estimates and renders for a plan.json. Stdlib only.
 
-    python3 edit.py stills   edits/NAME [--plan plan.json]   4 PNGs into edits/NAME/stills/
+    python3 edit.py stills   edits/NAME [--plan plan.json] [--no-check]   runs check.py plan, then PNGs into edits/NAME/stills/
     python3 edit.py estimate edits/NAME [--plan plan.json]   laptop time (measured) + Lambda cost (guess)
     python3 edit.py render   edits/NAME [--plan plan.json] [--lambda]   -> edits/NAME/render.mp4
     python3 edit.py demo     self-check
@@ -160,6 +160,7 @@ def main():
     ap.add_argument("edit")
     ap.add_argument("--plan", default="plan.json")
     ap.add_argument("--lambda", dest="use_lambda", action="store_true")
+    ap.add_argument("--no-check", action="store_true", help="stills even when check.py plan finds a FAIL")
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
@@ -168,6 +169,10 @@ def main():
     sync_renderer()
     pub = prepare_public(edit, plan, tag)
     if a.cmd == "stills":
+        # check.py plan first: prints what it finds, stops the stills only on a FAIL
+        chk = subprocess.run([sys.executable, str(Path(__file__).parent / "check.py"), "plan", str(edit), "--plan", a.plan])
+        if chk.returncode and not a.no_check:
+            sys.exit("check.py plan found a FAIL: fix it and plan again (edit.py stills --no-check to look anyway)")
         pairs = [f"{k}={v}" for k, v in still_frames(plan).items()]
         node("stills", pub, plan_path, edit / f"stills{tag}", *pairs)
     elif a.cmd == "estimate":

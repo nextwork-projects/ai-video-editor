@@ -19,6 +19,15 @@ edits/<name>/images.json + images/     (the user's images, plus the screenshots)
    -> plan.json -> stills/ -> render.mp4
 ```
 
+## 0. Read the user's taste
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
+```
+
+Follow every rule in it; the scripts already read its settings. When the user reacts to the result
+("too slow", "captions too small"), save it with the taste skill before redoing the edit.
+
 ## 1. Check the inputs
 
 - **No style.json?** Ask which creator. Run creator-teardown in quick mode on them first.
@@ -188,6 +197,20 @@ so change it there, not in the renderer. A new cut.mp4 rebuilds the kit on the n
 
 No sound: `"sfx": false` in style.json, or `plan.py ... --no-sfx`.
 
+### Check the plan
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/check.py" plan edits/<name> [--plan plan-split.json] [--style creator-teardowns/<handle>/style.json]
+```
+
+Instant. It FAILs a card under the app's UI, a vertical card whose centre is more than 1.5% off
+the middle, a card on the head while it is up (zooms and the split window included), captions
+outside the safe band, a caption up longer than 1.2 s a word or held more than 0.3 s past its last
+word, and text-card text under 34 px. It WARNs a stretch with no card, zoom or cut longer than
+2.5 x the creator's median shot (6 s without `--style`) and text cards that outnumber picture
+cards. Every line has the time and the fix. Fix every FAIL, plan again, check again, before the
+stills. `edit.py stills` runs it first and stops on a FAIL (`--no-check` to look anyway).
+
 ## 5. Stills, then wait
 
 ```bash
@@ -234,6 +257,21 @@ Both write `edits/<name>/render.mp4` and print how long it took. Lambda also pri
 really cost. The first Lambda render sets up the function and a storage bucket in their account;
 later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
 
+### Check the render
+
+```bash
+~/.ai-video-editor/venv/bin/python "${CLAUDE_SKILL_DIR}/scripts/check.py" render edits/<name> [--plan plan-split.json]
+```
+
+Before the user sees the render. Four samples a second: it FAILs a card whose drawn pixels land on
+the face (YuNet, as face.py), a vertical card whose drawn content sits more than 2% of the width
+off centre at mid-life, a silence over 0.3 s inside the speech (cut.mp4, the cut skill's derived
+threshold) and a kept span under 0.2 s between two splices. It WARNs a card that holds still for
+more than 1.5 s. It lists (LOOK) caption words that differ from what cut.transcript.json heard.
+FAILs go back to the plan (re-plan, re-render) or the cut (re-cut). At most two fix rounds; then
+show the user the render with what is still listed. Overlay cards sit on a dark panel, so their
+centre is the panel's, not the art inside it. Results land in `edits/<name>/check.json`.
+
 ## 8. Open it
 
 Open the result for the user (`open` on Mac, `start ""` on Windows, `xdg-open` on Linux) and give
@@ -246,6 +284,7 @@ Notes about what was cut go back to the cut skill.
 - `scripts/sfx.py`: the sound cues, synthesised and level-matched to the cut into `.sfx/`. `sfx.py demo` self-checks.
 - `scripts/capture.mjs`: visuals.json to screenshots, logos and icons in `images/`. No dependencies.
 - `scripts/face.py`: the speaker's head per 0.5 s into face.json (OpenCV YuNet). `face.py demo` self-checks.
+- `scripts/check.py`: the automatic check of a plan (stdlib) and a render (venv). `check.py demo` self-checks.
 - `scripts/edit.py`: stills, estimate and render. `edit.py demo` self-checks.
 - `../../remotion/`: the Remotion project, copied to `~/.ai-video-editor/remotion` (installed once,
   its source refreshed on every run). `src/Anims.tsx` holds the anim templates. It reads `edits/<name>/.render/`, which holds a copy of the cut

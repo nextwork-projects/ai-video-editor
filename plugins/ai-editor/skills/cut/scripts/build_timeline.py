@@ -473,7 +473,9 @@ def main():
     sp = d / "spans.json"
     model_cuts = resolve_spans(json.loads(sp.read_text()) if sp.exists() else [], toks)
 
-    max_pause = a.max_pause or DEFAULT_MAX_PAUSE
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "taste" / "scripts"))
+    import taste    # the user's own pause setting (taste skill) beats the default
+    max_pause = a.max_pause or taste.load_json().get("cut", {}).get("max_pause") or DEFAULT_MAX_PAUSE
     gap_max, gap_keep, splice_max = max_pause, round(2 / 3 * max_pause, 3), max_pause
 
     fps, dur = probe(a.source)

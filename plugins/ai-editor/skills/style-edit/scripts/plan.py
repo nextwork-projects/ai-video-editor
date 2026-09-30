@@ -625,7 +625,11 @@ def main():
     images = json.loads(img.read_text()) if img.exists() else []
     vis = edit_dir / "visuals.json"
     visuals = json.loads(vis.read_text()) if vis.exists() else []
-    plan = build(json.loads(Path(a.style).read_text()), json.loads(Path(a.words).read_text()),
+    # The user's own settings (taste skill) win over the creator's measured style.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "taste" / "scripts"))
+    import taste
+    style = taste.merge(json.loads(Path(a.style).read_text()), taste.load_json())
+    plan = build(style, json.loads(Path(a.words).read_text()),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None)
     if a.no_sfx:

@@ -62,7 +62,12 @@ function launch(bin) {
     const done = (v) => { clearTimeout(timer); listeners.splice(listeners.indexOf(l), 1); ok(v); };
     listeners.push(l);
   });
-  const close = () => { proc.kill(); fs.rmSync(profile, { recursive: true, force: true }); };
+  // Chrome keeps writing its profile for a moment after the kill; retry, and never fail a capture
+  // run over a temp folder the OS cleans up anyway.
+  const close = () => {
+    proc.kill();
+    try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+  };
   return { send, once, close };
 }
 
