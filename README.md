@@ -17,7 +17,21 @@ Two Claude Code plugins, installed together:
 | Plugin | What it does |
 |---|---|
 | `creator-teardown` | Breaks down a creator's top TikTok or YouTube Shorts videos: views, word-level transcripts, pace, cuts per 10 seconds, zooms and caption style. Writes `teardown.md` and `style.json`. |
-| `ai-editor` | `setup` installs everything. `cut` removes retakes, false starts and dead air from your video. `style-edit` renders it with the creator's zooms, captions and cards. |
+| `ai-editor` | `setup` installs everything. `cut` removes retakes, false starts and dead air from your video. `style-edit` renders it in the creator's style. `taste` remembers every correction you give. |
+
+What `style-edit` adds on its own, each timed to the word you say:
+
+- Captions in the creator's look, and zoom punches at the creator's rate.
+- A logo when you name a brand, and a real screenshot when you name a website, scrolled to the
+  sentence and highlighted.
+- Animated scenes built from logos and icons: a flow (this goes into that), a race (how much
+  faster), a pile (thousands of emails sorted).
+- Sound effects, generated on your computer and levelled under your voice.
+- Two layouts: **overlay** (you full frame, visuals above your head) or **split** (the visual on
+  top, you underneath).
+
+Nothing lands on your face or under the app's buttons, and an automatic check measures every edit
+for that before you see it.
 
 ## Install
 
@@ -44,11 +58,15 @@ Start Claude Code in an empty folder, then:
    to camera, under 3 minutes).
 3. Claude shows you the cut: your transcript with the removed parts struck through. Approve it, or
    say which lines to keep.
-4. Claude shows 4 stills of the styled edit. Approve them, or say what to change.
+4. Claude asks overlay or split, then shows stills of the styled edit. Approve them, or say what
+   to change.
 5. Pick where to render. Claude estimates both first:
    - **Your laptop** (free, default).
    - **AWS Lambda** (fast, costs a little on your own AWS account). See
      [Render in the cloud](#render-in-the-cloud).
+
+6. Tell Claude what you'd change ("captions too small", "fewer zooms"). It saves that to your
+   taste in `~/.ai-video-editor/taste.md` and uses it on every video after.
 
 Everything lands in the folder you started in: `creator-teardowns/<handle>/` and `edits/<name>/`.
 

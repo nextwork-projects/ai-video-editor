@@ -318,7 +318,9 @@ def check_render(edit, plan, video):
             if st["prev"] is not None:
                 st["diffs"].append((t, float(np.abs(region - st["prev"]).mean())))
             st["prev"] = region
-            if st["mid"] is None and t >= (c["start"] + c["end"]) / 2:
+            # Measured once the card has settled (every scene part landed), just before it leaves:
+            # a scene that builds left to right is off centre mid-build by design.
+            if st["mid"] is None and t >= max((c["start"] + c["end"]) / 2, c["end"] - 0.6):
                 ys, xs = np.nonzero(mask)
                 st["mid"] = (t, None if not len(xs) else [100 * xs.min() / W, 100 * ys.min() / H,
                                                           100 * (xs.max() + 1) / W, 100 * (ys.max() + 1) / H])
