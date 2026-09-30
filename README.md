@@ -46,8 +46,7 @@ You need [Claude Code](https://claude.com/claude-code). Then, inside Claude Code
 and installs what is missing (Python, ffmpeg, Node, the transcription model and the renderer),
 asking before each step. Works on Mac, Windows and Linux.
 
-The full install is about 1.5 GB, most of it the renderer. Allow 10 to 20 minutes on a normal
-connection.
+The full install is about 1.5 GB, most of it the renderer.
 
 ## Use it
 
@@ -55,7 +54,7 @@ Start Claude Code in an empty folder, then:
 
 1. **"Break down @creator on TikTok"** (or paste a few video links).
 2. **"Edit my video like @creator"** and give the path to your video (an mp4 or mov of you talking
-   to camera, under 3 minutes).
+   to camera).
    No video of your own yet? Practise on the sample take (a raw take with retakes and
    pauses left in): say **"use the sample video"**, or download it yourself:
    `curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4`
