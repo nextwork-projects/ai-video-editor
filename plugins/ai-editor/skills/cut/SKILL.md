@@ -19,7 +19,7 @@ edits/<name>/
   words.json        words re-timed onto cut.mp4
 ```
 
-`<name>` is a short slug of the file name (`IMG_5845.MOV` -> `img-5845`). Paths are relative to the
+`<name>` is a short slug of the file name (`IMG_1234.MOV` -> `img-1234`). Paths are relative to the
 folder Claude Code was started in. Never modify, move or copy the source file. Pass its path.
 
 Python: `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
