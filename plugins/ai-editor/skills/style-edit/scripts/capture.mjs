@@ -7,7 +7,9 @@
 // ~/.ai-video-editor/remotion (AI_EDITOR_HOME overrides) over the DevTools pipe.
 // Per beat, optional: "clip": [x, y, w, h] in page px, or "selector": "css" (the element, padded),
 // "width" (viewport px, default 1000), "height" (default 700), "wait_ms" (default 2500),
-// "box", "hold_s", "entrance" (passed on to the card).
+// "box", "hold_s", "entrance" (passed on to the card), "highlight": "an exact sentence on the page"
+// (the shot runs from the clip down past that sentence, and images.json gets the sentence's line boxes
+// so the card scrolls to it and sweeps a highlighter over it).
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -64,7 +66,8 @@ function launch(bin) {
   return { send, once, close };
 }
 
-// Accept the cookie banner if there is an obvious button, then hide whatever fixed overlay still says cookie/consent.
+// Accept the cookie banner if there is an obvious button, then hide whatever fixed overlay still says cookie/consent
+// and any floating widget.
 const DISMISS = `(() => {
   const btn = [...document.querySelectorAll('button, a, [role=button]')]
     .find((b) => /^(accept( all)?( cookies)?|agree|allow all|i agree|got it|ok)$/i.test((b.innerText || '').trim()));
@@ -73,8 +76,49 @@ const DISMISS = `(() => {
     const s = getComputedStyle(el);
     if ((s.position === 'fixed' || s.position === 'sticky') && /cookie|consent|gdpr|privacy/i.test(el.innerText || '')
         && el.innerText.length < 2000) el.remove();
+    // Floating widgets (chat and "ask" buttons, bottom bars): fixed, and not the header at the top.
+    else if (s.position === 'fixed' && el.getBoundingClientRect().top > 40) el.style.visibility = 'hidden';
   }
 })()`;
+
+// The line boxes of the first place `target` appears in the page's visible text, in page px.
+// Whitespace and case are ignored, and the text may run across links and inline tags.
+const FIND = (target) => `(() => {
+  const want = ${JSON.stringify(target)}.replace(/\\s+/g, ' ').trim().toLowerCase();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let text = '', map = [], space = true;
+  for (let n; (n = walker.nextNode());) {
+    if (!n.parentElement || !n.parentElement.offsetParent) continue;
+    const s = n.nodeValue;
+    for (let i = 0; i < s.length; i++) {
+      const sp = /\\s/.test(s[i]);
+      if (sp && space) continue;
+      text += sp ? ' ' : s[i].toLowerCase();
+      map.push([n, i]);
+      space = sp;
+    }
+  }
+  const at = text.indexOf(want);
+  if (at < 0) return null;
+  const r = document.createRange();
+  r.setStart(...map[at]);
+  const [en, eo] = map[at + want.length - 1];
+  r.setEnd(en, eo + 1);
+  return [...r.getClientRects()].filter((q) => q.width > 2 && q.height > 2)
+    .map((q) => [q.left + scrollX, q.top + scrollY, q.width, q.height]);
+})()`;
+
+// Fragments on one line (a link inside the sentence) become one box per line.
+const lines = (rects) => {
+  const out = [];
+  for (const [x, y, w, h] of rects.sort((a, b) => a[1] - b[1] || a[0] - b[0])) {
+    const l = out.find((o) => Math.abs(o[1] - y) < h / 2);
+    if (!l) { out.push([x, y, w, h]); continue; }
+    const r = Math.max(l[0] + l[2], x + w), b = Math.max(l[1] + l[3], y + h);
+    l[0] = Math.min(l[0], x); l[1] = Math.min(l[1], y); l[2] = r - l[0]; l[3] = b - l[1];
+  }
+  return out;
+};
 
 async function shoot(cdp, beat, out) {
   const width = beat.width || 1000, height = beat.height || 700;
@@ -106,9 +150,25 @@ async function shoot(cdp, beat, out) {
         clip = { x: Math.max(0, r.x - pad), y: Math.max(0, r.y - pad), width: r.width + pad * 2, height: r.height + pad * 2 };
       } else console.error(`  ${beat.url}: selector ${beat.selector} not found, shooting the viewport`);
     }
+    let highlight;
+    if (beat.highlight) {
+      const { result } = await s("Runtime.evaluate", { returnByValue: true, expression: FIND(beat.highlight) });
+      if (!result.value?.length) throw new Error(`highlight text not found on the page: "${beat.highlight}"`);
+      const rs = lines(result.value);
+      const bottom = Math.max(...rs.map((r) => r[1] + r[3]));
+      // Shoot from the clip's top down past the sentence, so the card can travel to it. Capped: a
+      // screenshot taller than this is mostly scroll nobody reads.
+      clip.height = Math.min(Math.max(clip.height, bottom + 140 - clip.y), 3200);
+      highlight = { rects: rs.map(([x, y, w, h]) => [(x - clip.x) / clip.width, (y - clip.y) / clip.height,
+        w / clip.width, h / clip.height].map((v) => Math.round(v * 10000) / 10000)) };
+      if (rs.some((r) => r[1] + r[3] > clip.y + clip.height)) console.error(`  ${beat.url}: highlight runs past 3200 px, cut off`);
+    }
     const { data } = await s("Page.captureScreenshot", { format: "png", captureBeyondViewport: true,
       clip: { ...clip, scale: 1 } });
     fs.writeFileSync(out, Buffer.from(data, "base64"));
+    // The PNG's own size (IHDR), so the card can fit it at its own ratio.
+    const png = Buffer.from(data.slice(0, 64), "base64");
+    return { highlight, size: [png.readUInt32BE(16), png.readUInt32BE(20)] };
   } finally {
     await cdp.send("Target.closeTarget", { targetId });
   }
@@ -201,15 +261,17 @@ async function main() {
   try {
     for (const [i, b] of beats.entries()) {
       const src = `${PREFIX}${i + 1}-${slug(b.word)}.png`;
+      let shot;
       try {
-        await shoot(cdp, b, path.join(edit, src));
+        shot = await shoot(cdp, b, path.join(edit, src));
       } catch (e) {
         failed++;
         console.error(`  failed ${b.url}: ${e.message}`);
         continue;
       }
-      const im = { src, word: b.word };
+      const im = { src, word: b.word, size: shot.size };
       for (const k of ["nth", "box", "hold_s", "entrance"]) if (b[k] !== undefined) im[k] = b[k];
+      if (shot.highlight) im.highlight = shot.highlight;
       images.push(im);
       console.log(`${src}  <- ${b.url}`);
     }

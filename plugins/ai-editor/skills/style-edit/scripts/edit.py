@@ -72,10 +72,11 @@ def prepare_public(edit, plan, tag):
     # Card images, plus every image an anim's props name (a logo card, a scene's icons and logos).
     rels = [c["src"] for c in plan["cards"] if c.get("src")]
     rels += re.findall(r'"(images/[^"]+)"', json.dumps([c.get("anim") for c in plan["cards"]]))
+    rels += [c["src"] for c in plan.get("sfx", [])]   # sound cues, from sfx.py
     for rel in dict.fromkeys(rels):
         src = edit / rel
         if not src.exists():
-            sys.exit(f"ERROR: card image {src} missing")
+            sys.exit(f"ERROR: {src} missing" + (" (run sfx.py build, then plan.py)" if rel.startswith(".sfx/") else ""))
         (pub / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, pub / rel)
     return pub
@@ -83,7 +84,9 @@ def prepare_public(edit, plan, tag):
 
 def still_frames(plan):
     """Frames that show each part of the edit: the opening, a caption, a zoom, then every card
-    (4-card, 5-card, ...) once its entrance and animation have settled."""
+    (4-card, 5-card, ...) once its entrance and animation have settled. Every card but a logo tile
+    moves, so it also gets N-card-early and N-card-late; a card that swaps in right after the
+    one before it gets N-swap, mid-move."""
     fps, last = plan["fps"], plan["durationInFrames"] - 1
     chunks, zooms, cards = plan["captions"]["chunks"], plan["zooms"], plan["cards"]
     busy = lambda t: any(z["start"] <= t < z["end"] for z in zooms) or any(c["start"] <= t < c["end"] for c in cards)
@@ -98,9 +101,12 @@ def still_frames(plan):
         frames["3-zoom"] = inside[0] if inside else mid(z)
     for i, c in enumerate(cards):
         frames[f"{4 + i}-card"] = max(c["start"], min(c["start"] + 1.6, c["end"] - 0.25))
-        if (c.get("anim") or {}).get("type") in ("flow", "race", "pile"):   # a scene moves: show it early and late too
+        if c.get("lane") != "logo":
             frames[f"{4 + i}-card-early"] = c["start"] + 0.5
             frames[f"{4 + i}-card-late"] = c["end"] - 0.3
+            prev = [p for p in cards[:i] if p.get("lane") != "logo"]
+            if prev and 0 <= c["start"] - prev[-1]["end"] < 1.2:
+                frames[f"{4 + i}-swap"] = c["start"] + 0.12
     return {k: min(last, round(t * fps)) for k, t in frames.items()}
 
 
@@ -136,7 +142,10 @@ def demo():
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
             "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}, {"start": 25, "end": 26}]}
     f = still_frames(plan)
-    assert f == {"1-opening": 15, "2-caption": 165, "3-zoom": 45, "4-card": 648, "5-card": 772}, f
+    assert f == {"1-opening": 15, "2-caption": 165, "3-zoom": 45, "4-card": 648, "4-card-early": 615, "4-card-late": 681,
+                 "5-card": 772, "5-card-early": 765, "5-card-late": 771}, f
+    plan["cards"][1]["start"] = 23.5
+    assert still_frames(plan)["5-swap"] == 709
     assert "crop=1080:1920" in proxy_filter(1920, 1080, 1080, 1920)
     assert "gblur" in proxy_filter(1080, 1920, 1920, 1080)
     assert proxy_filter(3840, 2160, 1920, 1080).startswith("scale=1920:1080")

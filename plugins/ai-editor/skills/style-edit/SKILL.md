@@ -23,6 +23,13 @@ edits/<name>/images.json + images/     (the user's images, plus the screenshots)
 
 - **No style.json?** Ask which creator. Run creator-teardown in quick mode on them first.
 - **No cut.mp4 or words.json?** Run the cut skill on their raw take first.
+- **Layout?** Ask overlay or split (vertical only). **Overlay** (default): the speaker fills the
+  frame and visuals float in the space above their head, so they stay small. **Split**: while a
+  visual is up it owns the top half of the frame on a plain ground and the speaker sits in a
+  rounded window underneath, framed so the whole head shows; with no visual up the speaker has the
+  whole frame again, and the window slides between the two. Split gives visuals about twice the
+  room. Pass `--layout split` to plan.py (or set `"layout": {"mode": "split", "ground": "#F4F4F2"}`
+  in style.json; `ground` is the panel colour, `seam` where it ends, default 50% of the height).
 - **Images?** Ask if they want any image on screen, and on which word. Put each file in
   `edits/<name>/images/` and write `edits/<name>/images.json`:
 
@@ -63,8 +70,13 @@ transcript may misspell a name: anchor on its spelling, not the real one).
 - **capture** for a NAMED thing: a product, website, doc, post. The real page, cropped to the part
   that is the evidence. `"clip": [x, y, w, h]` in page px, or `"selector": "css"`. `"width"` sets the
   viewport (default 1000): a narrow one (400-550) reflows docs so their text reads on a phone.
+  `"highlight": "the exact sentence"` (copied from the page, as it reads there) makes the card open
+  on the clip, travel down the page to that sentence and sweep a highlighter over it. Use it on
+  docs and articles, where one sentence is the evidence. Give the card `hold_s` of 3 s or more so the
+  sweep finishes. capture.mjs stops with an error if the sentence is not on the page.
 - **logo** every time a brand or product is named (`"brand": "claude"`, plus `"domain": "example.com"`
-  for brands Simple Icons lacks). A small logo tile pops above the caption for 1.2 s. Logos run in
+  for brands Simple Icons lacks). A small logo tile pops above the caption for 1.2 s (split: the logo
+  gets the panel to itself for 1.5 s, and is skipped while a bigger visual is up). Logos run in
   their own lane, so one can land while a bigger card is up. Mark a named brand with a logo even
   when it also gets a capture; skip generic words ("email", "AI").
 - **anim** for an EXPLAINING beat, one idea per card. Only words and numbers the speaker said. Never
@@ -123,7 +135,7 @@ shows, change `clip`, `selector` or `wait_ms` and run it again.
 Nothing lands where the app draws its own buttons. On vertical video, `plan.py` keeps every card and
 the captions out of the top 14% (the top bar), the right 14% (the like and share rail) and the
 bottom 22% (the username and description), and caps a card at the top at 22% tall so it stays off
-the head.
+the head. In split, every visual fills the top panel between the top 14% and the seam instead.
 
 ## 4. Plan
 
@@ -135,16 +147,18 @@ Find the speaker's head first, so no card or logo covers the face:
 
 It writes `edits/<name>/face.json`. `plan.py` reads it: a card at the top shrinks into the space
 above the head, a logo moves below the chin or beside the head, and a card that cannot fit is
-dropped with a warning. Covering the face is never the fallback.
+dropped with a warning. Covering the face is never the fallback. In split it frames the speaker's
+window instead: the hair sits just under the seam, the head centred, scaled up if it is small.
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/plan.py" creator-teardowns/<handle>/style.json edits/<name>/captions.json  [--aspect 9:16|16:9]
+python3 "${CLAUDE_SKILL_DIR}/scripts/plan.py" creator-teardowns/<handle>/style.json edits/<name>/captions.json  [--aspect 9:16|16:9] [--layout overlay|split]
 ```
 
 Writes `edits/<name>/plan.json`. The output matches the cut's shape unless `--aspect` says
 otherwise. A wide cut made vertical is centre-cropped. A vertical cut made wide sits over a
 blurred copy of itself. For both shapes, write a second plan with `--out edits/<name>/plan-16x9.json`
 and pass `--plan plan-16x9.json` to every command below (its files get the same `-16x9` suffix).
+To compare layouts the same way, write `--layout split --out edits/<name>/plan-split.json`.
 
 What the plan does:
 - Captions: `words_per_caption` words at a time, never held more than 0.3 s past the last word, a new line at every pause and comma. The word being
@@ -154,6 +168,25 @@ What the plan does:
 - Cards: images, screenshots and the anims in `visuals.json` (read automatically). Each lands 0.1 s
   before its word and stays for the creator's hold time, cut short when the next one lands. A warning
   names any word that is never said.
+- Motion: every card moves the whole time it is up. Screenshots push in slowly (a tall page, or
+  one with a `highlight`, travels down inside its card); scene parts spring in on their words and
+  float; a card that lands right after the last one slides it out as it slides in. In split, the
+  panel stays open across gaps under 1.2 s, so a run of visuals swaps inside one panel.
+
+### Sound
+
+`plan.py` adds sound cues on its own: a whoosh when a card lands, a whoosh when a card leaves
+while a sentence is still going, a pop when a scene part or logo lands, a soft hit for a counter
+or a scene's tag, and a punch on a zoom. Never two within 0.25 s, at most one per 1.5 s on average.
+Each cue starts early by its attack, so its hit is heard on the frame the thing lands.
+
+The first plan builds the kit into `edits/<name>/.sfx/` with `scripts/sfx.py`: every cue is
+synthesised by ffmpeg from a fixed seed (nothing to licence), then set about 4 dB under this
+cut's speech (the pop 6, the zoom 5), measured on the loudest 50 ms. The level lives in the file,
+so change it there, not in the renderer. A new cut.mp4 rebuilds the kit on the next plan.
+`sfx.py build edits/<name>` rebuilds it by hand.
+
+No sound: `"sfx": false` in style.json, or `plan.py ... --no-sfx`.
 
 ## 5. Stills, then wait
 
@@ -163,7 +196,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" stills edits/<name>
 
 The first run installs the renderer (a few minutes, once). Writes `stills/1-opening.png`,
 `2-caption.png`, `3-zoom.png`, then one still per card (`4-card.png`, `5-card.png`, ...), and for
-each scene `N-card-early.png` and `N-card-late.png` so its motion can be judged. Look at
+each card `N-card-early.png` and `N-card-late.png` so its motion can be judged, and `N-swap.png`
+mid-move where a card slides in over the one before it. Look at
 every still yourself before showing them. Fix before showing if a caption or card covers the face, a
 zoom cuts off the head, a screenshot shows the wrong part of the page, or text is too small to read
 on a phone. Change `captions.y_pct` or `size_pct` in style.json, or a beat's `box` or `clip` in
@@ -209,6 +243,7 @@ Notes about what was cut go back to the cut skill.
 ## Files
 
 - `scripts/plan.py`: style.json + captions.json (+ images.json, visuals.json, face.json) to plan.json. `plan.py demo` self-checks.
+- `scripts/sfx.py`: the sound cues, synthesised and level-matched to the cut into `.sfx/`. `sfx.py demo` self-checks.
 - `scripts/capture.mjs`: visuals.json to screenshots, logos and icons in `images/`. No dependencies.
 - `scripts/face.py`: the speaker's head per 0.5 s into face.json (OpenCV YuNet). `face.py demo` self-checks.
 - `scripts/edit.py`: stills, estimate and render. `edit.py demo` self-checks.

@@ -89,6 +89,7 @@ Existing keys (card events, from `editplan.py style`) stay. The visual pass adds
 - `captions` is filled by Claude from the frame sheets. `font_match` must be a Google Font (free to ship).
   `case`: `lower` | `upper` | `sentence`. `animation`: `pop` | `none` | `slide` | `word_highlight`.
 - `max_pause_s`: the longest silence the creator leaves between phrases. The cut uses it as its pause target.
+- `sfx` (optional, default true): `false` turns off the sound cues plan.py adds.
 
 ## Cut output (cut -> style-edit)
 
@@ -113,8 +114,11 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 ```
 
 - `capture`: `url`, optional `clip` `[x, y, w, h]` in page px or `selector` (CSS), `width` / `height`
-  (viewport px, default 1000 x 700), `wait_ms` (default 2500). `capture.mjs` writes
-  `images/capture-<i>-<word>.png` and replaces its earlier entries in `images.json`.
+  (viewport px, default 1000 x 700), `wait_ms` (default 2500), `highlight` (an exact sentence on the
+  page; whitespace and case ignored). `capture.mjs` writes `images/capture-<i>-<word>.png` and replaces
+  its earlier entries in `images.json`, each with `size` `[w, h]` (image px) and, for a highlight,
+  `"highlight": {"rects": [[x, y, w, h], ...]}`: one box per line of the sentence, in fractions of the
+  image. With a highlight the shot runs from the clip's top down past the sentence (at most 3200 page px).
 - `anim`: `type` one of `counter` (`to`, `from`, `prefix`, `suffix`, `label`, `decimals`), `steps`
   (`items`), `versus` (`a`, `b`, `a_label`, `b_label`), `logo` (`src`, `label`), `keyword` (`text`, `sub`).
   plan.py reads these straight from visuals.json.
@@ -150,6 +154,27 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 }
 ```
 
-A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both.
+A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. Optional per card:
+`lane` (`"logo"` for the logo tiles' lane), `size` and `highlight` (from images.json, for an image).
+
+`layout` is present only for the split layout (`plan.py --layout split`, vertical only):
+
+```json
+"layout": {"mode": "split", "ground": "#F4F4F2", "seam": 50, "art": [6, 14, 80, 34],
+           "speaker": {"scale": 1, "x": 0, "y": 29.2, "origin": [45.8, 45.9]}, "caption_full_y": 68}
+```
+
+`seam`: where the top panel ends, % of the height. `art`: the box every card fills (clear of the app's
+UI and the seam). `speaker`: the cut drawn at `scale`, pulled left `x` and up `y` (% of the frame) inside
+the window under the seam; `origin` is the head's centre on the video (zooms grow from it). The panel
+opens while cards are up (runs of cards closer than 1.2 s share one opening) and the speaker has the
+whole frame otherwise. `captions.style.y_pct` is the split position (just under the seam);
+`caption_full_y` is where captions sit while the speaker has the whole frame.
+
+`sfx` (optional): sound cues, `[{"t": 6.99, "src": ".sfx/whoosh-in.wav", "event": 7.18}]`. `t` is when the
+file starts; `event` is the visual event its hit lands on (`t` = `event` minus the cue's attack). `src`
+is relative to the edit folder: `edits/<name>/.sfx/`, written by `sfx.py build` with `kit.json`
+(`speech_db`, `cut_mtime`, and per cue `attack_s` and `db`, its loudest 50 ms in dBFS). Each cue plays at
+volume 1; its level is baked into the file. Empty when style.json has `"sfx": false` or `plan.py --no-sfx`.
 
 Times in seconds on cut.mp4's timeline. `box` is `[x, y, w, h]` in percent of the frame. Caption `size_pct` is measured on the frame's long side, so it reads the same in 9:16 and 16:9.

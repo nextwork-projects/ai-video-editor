@@ -2,7 +2,7 @@
 """Turn a creator's style.json + a cut's words.json into plan.json for the Remotion render.
 
     python3 plan.py <style.json> <edits/NAME/words.json> [--images images.json (default: next to words.json)]
-                    [--aspect auto|9:16|16:9] [--out edits/NAME/plan.json]
+                    [--aspect auto|9:16|16:9] [--layout overlay|split] [--out edits/NAME/plan.json]
     python3 plan.py demo      self-check
 
 cut.mp4 is read from the words.json folder (ffprobe gives its size, fps and length).
@@ -11,9 +11,14 @@ to the edit folder. Optional per image: "nth" (which time the word is said, defa
 next one after the previous card), "box" [x, y, w, h] in percent, "entrance", "hold_s".
 visuals.json next to words.json, optional: its "anim" beats become animated cards
 (its "capture" beats arrive through images.json once capture.mjs has run).
+--layout split (vertical only): the visual sits in a top panel, the speaker in a window under it,
+framed from face.json; with no visual up the speaker has the whole frame. Default overlay: cards
+float over the full-frame speaker. style.json "layout": {"mode": "split", "ground": "#F4F4F2"}
+sets it too (the flag wins).
 Shapes: docs/CONTRACTS.md. Stdlib only, deterministic.
 """
 import argparse
+import inspect
 import json
 import re
 import subprocess
@@ -256,6 +261,11 @@ def _place(images, words, duration, hold, ent, box, aspect):
             continue
         start = round(max(0.0, hits[0]["start"] - CARD_LEAD_S), 3)
         card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
+        if im.get("lane"):
+            card["lane"] = im["lane"]
+        for k in ("highlight", "size"):
+            if im.get(k):
+                card[k] = im[k]
         card.update({"start": start, "end": round(min(duration, start + (im.get("hold_s") or hold)), 3),
                      "trigger_word": im["word"], "entrance": im.get("entrance", ent),
                      "box": safe_box(im.get("box") or box or DEFAULT_BOX[aspect], aspect)})
@@ -310,7 +320,131 @@ def avoid_heads(cards, face, cap_y, aspect):
     return out
 
 
-def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edit_dir=None):
+SFX_GAP_S = 0.25       # never two cues closer than this
+SFX_EVERY_S = 1.5      # at most one cue per this many seconds, on average
+SFX_RANK = ("hit", "whoosh-in", "whoosh-out", "pop", "zoom")   # who keeps its slot when cues crowd
+
+
+def place_sfx(plan, words, kit):
+    """Sound cues for the plan's visual events: a card lands (whoosh-in, a counter or a scene's tag
+    gets the soft hit, a logo tile a pop), a card leaves while a sentence is still going (whoosh-out),
+    a scene part lands on its word (pop), a zoom starts (zoom). A cue starts its attack early so its
+    hit is heard on the event. kit: sfx.py's kit.json."""
+    words = [w for w in words if w.get("type", "word") == "word" and w["text"].strip()]
+    ev = []
+
+    def parts(node, key, start):
+        if isinstance(node, list):
+            for x in node:
+                parts(x, key, start)
+        elif isinstance(node, dict):
+            if "at" in node and key != "label":   # a label swapping its text stays quiet
+                ev.append((start + node["at"], "hit" if key == "tag" else "pop"))
+            for k, v in node.items():
+                parts(v, k, start)
+
+    def mid_sentence(t):
+        before = [w for w in words if w["end"] <= t + 0.05]
+        return bool(before) and t - before[-1]["end"] < PAUSE_S and not ends_sentence(before[-1]["text"]) \
+            and any(0 <= w["start"] - t < PAUSE_S for w in words)
+
+    for c in plan["cards"]:
+        kind = (c.get("anim") or {}).get("type")
+        lands = c["start"] + CARD_LEAD_S
+        ev.append((lands, "pop" if kind == "logo" else "hit" if kind == "counter" else "whoosh-in"))
+        if kind != "logo" and mid_sentence(c["end"] - 0.15):   # the card fades out over its last 0.15 s
+            ev.append((c["end"] - 0.15, "whoosh-out"))
+        parts((c.get("anim") or {}).get("props"), None, c["start"])
+    ev += [(z["start"], "zoom") for z in plan["zooms"]]
+
+    duration = plan["durationInFrames"] / plan["fps"]
+    budget = max(1, int(duration / SFX_EVERY_S))
+    kept = []
+    # ponytail: rank-then-time greedy, so a crowded video loses its LATER low-rank cues first;
+    # spread the budget over time if that ever reads lopsided.
+    for t, name in sorted(ev, key=lambda e: (SFX_RANK.index(e[1]), e[0])):
+        if name in kit["cues"] and len(kept) < budget and 0 <= t < duration \
+                and all(abs(t - k) >= SFX_GAP_S for k, _ in kept):
+            kept.append((t, name))
+    return [{"t": round(max(0.0, t - kit["cues"][n]["attack_s"]), 3), "src": f".sfx/{n}.wav", "event": round(t, 3)}
+            for t, n in sorted(kept)]
+
+
+def with_sfx(build):
+    """Adds plan["sfx"] (place_sfx) to build()'s plan. Off when style.json has "sfx": false or
+    there is no edit folder (sfx.py level-matches the kit to the folder's cut.mp4)."""
+    sig = inspect.signature(build)
+
+    def wrap(*a, **k):
+        plan = build(*a, **k)
+        v = sig.bind(*a, **k)
+        v.apply_defaults()
+        style, edit_dir = v.arguments["style"], v.arguments["edit_dir"]
+        if style.get("sfx", True) is False or not edit_dir:
+            plan["sfx"] = []
+            return plan
+        import sfx
+        plan["sfx"] = place_sfx(plan, v.arguments["words"], sfx.kit(edit_dir))
+        return plan
+    return wrap
+
+
+# Split layout: the visual owns a top panel, the speaker a window under the seam. In percent of the frame.
+SPLIT = {"seam": 50, "ground": "#F4F4F2"}
+SPLIT_GAP = 2          # art stops this far above the seam
+SPLIT_CAP_BELOW = 4.5  # captions sit this far under the seam, over the top of the speaker's window
+HEAD_ROOM = 4          # the top of the head (hair included) sits this far into the window
+MIN_HEAD = 22          # a head shorter than this is scaled up to it, so a face is never tiny
+MAX_SPEAKER_SCALE = 1.6
+PANEL_T = 0.3          # the panel opens this long before a card lands (StyleEdit.tsx PANEL_T)
+SPLIT_LOGO_S = 1.5     # a logo alone in the panel stays at least this long
+
+
+def split_art_box(seam):
+    """The part of the top panel clear of the app's UI and the seam: every split card fills it."""
+    l, t, r, _ = SAFE["9:16"]
+    return [l, t, 100 - l - r, seam - SPLIT_GAP - t]
+
+
+def speaker_frame(face, seam):
+    """How the cut sits in the window under the seam: scaled so the head is at least MIN_HEAD tall,
+    moved so the hair sits HEAD_ROOM below the window's top and the head is centred left to right.
+    x, y: how far the scaled video's top-left is pulled left and up, in % of the frame. origin: the
+    head's centre on the video, for zooms."""
+    win = 100 - seam
+    bs = sorted((h["box"] for h in (face or {}).get("heads", []) if h["box"]), key=lambda b: b[1])
+    if not bs:
+        return {"scale": 1, "x": 0, "y": round(seam / 2, 1), "origin": [50, 40]}
+    q = lambda xs, f: sorted(xs)[min(len(xs) - 1, int(f * len(xs)))]
+    top = q([b[1] for b in bs], 0.1)                  # the highest the head goes, near enough
+    bottom = q([b[1] + b[3] for b in bs], 0.9)
+    cx = q([b[0] + b[2] / 2 for b in bs], 0.5)
+    k = min(max(1, MIN_HEAD / max(1, bottom - top)), MAX_SPEAKER_SCALE)
+    y = min(max(0, k * top - HEAD_ROOM), k * 100 - win)
+    x = min(max(0, k * cx - 50), k * 100 - 100)
+    if k * bottom - y > win:
+        print("warning: the head is taller than the split window; the chin is cut off", file=sys.stderr)
+    return {"scale": round(k, 3), "x": round(x, 1), "y": round(y, 1), "origin": [round(cx, 1), round((top + bottom) / 2, 1)]}
+
+
+def split_cards(cards, art):
+    """Every card fills the top panel's art box. A logo tile gets the panel to itself for a moment,
+    unless a bigger card is up then (the panel is already showing the visual): that logo is dropped."""
+    main = [c for c in cards if c.get("lane") != "logo"]
+    out = []
+    for c in cards:
+        if c.get("lane") == "logo":
+            if any(m["start"] - 2 * PANEL_T < c["end"] and c["start"] < m["end"] + 2 * PANEL_T for m in main):
+                continue
+            c = {k: v for k, v in c.items() if k != "lane"}
+            nxt = min((m["start"] for m in main if m["start"] > c["start"]), default=c["end"] + 9)
+            c["end"] = round(max(c["end"], min(c["start"] + SPLIT_LOGO_S, nxt - 2 * PANEL_T)), 3)
+        out.append({**c, "box": list(art)})
+    return sorted(out, key=lambda c: c["start"])
+
+
+@with_sfx
+def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edit_dir=None, layout=None):
     words = [w for w in words if w.get("type", "word") == "word" and w["text"].strip()]
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
@@ -324,6 +458,23 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if cap.get("present", True) else []
     fj = edit_dir and Path(edit_dir) / "face.json"
     face = json.loads(fj.read_text()) if fj and fj.exists() else None
+    lay = {**SPLIT, **(style.get("layout") or {}), **(layout or {})}
+    if lay.get("mode", "overlay") == "split":
+        if aspect != "9:16":
+            sys.exit("ERROR: the split layout is vertical only; use --layout overlay for 16:9")
+        seam = lay["seam"]
+        art = split_art_box(seam)
+        full_y = cap["y_pct"]   # where captions sit while the speaker has the whole frame
+        cap["y_pct"] = min(seam + SPLIT_CAP_BELOW, 100 - bottom - 4)
+        cards = place_cards(list(images) + anim_items(visuals) + logo_items(visuals, edit_dir, cap["y_pct"], aspect),
+                            words, duration, style, aspect)
+        return {"video": meta["video"], "width": width, "height": height, "fps": fps,
+                "durationInFrames": int(duration * fps),
+                "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
+                           "speaker": speaker_frame(face, seam), "caption_full_y": full_y},
+                "captions": {"style": cap, "chunks": chunks},
+                "zooms": place_zooms(style.get("zoom") or {}, words, duration, list(cuts)),
+                "cards": scene_parts(split_cards(cards, art), words, edit_dir)}
     return {"video": meta["video"], "width": width, "height": height, "fps": fps,
             "durationInFrames": int(duration * fps),
             "captions": {"style": cap, "chunks": chunks},
@@ -420,6 +571,34 @@ def demo():
     n0, n1 = f["anim"]["props"]["nodes"]
     assert n0["src"] == "images/icon-mail.svg" and abs(n0["at"] - (every["start"] + 0.35 - f["start"])) < 1e-6, f
     assert n1["off_at"] > n1["at"] > n0["at"] and "at" not in sc[0]["props"]["nodes"][0], f
+    sp_face = {"step_s": 0.5, "heads": [{"t": 0.0, "box": [30, 31, 30, 29]}, {"t": 0.5, "box": None}]}
+    fr = speaker_frame(sp_face, 50)
+    assert fr["scale"] == 1 and fr["y"] == 27 and 31 - fr["y"] == HEAD_ROOM, fr      # hair HEAD_ROOM into the window
+    assert abs(speaker_frame({"heads": [{"t": 0, "box": [45, 40, 10, 15]}]}, 50)["scale"] - MIN_HEAD / 15) < 1e-3   # small head scaled up
+    assert speaker_frame(None, 50)["y"] == 25
+    lg = {"start": 5.0, "end": 6.2, "box": [1, 1, 1, 1], "trigger_word": "l", "lane": "logo", "anim": {"type": "logo"}}
+    big = {"start": 0.0, "end": 4.0, "box": [1, 1, 1, 1], "trigger_word": "b"}
+    art = split_art_box(50)
+    assert art == [6, 14, 80, 34]
+    sc2 = split_cards([big, lg, {**lg, "start": 3.5, "end": 4.7}], art)
+    assert [c["box"] for c in sc2] == [art, art] and "lane" not in sc2[1] and sc2[1]["end"] == 6.5, sc2   # overlapping logo dropped
+    vs = build(style, words, {**meta, "width": 1080, "height": 1920}, imgs, layout={"mode": "split"})
+    assert vs["layout"]["mode"] == "split" and vs["captions"]["style"]["y_pct"] == 50 + SPLIT_CAP_BELOW
+    assert all(c["box"] == art for c in vs["cards"]) and "layout" not in p
+    kit = {"cues": {n: {"attack_s": 0.2} for n in SFX_RANK}}
+    sp = {"fps": 30, "durationInFrames": 300, "zooms": [{"start": 1.25}, {"start": 6.0}],
+          "cards": [{"start": 1.0, "end": 3.0, "anim": {"type": "flow", "props": {"nodes": [{"at": 0.5}, {"at": 0.6}],
+                                                                                   "tag": {"at": 1.5}}}},
+                    {"start": 7.0, "end": 8.0, "src": "images/a.png"}]}
+    sw = [{"text": t, "start": s, "end": s + 0.2} for t, s in (("a", 2.6), ("b", 2.9), ("c.", 7.5))]
+    cues = place_sfx(sp, sw, kit)
+    ev = [(c["event"], c["src"]) for c in cues]
+    assert ev == [(1.1, ".sfx/whoosh-in.wav"), (1.5, ".sfx/pop.wav"), (2.5, ".sfx/hit.wav"),
+                  (2.85, ".sfx/whoosh-out.wav"), (6.0, ".sfx/zoom.wav"), (7.1, ".sfx/whoosh-in.wav")], ev
+    assert all(abs(c["t"] - (c["event"] - 0.2)) < 1e-6 for c in cues)   # started early by the attack
+    assert all(b["event"] - a["event"] >= SFX_GAP_S for a, b in zip(cues, cues[1:]))   # 1.25 zoom and 1.6 pop lost
+    sp["durationInFrames"] = 90   # 3 s: room for 2 cues, the highest ranked
+    assert [c["src"] for c in place_sfx(sp, sw, kit)] == [".sfx/whoosh-in.wav", ".sfx/hit.wav"]
     print("demo ok")
 
 
@@ -431,7 +610,9 @@ def main():
     ap.add_argument("words")
     ap.add_argument("--images")
     ap.add_argument("--aspect", choices=["auto", "9:16", "16:9"], default="auto")
+    ap.add_argument("--layout", choices=["overlay", "split"], help="default: style.json layout.mode, else overlay")
     ap.add_argument("--out")
+    ap.add_argument("--no-sfx", action="store_true", help="no sound cues (same as \"sfx\": false in style.json)")
     a = ap.parse_args()
     edit_dir = Path(a.words).resolve().parent
     video = edit_dir / "cut.mp4"
@@ -442,7 +623,10 @@ def main():
     vis = edit_dir / "visuals.json"
     visuals = json.loads(vis.read_text()) if vis.exists() else []
     plan = build(json.loads(Path(a.style).read_text()), json.loads(Path(a.words).read_text()),
-                 probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir)
+                 probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
+                 {"mode": a.layout} if a.layout else None)
+    if a.no_sfx:
+        plan["sfx"] = []
     out = Path(a.out) if a.out else edit_dir / "plan.json"
     out.write_text(json.dumps(plan, indent=1))
     print(f"{out}: {plan['width']}x{plan['height']}, {plan['durationInFrames'] / plan['fps']:.1f} s, "
