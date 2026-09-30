@@ -53,9 +53,12 @@ connection.
 
 Start Claude Code in an empty folder, then:
 
-1. **"Break down @creator on TikTok"** (or paste a few video links). About 10 minutes.
+1. **"Break down @creator on TikTok"** (or paste a few video links).
 2. **"Edit my video like @creator"** and give the path to your video (an mp4 or mov of you talking
    to camera, under 3 minutes).
+   No video of your own yet? Practise on the sample take (a raw take with retakes and
+   pauses left in): say **"use the sample video"**, or download it yourself:
+   `curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4`
 3. Claude shows you the cut: your transcript with the removed parts struck through. Approve it, or
    say which lines to keep.
 4. Claude asks overlay or split, then shows stills of the styled edit. Approve them, or say what

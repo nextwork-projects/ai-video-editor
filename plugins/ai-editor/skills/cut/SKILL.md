@@ -25,6 +25,18 @@ folder Claude Code was started in. Never modify, move or copy the source file. P
 Python: `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
 If it is missing, run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
+## No video yet?
+
+The user's own talking-head video is the main path: ask for its path first. If they have none,
+offer the sample take (a raw vertical take with retakes, false starts and pauses left in)
+and download it into their folder:
+
+```bash
+curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4
+```
+
+`curl` ships with Mac, Linux and Windows 10 and later.
+
 ## 0. Read the user's taste
 
 ```bash
