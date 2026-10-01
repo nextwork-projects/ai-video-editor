@@ -142,12 +142,15 @@ One fix cycle, then show the user whatever is left.
 
 ## 6. The user approves
 
-Rebuild the page so it includes the video, then open it:
+Every time a cut is rendered, the first one and every re-cut, rebuild the page so it includes the
+video. The script opens it in the browser itself:
 
 ```bash
 python3 "$S/preview_cut.py" edits/<name>
-open edits/<name>/cut-check.html        # Windows: start "" <path>   Linux: xdg-open <path>
 ```
+
+Never skip this, and never tell the user to open the page themselves. If the browser does not open
+(a remote machine), give them the full path to `cut-check.html`.
 
 Tell the user in two lines: how many seconds came out, and what the page shows (struck-through
 words are cut, highlighted ones are judgement calls). Then **wait**.

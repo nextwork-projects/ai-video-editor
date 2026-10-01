@@ -3,7 +3,10 @@
 (for the user to approve). build_timeline.py calls write_all(); run this directly
 to rebuild both from an edit folder:
 
-    python3 preview_cut.py <edit_dir>
+    python3 preview_cut.py <edit_dir> [--no-open]
+
+Run directly, it also opens cut-check.html in the browser once cut.mp4 exists, so the user always
+gets the page (--no-open to skip).
 
 A token counts as removed unless build_timeline.is_kept() says it plays, the same
 rule verify_cut.py and words.json use. A removed word that no spans.json entry
@@ -158,12 +161,16 @@ def write_all(d, toks, cuts, spans, dur, final):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if a != "--no-open"]
+    if len(args) != 1:
         sys.exit(__doc__)
-    d = Path(sys.argv[1])
+    d = Path(args[0])
     rep = json.loads((d / "report.json").read_text())
     toks = [t for t in load_words(d / "words.raw.json") if t.get("type") in ("word", "audio_event")]
     write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text()),
               rep["duration"], rep["final_s"])
     print(d / "paper-edit.md")
     print(d / "cut-check.html")
+    if "--no-open" not in sys.argv and (d / "cut.mp4").exists():
+        import webbrowser
+        webbrowser.open((d / "cut-check.html").resolve().as_uri())
