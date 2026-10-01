@@ -58,16 +58,19 @@ Start Claude Code in an empty folder, then:
    No video of your own yet? Practise on the sample take (a raw take with retakes and
    pauses left in): say **"use the sample video"**, or download it yourself:
    `curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4`
-3. Claude shows you the cut: your transcript with the removed parts struck through. Approve it, or
-   say which lines to keep.
-4. Claude asks overlay or split, then shows stills of the styled edit. Approve them, or say what
+3. Claude asks: **just the cut first**, or the cut and the styled edit in one go. Cut first uses
+   fewer tokens, because the visuals only get built once the cut is right.
+4. Claude shows you the cut: your transcript with the removed parts struck through. Approve it, or
+   say which lines to keep. On "cut first", say **"now style it"** when you're happy.
+5. Claude asks overlay or split, then shows stills of the styled edit. Approve them, or say what
    to change.
-5. Pick where to render. Claude estimates both first:
-   - **Your laptop** (free, default).
+6. Pick where to render. Claude times each option on your video first:
+   - **Your laptop** (free).
+   - **GitHub Actions** (free, in a private repo). See [Render on GitHub](#render-on-github-actions).
    - **AWS Lambda** (fast, costs a little on your own AWS account). See
      [Render in the cloud](#render-in-the-cloud).
 
-6. Tell Claude what you'd change ("captions too small", "fewer zooms"). It saves that to your
+7. Tell Claude what you'd change ("captions too small", "fewer zooms"). It saves that to your
    taste in `~/.ai-video-editor/taste.md` and uses it on every video after.
 
 Everything lands in the folder you started in: `creator-teardowns/<handle>/` and `edits/<name>/`.

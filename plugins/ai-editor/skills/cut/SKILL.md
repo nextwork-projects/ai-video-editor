@@ -1,6 +1,6 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. Also the entry point for "edit my video" and "edit my video like @creator" with a raw take: it asks first whether to stop at the cut or carry straight on into style-edit. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
 ---
 
 # Cut
@@ -37,7 +37,27 @@ curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/
 
 `curl` ships with Mac, Linux and Windows 10 and later.
 
-## 0. Read the user's taste
+## 0. Ask: the cut first, or everything at once
+
+Before anything else, ask the user one question, even if they said "edit my video like @creator":
+
+> Do you want just the cut first, or the cut and the styled edit in one go?
+> - **Just the cut first.** I take out the retakes, false starts and pauses, and you approve that
+>   before I add captions, zooms or visuals. If the cut changes, the visuals don't have to be
+>   rebuilt, so it uses fewer tokens.
+> - **Everything at once.** I cut it, then carry straight on into the style without waiting for you
+>   to approve the cut. You still see the cut page and the stills before anything renders.
+
+List "just the cut first" first. Skip the question only when the user already answered it in
+their message ("just cut it", "cut and style it in one go").
+
+- **Just the cut first:** run steps 1-6 and stop. Do not start style-edit until the user approves
+  the cut **and** asks for the style ("style it", "now edit it like @creator").
+- **Everything at once:** run steps 1-5, open the cut page (step 6), then go straight on to
+  style-edit without waiting. If the user changes the cut afterwards, rebuild the cut and re-run
+  style-edit from its plan step.
+
+## 0b. Read the user's taste
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
@@ -138,6 +158,9 @@ words are cut, highlighted ones are judgement calls). Then **wait**.
 
 After any change: build, render, verify, reopen the page. Only when the user approves is the cut
 done. `cut.mp4` and `words.json` are what style-edit takes next.
+
+On "just the cut first", stop here after approval: say the cut is done and that they can ask for
+the style when they're ready. Never start style-edit on your own.
 
 ## Rules
 

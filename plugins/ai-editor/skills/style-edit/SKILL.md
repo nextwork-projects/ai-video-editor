@@ -31,7 +31,8 @@ Follow every rule in it; the scripts already read its settings. When the user re
 ## 1. Check the inputs
 
 - **No style.json?** Ask which creator. Run creator-teardown in quick mode on them first.
-- **No cut.mp4 or words.json?** Run the cut skill on their raw take first.
+- **No cut.mp4 or words.json?** Run the cut skill on their raw take first. It asks whether to stop
+  at the cut for approval or carry straight on into this skill.
 - **Layout?** Ask overlay or split (vertical only). **Overlay** (default): the speaker fills the
   frame and visuals float in the space above their head, so they stay small. **Split**: while a
   visual is up it owns the top half of the frame on a plain ground and the speaker sits in a
