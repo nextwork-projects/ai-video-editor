@@ -235,22 +235,26 @@ style.json or images.json, then plan and stills again.
 python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" estimate edits/<name>
 ```
 
-Renders two seconds to time this computer, then prints both options:
+Renders two seconds to time this computer, then prints three lines:
 
 ```
-Laptop: about 2.3 min (measured 6.7 s for 60 frames, 1200 frames in all).
-Lambda: about 70 s on 8 Lambdas in us-east-1, about $0.010. A guess until a real render is measured.
+Laptop: about 0.9 min (measured 2.3 s for 60 frames, 1326 frames in all). Free.
+GitHub Actions: about 7.3 min on 1 runner, uses about 10 of the 2,000 free private-repo minutes a month; media 36 MB, fits one release file. Free.
+Lambda: about 70 s on 9 Lambdas in us-east-1, about $0.011. A guess until a real render is measured; the render prints the real cost.
 ```
 
-Give the user both lines, plus GitHub Actions, and ask which one.
+Then ask the user **one question**: where to render. Use the AskUserQuestion tool when it is
+available, else a numbered question. Exactly three options, in this order, none marked
+recommended, each description carrying its printed time and cost:
 
-- **Laptop** is the default: free, and nothing to set up.
-- **GitHub Actions** is free and slower (one GitHub machine, about the laptop time or more, plus a
-  few minutes to install). It needs a GitHub account and `gh` logged in. It puts the footage in a
-  **private** GitHub repo. Say that plainly and ask before creating the repo. Private repos on the
-  free plan get 2,000 Actions minutes a month.
-- **Lambda** runs on their own AWS account and costs money. Only offer it when their AWS credentials
-work (`aws sts get-caller-identity`); if not, the setup skill's Lambda section sets them up.
+1. **Laptop**: the Laptop line's time. Free, nothing to set up.
+2. **GitHub Actions**: the GitHub line's time and minutes. Free. Needs a GitHub account and `gh`
+   logged in. The footage goes into a **private** GitHub repo in their account.
+3. **Lambda**: the Lambda line's time and cost, on their own AWS account. Needs an AWS account; if
+   `aws sts get-caller-identity` fails, say the setup skill's Lambda section sets it up first.
+
+Run the path they pick. For GitHub, ask before creating the repo, and say plainly that the
+footage goes into it as a private release file.
 
 ## 7. Render
 
@@ -270,11 +274,18 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-fetch edits/<name> --repo <
 ```
 
 `render --github` writes `edits/<name>/github-render/` (renderer source, plan, workflow; no footage)
-and `edits/<name>/github-render-media.zip` (the footage). `github-push` exits 1 with
-`gh auth login --web` when they are not logged in: they run that in their own terminal. It refuses a
-public repo, creates the private one, commits, uploads the zip to the `media` release and starts the
-`render` workflow. Re-run it after a new plan: it pushes the changes, replaces the zip and starts a
-new run. `github-fetch` waits for the latest run and writes `edits/<name>/render-github.mp4`. Lambda also prints what the render
+and `edits/<name>/github-render-media.zip` (the footage; over 1.9 GB it is split into
+`github-render-media.zip.part-00`, `-01`, ... because a release file holds 2 GB). `github-push` exits 1
+with `gh auth login --web` when they are not logged in: they run that in their own terminal. It
+refuses a public repo, creates the private one, commits, uploads the media to the `media` release
+(deleting media files left from an earlier push) and starts the `render` workflow. The workflow
+renders in parallel: a `plan` job splits the video into chunks of about 2 minutes (at most 20), one
+`render` job per chunk renders its frames, and a `join` job puts them back together, so a long take
+stays under GitHub's 6-hour job limit. Re-run `github-push` after a new plan: it pushes the
+changes, replaces the media and starts a new run. `github-fetch` waits for the latest run and
+writes `edits/<name>/render-github.mp4`.
+
+Lambda also prints what the render
 really cost. The first Lambda render sets up the function and a storage bucket in their account;
 later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
 

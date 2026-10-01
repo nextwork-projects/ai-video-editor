@@ -96,13 +96,16 @@ works. After that, pick **Lambda** when Claude asks where to render.
 
 ## Render on GitHub Actions
 
-Free, no card. Slower than Lambda: one GitHub machine renders the whole video. You need a GitHub
-account and the GitHub CLI (`gh`); say **"set up GitHub rendering"** and Claude installs it and
-logs you in.
+Free, no card. The video is split into pieces of about 2 minutes, up to 20 GitHub machines render
+them at once, and a last step joins them. A 44-second vertical video takes about 7 minutes; a
+40-minute take about 20. Each machine-minute counts against the 2,000 free minutes a month that
+private repos get, and Claude prints the count before you choose. You need a GitHub account and
+the GitHub CLI (`gh`); say **"set up GitHub rendering"** and Claude installs it and logs you in.
 
 Pick **GitHub Actions** when Claude asks where to render. Claude packs the renderer and your plan
 into a **private** repo in your account, uploads the footage to that repo as a release file,
-starts the render and downloads the finished video when it is done. Claude asks before creating
+starts the render and downloads the finished video when it is done. Footage over 2 GB goes up in
+parts. Claude asks before creating
 the repo. The footage stays private to you.
 
 ## Troubleshooting

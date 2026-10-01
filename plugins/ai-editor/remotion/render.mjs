@@ -3,12 +3,14 @@
 //   node render.mjs stills <publicDir> <plan.json> <outDir> name=frame ...
 //   node render.mjs bench  <publicDir> <plan.json>            -> JSON: laptop seconds per frame
 //   node render.mjs local  <publicDir> <plan.json> <out.mp4>
+//   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to>   frames from..to inclusive
 //   node render.mjs lambda-estimate <plan.json>               -> JSON: Lambda cost + time guess
 //   node render.mjs lambda <publicDir> <plan.json> <out.mp4> <siteName>
 //
 // Lambda uses the user's own AWS credentials: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY,
 // or AWS_PROFILE (REMOTION_AWS_* variants work too). Region: REMOTION_AWS_REGION, AWS_REGION, else us-east-1.
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
@@ -68,12 +70,32 @@ async function local(publicDir, planPath, out) {
   const { serveUrl, composition, inputProps } = await prepare(publicDir, planPath);
   const t0 = Date.now();
   let last = -1;
-  await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out,
+  // Rendering straight to mp4 puts the AAC encoder's start-up padding in front of the sound, so the
+  // audio lands 43 ms after the picture. Render PCM audio in an mkv, then encode AAC once, trimmed
+  // to the video: the same path the GitHub join takes, sample-aligned with the cut.
+  const tmp = out.replace(/\.mp4$/i, "") + ".tmp.mkv";
+  await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: tmp,
+    enforceAudioTrack: true,
     onProgress: ({ progress }) => {
       const p = Math.floor(progress * 10);
       if (p !== last) { last = p; process.stdout.write(`${p * 10}% `); }
     } });
+  const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-i", tmp, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    "-shortest", "-movflags", "+faststart", out], { stdio: "inherit" });
+  fs.rmSync(tmp, { force: true });
+  if (r.status !== 0) throw new Error(`ffmpeg could not write ${out}`);
   console.log(`\nrendered ${out} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+}
+
+// One slice of the video, for the GitHub workflow's parallel render. The join step concatenates them.
+async function chunk(publicDir, planPath, out, from, to) {
+  const { serveUrl, composition, inputProps } = await prepare(publicDir, planPath);
+  const t0 = Date.now();
+  // h264-mkv carries PCM audio: sample-exact to the frame, no AAC padding, so pieces join without a
+  // gap. The join encodes the audio to AAC once.
+  await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: out,
+    frameRange: [Number(from), Number(to)], enforceAudioTrack: true });
+  console.log(`rendered ${out} (frames ${from}-${to}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 
 async function lambdaEstimate(planPath) {
@@ -115,7 +137,7 @@ async function lambda(publicDir, planPath, out, siteName) {
   }
 }
 
-const cmds = { stills, bench, local, "lambda-estimate": lambdaEstimate, lambda };
+const cmds = { stills, bench, local, chunk, "lambda-estimate": lambdaEstimate, lambda };
 if (!cmds[cmd]) {
   console.error(`usage: node render.mjs ${Object.keys(cmds).join("|")} ...`);
   process.exit(2);

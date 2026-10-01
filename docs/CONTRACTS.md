@@ -184,18 +184,31 @@ Times in seconds on cut.mp4's timeline. `box` is `[x, y, w, h]` in percent of th
 ```
 edits/<name>/
   github-render/              a git repo, pushed to the user's PRIVATE GitHub repo. No footage.
-    .github/workflows/render.yml   workflow_dispatch: npm ci, remotion browser ensure,
-                                   gh release download media, unzip into public/,
-                                   node render.mjs local public plan.json out/render.mp4,
-                                   upload-artifact "render" (7 days)
+    .github/workflows/render.yml   workflow_dispatch, three jobs:
+                                   plan: chunk_ranges() over plan.json -> outputs chunks
+                                     [{"i": "00", "from": 0, "to": 3599}, ...] (about 120 s of
+                                     video each, 1-20 chunks) and fps
+                                   render (matrix, one job per chunk): npm ci, remotion browser
+                                     ensure, gh release download media (cat the .part-* files when
+                                     present), unzip into public/, node render.mjs chunk public
+                                     plan.json out/chunk-NN.mkv FROM TO, upload-artifact "chunk-NN" (1 day)
+                                   join: download chunk-*, cut each chunk's PCM audio to exactly its
+                                     frames, ffmpeg concat the video (-c copy) + the audio (AAC once)
+                                     -> out/render.mp4, upload-artifact "render" (7 days), delete
+                                     the chunk artifacts
     src/ package.json render.mjs tsconfig.json   the renderer, copied from the plugin
     package-lock.json         from ~/.ai-video-editor/remotion when present (npm ci), else npm install
     plan.json                 the plan (any plan-XYZ.json is written here as plan.json)
     .gitignore README.md
   github-render-media.zip     .render/ zipped (cut at output size, images/, .sfx/): the release
-                              asset "media" in that repo, up to 2 GB
+                              asset of the "media" release in that repo. Over 1.9 GB it is written as
+                              github-render-media.zip.part-00, -01, ... instead (one asset each)
+  github.json                 {"repo", "started"}: the run github-fetch waits for
   render-github.mp4           written by edit.py github-fetch
 ```
+
+`node render.mjs chunk <publicDir> <plan.json> <out.mkv> <from> <to>` renders frames from..to
+(inclusive) as h264 with PCM audio, so pieces join without an AAC gap.
 
 A plan named plan-XYZ.json uses `github-render-XYZ/`, `github-render-XYZ-media.zip`, `render-github-XYZ.mp4`.
 

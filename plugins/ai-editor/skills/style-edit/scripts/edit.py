@@ -2,7 +2,7 @@
 """Stills, estimates and renders for a plan.json. Stdlib only.
 
     python3 edit.py stills   edits/NAME [--plan plan.json] [--no-check]   runs check.py plan, then PNGs into edits/NAME/stills/
-    python3 edit.py estimate edits/NAME [--plan plan.json]   laptop time (measured) + Lambda cost (guess)
+    python3 edit.py estimate edits/NAME [--plan plan.json]   laptop (measured), GitHub Actions, Lambda (guess)
     python3 edit.py render   edits/NAME [--plan plan.json] [--lambda]   -> edits/NAME/render.mp4
     python3 edit.py render   edits/NAME [--plan plan.json] --github   -> edits/NAME/github-render/ + github-render-media.zip
     python3 edit.py github-push  edits/NAME --repo NAME [--plan plan.json]   private repo + media release, starts a render
@@ -14,12 +14,15 @@ The renderer lives in ~/.ai-video-editor/remotion (the setup skill installs it; 
 refreshes its source from the plugin on every run).
 """
 import argparse
+import inspect
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -131,23 +134,80 @@ def node(*args):
                           env=aws_env())
 
 
+# GitHub Actions, measured 2026-09-30 (minimus7/ai-video-editor-render-test): ubuntu-latest rendered
+# img-5845, 44.2 s of 1080x1920 (1326 frames), in 409 s, plus about 25 s of npm ci, browser and media download.
+GH_S_PER_FRAME = 0.31
+GH_INSTALL_S = 25
+GH_CHUNK_S = 120          # about 2 min of video per runner
+GH_MAX_CHUNKS = 20        # free accounts run 20 jobs at once
+GH_ASSET_MAX = 1_900_000_000   # release files are capped at 2 GiB; bigger media goes up in parts
+
+
+def chunk_ranges(frames, fps):
+    """Frame ranges [from, to] (inclusive), one per runner. The workflow's plan job runs this function."""
+    k = max(1, min(GH_MAX_CHUNKS, math.ceil(frames / (fps * GH_CHUNK_S))))
+    step = math.ceil(frames / k)
+    return [[a, min(frames, a + step) - 1] for a in range(0, frames, step)]
+
+
+def github_estimate(frames, fps, media_bytes):
+    chunks = chunk_ranges(frames, fps)
+    longest = max(b - a + 1 for a, b in chunks)
+    wall = GH_INSTALL_S + longest * GH_S_PER_FRAME
+    # Actions bills each job rounded up to the minute: the plan job, every chunk, the join.
+    minutes = 2 + sum(math.ceil((GH_INSTALL_S + (b - a + 1) * GH_S_PER_FRAME) / 60) for a, b in chunks)
+    parts = math.ceil(media_bytes / GH_ASSET_MAX)
+    media = (f"media {media_bytes / 1e6:.0f} MB, " +
+             ("fits one release file" if parts <= 1 else f"uploaded in {parts} parts (one release file holds 2 GB)"))
+    return (f"GitHub Actions: about {wall / 60:.1f} min on {len(chunks)} runner{'s' * (len(chunks) > 1)}, "
+            f"uses about {minutes} of the 2,000 free private-repo minutes a month; {media}. Free.")
+
+
 def estimate(plan_path, pub):
     b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
     laptop = b["bundle_s"] + b["s_per_frame"] * b["frames"]
     lam = json.loads(node("lambda-estimate", plan_path).stdout.strip().splitlines()[-1])
+    plan = json.loads(plan_path.read_text())
+    media = sum(f.stat().st_size for f in pub.rglob("*") if f.is_file())
     print(f"Laptop: about {laptop / 60:.1f} min (measured {b['bench_s']:.1f} s for "
-          f"{b['bench_frames']} frames, {b['frames']} frames in all).")
+          f"{b['bench_frames']} frames, {b['frames']} frames in all). Free.")
+    print(github_estimate(plan["durationInFrames"], plan["fps"], media))
     print(f"Lambda: about {lam['wall_s']} s on {lam['lambdas']} Lambdas in {lam['region']}, "
           f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost.")
 
 
+# The render in parallel: `plan` splits the frames (chunk_ranges, pasted in below), one `render` job per
+# chunk, `join` concatenates the chunks in order into the `render` artifact that github-fetch downloads.
 WORKFLOW = """name: render
 on: workflow_dispatch
 permissions:
   contents: read
+  actions: write
 jobs:
-  render:
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.split.outputs.chunks }}
+      fps: ${{ steps.split.outputs.fps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: split
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, math
+__CHUNK_PY__
+          p = json.load(open("plan.json"))
+          r = chunk_ranges(p["durationInFrames"], p["fps"])
+          print("chunks=" + json.dumps([{"i": f"{i:02d}", "from": a, "to": b} for i, (a, b) in enumerate(r)]))
+          print(f"fps={p['fps']}")
+          EOF
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -155,31 +215,106 @@ jobs:
           node-version: 22
       - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
       - run: npx remotion browser ensure
-      - run: gh release download media -R "$GITHUB_REPOSITORY" -p {zip}
+      - run: |
+          gh release download media -R "$GITHUB_REPOSITORY" -p '__ZIP__*'
+          if ls __ZIP__.part-* >/dev/null 2>&1; then cat __ZIP__.part-* > __ZIP__ && rm __ZIP__.part-*; fi
+          unzip -q __ZIP__ -d public && rm __ZIP__
         env:
-          GH_TOKEN: ${{{{ github.token }}}}
-      - run: unzip -q {zip} -d public && rm {zip}
-      - run: node render.mjs local public plan.json out/render.mp4
+          GH_TOKEN: ${{ github.token }}
+      - run: node render.mjs chunk public plan.json out/chunk-${{ matrix.chunk.i }}.mkv ${{ matrix.chunk.from }} ${{ matrix.chunk.to }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.chunk.i }}
+          path: out/chunk-${{ matrix.chunk.i }}.mkv
+          retention-days: 1
+  join:
+    needs: [plan, render]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: chunks
+          merge-multiple: true
+      - run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
+      - run: |
+          python3 - <<'EOF'
+__JOIN__
+          EOF
+        env:
+          CHUNKS: ${{ needs.plan.outputs.chunks }}
+          FPS: ${{ needs.plan.outputs.fps }}
       - uses: actions/upload-artifact@v4
         with:
           name: render
           path: out/render.mp4
           retention-days: 7
+      - run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \\
+            -q '.artifacts[] | select(.name | startswith("chunk-")) | .id' |
+            xargs -I{} gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/{}"
+        env:
+          GH_TOKEN: ${{ github.token }}
 """
+# Chunks carry PCM audio that runs a few samples past the last frame (16 at 30 fps). Each chunk's audio
+# is cut to exactly its frames, the pieces laid end to end and encoded to AAC once; the video is copied.
+# Measured on img-5845 (3 chunks): no gap or step at the joins, sync held to the sample.
+JOIN = """import json, os, subprocess
+fps, sr = float(os.environ["FPS"]), 48000
+chunks = json.loads(os.environ["CHUNKS"])
+os.makedirs("out", exist_ok=True)
+with open("list.txt", "w") as lst, open("audio.raw", "wb") as pcm:
+    for c in chunks:
+        f = os.path.abspath(f"chunks/chunk-{c['i']}.mkv")
+        lst.write(f"file '{f}'\\n")
+        n = 4 * (round((c["to"] + 1) * sr / fps) - round(c["from"] * sr / fps))
+        a = subprocess.run(["ffmpeg", "-v", "error", "-i", f, "-map", "0:a", "-f", "s16le", "-ac", "2",
+                            "-ar", str(sr), "-"], capture_output=True, check=True).stdout
+        pcm.write(a[:n].ljust(n, b"\\0"))
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
+                "-f", "s16le", "-ar", str(sr), "-ac", "2", "-i", "audio.raw", "-map", "0:v", "-map", "1:a",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", "out/render.mp4"], check=True)
+"""
+
+
+def workflow(zip_name):
+    py = "\n".join(f"GH_CHUNK_S = {GH_CHUNK_S}\nGH_MAX_CHUNKS = {GH_MAX_CHUNKS}\n{inspect.getsource(chunk_ranges)}".splitlines())
+    ind = lambda t: "\n".join(" " * 10 + l if l.strip() else "" for l in t.splitlines())
+    return (WORKFLOW.replace("__CHUNK_PY__", ind(py)).replace("__JOIN__", ind(JOIN))
+            .replace("__ZIP__", zip_name))
+
 
 README = """# {name}: render on GitHub Actions
 
 Made by the AI video editor (`edit.py render --github`). Keep this repo private: the footage is in
 it, as the `{zip}` asset of the `media` release.
 
-Actions > render > Run workflow renders `plan.json` with Remotion. The video is the `render`
-artifact on the finished run (kept 7 days). `edit.py github-fetch` downloads it.
+Actions > render > Run workflow renders `plan.json` with Remotion, about 2 minutes of video per
+runner in parallel, then joins the pieces. The video is the `render` artifact on the finished run
+(kept 7 days). `edit.py github-fetch` downloads it.
 """
 
 
 def gh_paths(edit, tag):
     """(git folder, media zip) for one plan."""
     return edit / f"github-render{tag}", edit / f"github-render{tag}-media.zip"
+
+
+def media_files(zip_path):
+    """What goes up to the release: the zip, or its parts when it was too big for one file."""
+    return sorted(zip_path.parent.glob(zip_path.name + ".part-*")) or [zip_path]
+
+
+def split_file(path, size):
+    """path -> path.part-00, -01, ... of at most size bytes; the workflow cats them back together."""
+    with open(path, "rb") as f:
+        for i in range(math.ceil(path.stat().st_size / size)):
+            with open(f"{path}.part-{i:02d}", "wb") as out:
+                left = size
+                while left and (buf := f.read(min(left, 1 << 24))):
+                    out.write(buf)
+                    left -= len(buf)
+    path.unlink()
 
 
 def package_github(edit, plan_path, pub, tag):
@@ -197,11 +332,16 @@ def package_github(edit, plan_path, pub, tag):
     (repo / "README.md").write_text(README.format(name=edit.name, zip=zip_path.name))
     wf = repo / ".github" / "workflows" / "render.yml"
     wf.parent.mkdir(parents=True, exist_ok=True)
-    wf.write_text(WORKFLOW.format(zip=zip_path.name))
-    zip_path.unlink(missing_ok=True)
+    wf.write_text(workflow(zip_path.name))
+    for f in media_files(zip_path):
+        f.unlink(missing_ok=True)
     shutil.make_archive(str(zip_path.with_suffix("")), "zip", pub)
+    if zip_path.stat().st_size > GH_ASSET_MAX:
+        split_file(zip_path, GH_ASSET_MAX)
     mb = lambda p: sum(f.stat().st_size for f in p.rglob("*") if f.is_file() and ".git" not in f.parts) / 1e6
-    print(f"{repo} ({mb(repo):.1f} MB)\n{zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB)")
+    print(f"{repo} ({mb(repo):.1f} MB)")
+    for f in media_files(zip_path):
+        print(f"{f} ({f.stat().st_size / 1e6:.1f} MB)")
     return repo, zip_path
 
 
@@ -223,7 +363,8 @@ def need_gh():
 def github_push(edit, repo_name, tag):
     need_gh()
     repo, zip_path = gh_paths(edit, tag)
-    if not (repo / ".github").exists() or not zip_path.exists():
+    media = media_files(zip_path)
+    if not (repo / ".github").exists() or not media[0].exists():
         sys.exit(f"ERROR: {repo} missing: run edit.py render {edit} --github first")
     view = gh("repo", "view", repo_name, "--json", "isPrivate,nameWithOwner,url", check=False)
     info = json.loads(view.stdout) if view.returncode == 0 else None
@@ -247,11 +388,15 @@ def github_push(edit, repo_name, tag):
             git("remote", "add", "origin", info["url"] + ".git")
         git("push", "-q", "-u", "origin", "HEAD:main")
     full = info["nameWithOwner"]
-    print(f"uploading {zip_path.name} ({zip_path.stat().st_size / 1e6:.0f} MB)", flush=True)
-    if gh("release", "view", "media", "-R", full, check=False).returncode == 0:
-        gh("release", "upload", "media", str(zip_path), "--clobber", "-R", full)
+    print(f"uploading {', '.join(f.name for f in media)} ({sum(f.stat().st_size for f in media) / 1e6:.0f} MB)", flush=True)
+    rel = gh("release", "view", "media", "-R", full, "--json", "assets", "-q", ".assets[].name", check=False)
+    if rel.returncode == 0:
+        # A zip left from an earlier push would be downloaded with (or cat over) the new media.
+        for old in set(rel.stdout.split()) - {f.name for f in media}:
+            gh("release", "delete-asset", "media", old, "-y", "-R", full)
+        gh("release", "upload", "media", *map(str, media), "--clobber", "-R", full)
     else:
-        gh("release", "create", "media", str(zip_path), "--title", "media", "-R", full,
+        gh("release", "create", "media", *map(str, media), "--title", "media", "-R", full,
            "--notes", "Footage for the render workflow. Keep this repo private.")
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5))
     for attempt in range(10):                      # a just-pushed workflow takes a few seconds to register
@@ -315,7 +460,29 @@ def demo():
             assert (repo / f).exists(), f
         assert not list(repo.rglob("*.mp4")), "footage leaked into the git folder"
         assert set(zipfile.ZipFile(z).namelist()) >= {"cut.mp4", "images/a.png"}, zipfile.ZipFile(z).namelist()
-        assert "-p github-render-media.zip" in (repo / ".github/workflows/render.yml").read_text()
+        wf = (repo / ".github/workflows/render.yml").read_text()
+        assert "-p 'github-render-media.zip*'" in wf
+        for job in ("  plan:", "  render:", "  join:", "name: render\n", "render.mjs chunk", '"concat"'):
+            assert job in wf, job
+        # the plan job's own script gives the same chunks as chunk_ranges
+        (repo / "plan.json").write_text('{"durationInFrames": 72000, "fps": 30}')
+        py = re.search(r"<<'EOF' >> \"\$GITHUB_OUTPUT\"\n(.*?)\n\s*EOF", wf, re.S).group(1)
+        out = subprocess.run([sys.executable, "-c", textwrap.dedent(py)], cwd=repo, capture_output=True, text=True, check=True).stdout
+        got = json.loads(out.splitlines()[0].partition("=")[2])
+        assert out.splitlines()[1] == "fps=30", out
+        assert [[c["from"], c["to"]] for c in got] == chunk_ranges(72000, 30) and got[-1]["i"] == "19", got[-1]
+        big = Path(t) / "big.zip"
+        big.write_bytes(bytes(range(256)) * 10)
+        split_file(big, 1000)
+        assert [p.name for p in media_files(big)] == ["big.zip.part-00", "big.zip.part-01", "big.zip.part-02"]
+        assert b"".join(p.read_bytes() for p in media_files(big)) == bytes(range(256)) * 10
+    assert chunk_ranges(1326, 30) == [[0, 1325]]
+    r = chunk_ranges(40 * 60 * 30, 30)
+    assert len(r) == 20 and r[0] == [0, 3599] and r[-1][1] == 71999, r
+    assert len(chunk_ranges(3 * 3600 * 30, 30)) == 20                       # capped
+    assert all(b - a + 1 > 0 for a, b in chunk_ranges(9, 1))
+    assert "1 runner," in github_estimate(1326, 30, 34e6) and "fits one" in github_estimate(1326, 30, 34e6)
+    assert "20 runners" in github_estimate(72000, 30, 5e9) and "3 parts" in github_estimate(72000, 30, 5e9)
     print("demo ok")
 
 
