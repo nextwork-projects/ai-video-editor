@@ -1,9 +1,13 @@
-// Renders a plan.json with the StyleEdit composition. Called by skills/style-edit/scripts/edit.py.
+// Renders a plan.json with the StyleEdit composition (or the one its "composition" key names). Called by skills/style-edit/scripts/edit.py.
 //
 //   node render.mjs stills <publicDir> <plan.json> <outDir> name=frame ...
 //   node render.mjs bench  <publicDir> <plan.json>            -> JSON: laptop seconds per frame
-//   node render.mjs local  <publicDir> <plan.json> <out.mp4>
-//   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to>   frames from..to inclusive
+//   node render.mjs local  <publicDir> <plan.json> <out.mp4> [--draft] [--concurrency=N]
+//   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to> [--concurrency=N]   frames from..to inclusive
+//   node render.mjs bundle <publicDir> <outDir>               a bundle folder another machine renders from (Modal)
+//
+// <publicDir> can also be a bundle folder made by `bundle` (it holds bundle.js): nothing is bundled again.
+// --draft renders at 2/3 size (1080x1920 -> 720x1280), on a Mac with its hardware H.264 encoder.
 //   node render.mjs lambda-estimate <plan.json>               -> JSON: Lambda cost + time guess
 //   node render.mjs lambda <publicDir> <plan.json> <out.mp4> <siteName>
 //
@@ -11,6 +15,7 @@
 // or AWS_PROFILE (REMOTION_AWS_* variants work too). Region: REMOTION_AWS_REGION, AWS_REGION, else us-east-1.
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
@@ -31,14 +36,32 @@ const MAX_LAMBDAS = 9;
 const LAMBDA_S_PER_FRAME = 0.3;
 const framesPerLambda = (frames) => Math.max(150, Math.ceil(frames / MAX_LAMBDAS));
 
+// Flags after the positional args: --draft, --concurrency=N.
+const flags = Object.fromEntries(args.filter((a) => a.startsWith("--"))
+  .map((a) => { const [k, v] = a.slice(2).split("="); return [k, v ?? true]; }));
+const pos = args.filter((a) => !a.startsWith("--"));
+// Measured on an M4 Pro (14 cores) rendering the sample take: see skills/style-edit/references/render.md.
+const CORES = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
+const concurrency = () => Number(flags.concurrency) || CORES;
+// Drafts on a Mac encode with VideoToolbox (hardware). It takes a bitrate, not a quality level:
+// 12 Mbit/s at 1080p, scaled with the pixel count. Finals stay on x264, the encoder Modal and GitHub
+// use, so a final looks the same wherever it renders.
+const hwOpts = (composition, scale) => (flags.draft && process.platform === "darwin")
+  ? { hardwareAcceleration: "if-possible", crf: null,
+      videoBitrate: `${Math.round(12 * (composition.width * composition.height * scale * scale) / (1080 * 1920))}M` }
+  : {};
+
 async function prepare(publicDir, planPath) {
   const inputProps = readPlan(planPath);
   const t0 = Date.now();
-  const serveUrl = await bundle({ entryPoint: ENTRY, publicDir: path.resolve(publicDir) });
-  // The bundle is a temp folder holding a copy of the video and images (150 MB+ per render) that
-  // Remotion never deletes; left alone, a few dozen renders fill the disk.
-  process.on("exit", () => { try { fs.rmSync(serveUrl, { recursive: true, force: true }); } catch {} });
-  const composition = await selectComposition({ serveUrl, id: ID, inputProps });
+  let serveUrl = path.resolve(publicDir);
+  if (!fs.existsSync(path.join(serveUrl, "bundle.js"))) {
+    serveUrl = await bundle({ entryPoint: ENTRY, publicDir: serveUrl });
+    // The bundle is a temp folder holding a copy of the video and images (150 MB+ per render) that
+    // Remotion never deletes; left alone, a few dozen renders fill the disk.
+    process.on("exit", () => { try { fs.rmSync(serveUrl, { recursive: true, force: true }); } catch {} });
+  }
+  const composition = await selectComposition({ serveUrl, id: inputProps.composition || ID, inputProps });
   return { serveUrl, composition, inputProps, bundleS: (Date.now() - t0) / 1000 };
 }
 
@@ -60,7 +83,7 @@ async function bench(publicDir, planPath) {
   const out = path.join(HERE, "out", "bench.mp4");
   const t0 = Date.now();
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out,
-    frameRange: [from, from + n - 1] });
+    frameRange: [from, from + n - 1], concurrency: concurrency() });
   const s = (Date.now() - t0) / 1000;
   console.log(JSON.stringify({ bundle_s: bundleS, bench_frames: n, bench_s: s,
     s_per_frame: s / n, frames: composition.durationInFrames }));
@@ -69,13 +92,14 @@ async function bench(publicDir, planPath) {
 async function local(publicDir, planPath, out) {
   const { serveUrl, composition, inputProps } = await prepare(publicDir, planPath);
   const t0 = Date.now();
+  const scale = flags.draft ? 2 / 3 : 1;
   let last = -1;
   // Rendering straight to mp4 puts the AAC encoder's start-up padding in front of the sound, so the
   // audio lands 43 ms after the picture. Render PCM audio in an mkv, then encode AAC once, trimmed
   // to the video: the same path the GitHub join takes, sample-aligned with the cut.
   const tmp = out.replace(/\.mp4$/i, "") + ".tmp.mkv";
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: tmp,
-    enforceAudioTrack: true,
+    enforceAudioTrack: true, concurrency: concurrency(), scale, ...hwOpts(composition, scale),
     onProgress: ({ progress }) => {
       const p = Math.floor(progress * 10);
       if (p !== last) { last = p; process.stdout.write(`${p * 10}% `); }
@@ -94,8 +118,14 @@ async function chunk(publicDir, planPath, out, from, to) {
   // h264-mkv carries PCM audio: sample-exact to the frame, no AAC padding, so pieces join without a
   // gap. The join encodes the audio to AAC once.
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: out,
-    frameRange: [Number(from), Number(to)], enforceAudioTrack: true });
+    frameRange: [Number(from), Number(to)], enforceAudioTrack: true, concurrency: concurrency() });
   console.log(`rendered ${out} (frames ${from}-${to}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+}
+
+async function bundleTo(publicDir, outDir) {
+  fs.rmSync(outDir, { recursive: true, force: true });
+  await bundle({ entryPoint: ENTRY, publicDir: path.resolve(publicDir), outDir: path.resolve(outDir) });
+  console.log(outDir);
 }
 
 async function lambdaEstimate(planPath) {
@@ -121,7 +151,7 @@ async function lambda(publicDir, planPath, out, siteName) {
     options: { publicDir: path.resolve(publicDir) } });
   const t0 = Date.now();
   const { renderId } = await L.renderMediaOnLambda({ region: REGION, functionName, serveUrl,
-    composition: ID, inputProps, codec: "h264", privacy: "private", maxRetries: 2,
+    composition: inputProps.composition || ID, inputProps, codec: "h264", privacy: "private", maxRetries: 2,
     framesPerLambda: framesPerLambda(inputProps.durationInFrames) });
   for (;;) {
     await new Promise((r) => setTimeout(r, 2000));
@@ -137,9 +167,9 @@ async function lambda(publicDir, planPath, out, siteName) {
   }
 }
 
-const cmds = { stills, bench, local, chunk, "lambda-estimate": lambdaEstimate, lambda };
+const cmds = { stills, bench, local, chunk, bundle: bundleTo, "lambda-estimate": lambdaEstimate, lambda };
 if (!cmds[cmd]) {
   console.error(`usage: node render.mjs ${Object.keys(cmds).join("|")} ...`);
   process.exit(2);
 }
-await cmds[cmd](...args);
+await cmds[cmd](...pos);

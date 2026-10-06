@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""The stills as one numbered contact sheet: the one image to review.
+
+    python sheet.py edits/NAME [--plan plan.json]   stills/ -> stills/sheet.png (stills-XYZ/ for plan-XYZ.json)
+    python sheet.py demo                            self-check
+
+Each tile is labelled with the still's name (its beat number), its time in the edit and the card's
+kind (capture, image, logo, or the anim type). The sheet's long edge is LONG_EDGE px, so it is read
+at full size and costs about the same as ONE full still. The full-size stills stay on disk beside it
+for a zoom-in on any tile that needs a closer look. Needs Pillow (the venv has it).
+"""
+import json
+import math
+import re
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from edit import still_frames  # noqa: E402
+
+LONG_EDGE = 1568        # Claude reads images up to 1568 px on the long edge without shrinking them
+TOKENS_CAP = 1600       # ...and about 1.15 MP, which is about 1,600 tokens: the most one image costs
+LABEL = 0.075           # label strip height, as a share of the tile width
+GAP = 6
+
+
+def tokens(w, h):
+    """Image tokens Claude spends on a w x h image: shrunk to LONG_EDGE, then w*h/750, capped."""
+    s = min(1.0, LONG_EDGE / max(w, h))
+    return min(TOKENS_CAP, round(w * s * h * s / 750))
+
+
+def grid(n, tw, th, long_edge=LONG_EDGE):
+    """(cols, scale) that makes the tiles biggest inside a long_edge x long_edge bound."""
+    best = (1, 0.0)
+    for cols in range(1, n + 1):
+        rows = math.ceil(n / cols)
+        s = min((long_edge - (cols + 1) * GAP) / (cols * tw),
+                (long_edge - (rows + 1) * GAP) / (rows * (th + LABEL * tw)))
+        if s > best[1]:
+            best = (cols, s)
+    return best
+
+
+def kind(card):
+    if card.get("lane") == "logo":
+        return "logo"
+    if card.get("src"):
+        return "capture" if "capture" in Path(card["src"]).name else "image"
+    return (card.get("anim") or {}).get("type", "card")
+
+
+def labels(plan):
+    """still name -> 'name  12.34s  kind'."""
+    out = {}
+    for name, frame in still_frames(plan).items():
+        m = re.match(r"(\d+)-(card|swap)", name)
+        k = kind(plan["cards"][int(m.group(1)) - 4]) if m else ""
+        out[name] = f"{name}  {frame / plan['fps']:.2f}s  {k}".rstrip()
+    return out
+
+
+def build(stills, plan, out):
+    from PIL import Image, ImageDraw, ImageFont
+    names = labels(plan)
+    order = sorted(names, key=lambda n: (int(n.split("-")[0]), float(names[n].split()[1].rstrip("s"))))
+    files = [(n, stills / f"{n}.png") for n in order if (stills / f"{n}.png").exists()]
+    if not files:
+        sys.exit(f"ERROR: no stills in {stills}")
+    def load(f):                       # closed straight away: Windows cannot delete an open file
+        with Image.open(f) as im:
+            im.load()
+            return im.convert("RGB")
+    tw, th = load(files[0][1]).size
+    cols, s = grid(len(files), tw, th)
+    s = min(s, 1.0)                    # never blow small stills up
+    w, h = max(1, int(tw * s)), max(1, int(th * s))
+    lh = max(14, int(LABEL * tw * s))
+    rows = math.ceil(len(files) / cols)
+    sheet = Image.new("RGB", (cols * w + (cols + 1) * GAP, rows * (h + lh) + (rows + 1) * GAP), "#202020")
+    draw = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.load_default(size=max(10, int(lh * 0.7)))
+    except TypeError:            # Pillow < 10.1 has one fixed-size bitmap font
+        font = ImageFont.load_default()
+    before = 0
+    for i, (name, f) in enumerate(files):
+        x = GAP + (i % cols) * (w + GAP)
+        y = GAP + (i // cols) * (h + lh + GAP)
+        draw.text((x + 3, y + 1), names[name], fill="#FFFFFF", font=font)
+        im = load(f)
+        before += tokens(*im.size)
+        sheet.paste(im.resize((w, h), Image.LANCZOS), (x, y + lh))
+    sheet.save(out, optimize=True)
+    return {"sheet": str(out), "stills": len(files), "size": sheet.size,
+            "tokens_sheet": tokens(*sheet.size), "tokens_stills": before}
+
+
+def demo():
+    import tempfile
+    from PIL import Image
+    assert tokens(1080, 1920) == TOKENS_CAP and tokens(400, 300) == 160
+    cols, s = grid(27, 1080, 1920)
+    rows = math.ceil(27 / cols)
+    assert 1500 < max(cols * 1080 * s + (cols + 1) * GAP, rows * (1920 + LABEL * 1080) * s + (rows + 1) * GAP) <= 1568
+    assert grid(1, 1080, 1920)[0] == 1
+    plan = {"fps": 30, "durationInFrames": 300, "zooms": [], "captions": {"chunks": [{"start": 0, "end": 1}]},
+            "cards": [{"start": 2, "end": 5, "src": "images/capture-1-x.png"},
+                      {"start": 6, "end": 8, "anim": {"type": "race"}}]}
+    lab = labels(plan)
+    assert lab["4-card"].endswith("capture") and lab["5-card-late"].endswith("race"), lab
+    assert lab["1-opening"] == "1-opening  0.50s", lab
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        for n in lab:
+            Image.new("RGB", (540, 960), (200, 30, 30)).save(d / f"{n}.png")
+        r = build(d, plan, d / "sheet.png")
+        assert max(r["size"]) <= LONG_EDGE + 1 and r["stills"] == len(lab), r
+        assert r["tokens_sheet"] < r["tokens_stills"], r
+        with Image.open(d / "sheet.png") as im:
+            assert im.getpixel((GAP + 5, GAP + 40))[0] == 200            # a tile, under its label
+    print("demo ok")
+
+
+def main():
+    if sys.argv[1:] == ["demo"]:
+        return demo()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("edit")
+    ap.add_argument("--plan", default="plan.json")
+    a = ap.parse_args()
+    edit = Path(a.edit).resolve()
+    plan_path = edit / a.plan
+    stills = edit / f"stills{plan_path.stem[len('plan'):]}"
+    r = build(stills, json.loads(plan_path.read_text()), stills / "sheet.png")
+    print(json.dumps(r))
+
+
+if __name__ == "__main__":
+    main()

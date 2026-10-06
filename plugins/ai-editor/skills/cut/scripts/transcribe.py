@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verbatim word-level transcription of a take. Writes a list of words.
 
-    python transcribe.py <media> <out.json> [--engine auto|whisper|scribe] [--lang en]
+    python transcribe.py <media> <out.json> [--engine auto|whisper|crisper|scribe] [--lang en]
 
 Output (docs/CONTRACTS.md, Transcription):
     [{"text": "so", "start": 0.12, "end": 0.31, "type": "word"},
@@ -10,9 +10,13 @@ Output (docs/CONTRACTS.md, Transcription):
 Engines:
   whisper  faster-whisper, free and local. Needs ~/.ai-video-editor/venv.
            Model from AI_EDITOR_WHISPER_MODEL (default "small").
+  crisper  CrisperWhisper 2.0, free and local, verbatim: keeps ums, repeats and false
+           starts, which plain Whisper tidies away. `setup.py crisper` installs it
+           (about 1 GB). Model from AI_EDITOR_CRISPER_MODEL (default "small"). Its
+           weights are licensed for NON-COMMERCIAL use only.
   scribe   ElevenLabs Scribe v2, verbatim. Needs a key in ELEVENLABS_API_KEY or
            ~/.config/creator-teardown/.env. Keeps every filler and false start.
-  auto     scribe when a key exists, else whisper (default).
+  auto     scribe when a key exists, else crisper when installed, else whisper (default).
 
 Audio is pulled out with ffmpeg first (16 kHz mono WAV), so a multi-GB 4K file
 costs one fast audio demux, never a video decode.
@@ -29,21 +33,17 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+from ai_editor import keys  # noqa: E402
+
 HOME = Path.home() / ".ai-video-editor"
-KEY_FILE = Path.home() / ".config" / "creator-teardown" / ".env"
 # Whisper tidies speech by default. A prompt full of hesitations makes it keep
 # more of them, and the fillers are the evidence the cut acts on.
 FILLER_PROMPT = "Umm, uh, so, like, you know, I mean, uh, so, um, wait, sorry, let me start again."
 
 
 def find_key():
-    if os.environ.get("ELEVENLABS_API_KEY"):
-        return os.environ["ELEVENLABS_API_KEY"].strip()
-    if KEY_FILE.exists():
-        for line in KEY_FILE.read_text().splitlines():
-            if line.startswith("ELEVENLABS_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'") or None
-    return None
+    return keys.get("elevenlabs")[0]
 
 
 def extract_audio(src, dst):
@@ -93,6 +93,34 @@ def run_whisper(wav, lang):
     return with_spacing(words)
 
 
+def has_crisper():
+    import importlib.util
+    return importlib.util.find_spec("crisperwhisper") is not None
+
+
+def run_crisper(wav, lang):
+    os.environ.setdefault("HF_HOME", str(HOME / "models"))
+    try:
+        from crisperwhisper import CrisperWhisperModel
+    except ImportError:
+        sys.exit("ERROR: CrisperWhisper missing. Install it with the setup skill: setup.py crisper")
+    name = os.environ.get("AI_EDITOR_CRISPER_MODEL", "small")
+    print(f"crisperwhisper {name} (verbatim; weights licensed for non-commercial use)", flush=True)
+    r = CrisperWhisperModel(name).transcribe(str(wav), language=lang, word_timestamps=True)
+    words = []
+    for w in r.words or []:
+        t = w.word.strip()
+        if not t:
+            continue
+        # Verbatim mode writes fillers as [um] and sounds as [laughter].
+        inner = t.strip("[]").strip()
+        tag = t.startswith("[") and t.endswith("]")
+        filler = inner.lower() in ("um", "uh", "umm", "uhh", "hmm", "mm", "er", "erm", "ah")
+        words.append({"text": inner if tag and filler else t, "start": round(w.start, 3),
+                      "end": round(w.end, 3), "type": "audio_event" if tag and not filler else "word"})
+    return with_spacing(words)
+
+
 def run_scribe(wav, key, lang):
     fields = [("model_id", "scribe_v2"), ("timestamps_granularity", "word"),
               ("tag_audio_events", "true"), ("no_verbatim", "false"), ("diarize", "false"),
@@ -122,14 +150,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("media")
     ap.add_argument("out")
-    ap.add_argument("--engine", choices=["auto", "whisper", "scribe"], default="auto")
+    ap.add_argument("--engine", choices=["auto", "whisper", "crisper", "scribe"], default="auto")
     ap.add_argument("--lang", default="en")
     a = ap.parse_args()
 
     if not Path(a.media).exists():
         sys.exit(f"ERROR: no such file: {a.media}")
     key = find_key()
-    engine = a.engine if a.engine != "auto" else ("scribe" if key else "whisper")
+    engine = a.engine if a.engine != "auto" else (
+        "scribe" if key else "crisper" if has_crisper() else "whisper")
     if engine == "scribe" and not key:
         print("ERROR: no ElevenLabs key (ELEVENLABS_API_KEY or ~/.config/creator-teardown/.env)",
               file=sys.stderr)
@@ -139,7 +168,8 @@ def main():
         wav = Path(tmp) / "a.wav"
         extract_audio(a.media, wav)
         print(f"engine {engine}", flush=True)
-        words = run_whisper(wav, a.lang) if engine == "whisper" else run_scribe(wav, key, a.lang)
+        run = {"whisper": run_whisper, "crisper": run_crisper}.get(engine)
+        words = run(wav, a.lang) if run else run_scribe(wav, key, a.lang)
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,7 @@
 """Check an edit mechanically before anyone looks at it.
 
     python3 check.py plan   edits/NAME [--plan plan.json] [--style style.json]   instant, stdlib only
-    ~/.ai-video-editor/venv/bin/python check.py render edits/NAME [--plan plan.json]   reads render.mp4
+    ~/.ai-video-editor/venv/bin/python check.py render edits/NAME [--plan plan.json] [--style style.json]   reads render.mp4
     python3 check.py demo   self-check, synthetic data, no video
 
 plan: every card inside the app's safe zones, vertical cards centred, no card on the head while
@@ -12,7 +12,11 @@ than picture cards, text cards' text at least 34 px.
 render: on the rendered mp4 (4 samples a second), where the card's drawn pixels are: on the face
 (YuNet, face.py), off centre, or not moving. On cut.mp4's audio: silences inside the speech, and
 kept spans too short to read as anything but a glitch. Caption words that differ from what the
-cut's own transcript heard are listed for a person to look at.
+cut's own transcript heard are listed for a person to look at. Then quality.py: every frame
+(freezes, one-frame pops, jitter, a first-frame flash, when each card lands against its word,
+static stretches, cuts and cards a minute against style.json), each settled card (text running
+into its edge, contrast, the AI-default look), captions (contrast, the frame's edge), loudness, true
+peak and each sound cue against the voice, and a render older than what it was made from.
 
 Prints FAIL / WARN / LOOK lines with the time and the fix, writes edits/NAME/check.json
 (check-XYZ.json for plan-XYZ.json, one key per mode). Exit 1 on any FAIL.
@@ -20,6 +24,7 @@ Prints FAIL / WARN / LOOK lines with the time and the fix, writes edits/NAME/che
 import argparse
 import difflib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -28,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import SAFE, clean, cut_points, head_during  # noqa: E402
+from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, SAFE, clean, cut_points, head_during, overlay_led  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -39,9 +44,16 @@ TEXT_ANIMS = ("counter", "steps", "versus", "keyword")
 LABEL_MIN = 34         # px, remotion/src/Anims.tsx LABEL_MIN
 SILENCE_S = 0.3        # a silence inside the speech longer than this
 SLIVER_S = 0.2         # a kept span shorter than this between two splices
+HOOK_TOL_S = 0.5       # a first graphic this much later than the creator's winners' median is a miss
 STILL_S = 1.5          # a card region unchanged for longer than this
 FPS = 4                # render samples a second
 ZOOM_ORIGIN = (50, 30)  # remotion/src/StyleEdit.tsx ZOOM_ORIGIN
+
+
+def spread(c):
+    """A card laid round the head over the whole frame (logo_cluster): its content is placed by the head,
+    not centred, so the off-centre checks skip it."""
+    return (c.get("anim") or {}).get("type") == "logo_cluster" or c.get("box") == [0, 0, 100, 100] and c.get("layout") != "scene"
 
 
 def finding(level, t, what, fix):
@@ -52,33 +64,66 @@ def aspect_of(plan):
     return "9:16" if plan["height"] > plan["width"] else "16:9"
 
 
+PUNCH_S, PUSH_MIN_S = 0.16, 0.8   # StyleEdit.tsx
+
+
+def zoom_state(t, zooms):
+    """StyleEdit.tsx zoomAt: (scale, (origin x, y) % of the frame). Punches ease over PUNCH_S on power2.out,
+    pushes at least PUSH_MIN_S each way on sine.inOut (a fitted ease is read as sine.inOut here); log space."""
+    zs = sorted(zooms, key=lambda z: z["start"])
+    out2 = lambda p: 1 - (1 - p) ** 2  # noqa: E731
+    sine = lambda p: (1 - math.cos(math.pi * p)) / 2  # noqa: E731
+    for i, z in enumerate(zs):
+        nxt = zs[i + 1]["start"] if i + 1 < len(zs) else float("inf")
+        push = z.get("kind") == "push" and z.get("ease_s", 0) > 0
+        tail = 0 if push else min(PUNCH_S, max(0, nxt - z["end"]))
+        if not z["start"] <= t < z["end"] + tail:
+            continue
+        if push:
+            e = min(max(PUSH_MIN_S, z["ease_s"]), (z["end"] - z["start"]) / 2)
+            p = sine((t - z["start"]) / e) if t < z["start"] + e else sine((z["end"] - t) / e) if t > z["end"] - e else 1
+        else:
+            p = out2(min(1, (t - z["start"]) / PUNCH_S)) if t < z["end"] else 1 - out2(min(1, (t - z["end"]) / PUNCH_S))
+        return z["scale"] ** max(0.0, min(1.0, p)), tuple(z.get("origin") or ZOOM_ORIGIN)
+    return 1.0, ZOOM_ORIGIN
+
+
 def zoom_at(t, zooms):
-    """StyleEdit.tsx zoomScale."""
-    z = next((z for z in zooms if z["start"] <= t < z["end"]), None)
-    if not z:
-        return 1.0
-    if z["kind"] == "punch" or z.get("ease_s", 0) <= 0:
-        return z["scale"]
-    e = min(z["ease_s"], (z["end"] - z["start"]) / 2)
-    cub = lambda p: 4 * p ** 3 if p < 0.5 else 1 - (-2 * p + 2) ** 3 / 2
-    if t < z["start"] + e:
-        p = (t - z["start"]) / e
-    elif t > z["end"] - e:
-        p = (z["end"] - t) / e
-    else:
-        p = 1
-    return 1 + (z["scale"] - 1) * cub(max(0, min(1, p)))
+    """The zoom for the head check: held at its peak from its start (a punch's 0.16 s ramp errs large)."""
+    z = next((z for z in zooms if z["start"] <= t < z["end"] and z.get("kind") != "push"), None)
+    return z["scale"] if z else zoom_state(t, zooms)[0]
+
+
+def pan_at(t, pans):
+    """StyleEdit.tsx panAt: (offset % of the width, cover scale)."""
+    x = 0.0
+    for p in pans or []:
+        if t >= p["start"]:
+            q = min(1.0, (t - p["start"]) / max(1e-3, p["end"] - p["start"]))
+            x = p["from"] + (p["to"] - p["from"]) * (1 - math.cos(math.pi * q)) / 2
+    return x, 1 + 2 * abs(x) / 100
+
+
+def footage_affine(t, plan, W, H):
+    """Where StyleEdit.tsx draws the cut at t (overlay layout): 2x3 matrix, frame px. Scale about the zoom's
+    origin (the zoom x the pan's cover), then the pan's shift."""
+    k, (ox, oy) = zoom_state(t, plan["zooms"])
+    px, pk = pan_at(t, plan.get("pans"))
+    s, ox, oy = k * pk, ox / 100 * W, oy / 100 * H
+    return [[s, 0, ox * (1 - s) + px / 100 * W], [0, s, oy * (1 - s)]]
 
 
 def on_screen(box, t, plan):
     """A head box on cut.mp4 (percent) -> where it is drawn on the output while a card is up:
-    grown by the zoom, and in split moved into the speaker's window under the seam."""
+    grown by the zoom (and moved by a pan), and in split moved into the speaker's window under the seam."""
     x, y, w, h = box
     s = zoom_at(t, plan["zooms"])
     lay = plan.get("layout")
     if not lay:
-        ox, oy = ZOOM_ORIGIN
-        return [ox + (x - ox) * s, oy + (y - oy) * s, w * s, h * s]
+        ox, oy = zoom_state(t, plan["zooms"])[1]
+        px, pk = pan_at(t, plan.get("pans"))
+        s *= pk
+        return [ox + (x - ox) * s + px, oy + (y - oy) * s, w * s, h * s]
     sp = lay["speaker"]
     k = sp["scale"]
     ox, oy = k * sp["origin"][0], k * sp["origin"][1]
@@ -115,7 +160,7 @@ def text_sizes(anim, w, h):
     return out
 
 
-def check_plan(plan, face=None, cuts=(), static_s=STATIC_S):
+def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None):
     out = []
     aspect = aspect_of(plan)
     l, top, r, bottom = SAFE[aspect]
@@ -129,11 +174,26 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S):
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
-        if x < l - 0.05 or y < top - 0.05 or x + w > 100 - r + 0.05 or y + h > 100 - bottom + 0.05:
+        if c.get("layer") == "behind":
+            # behind the speaker: the cutout covers the card where it meets him, so it may reach the head,
+            # but only once matte.py has cut him out for this card's time
+            fps = plan["fps"]
+            if not any(k["from"] <= c["start"] * fps and c["end"] * fps <= k["to"] + 1 for k in plan.get("cutouts") or []):
+                out.append(finding("FAIL", c["start"], f"{name} card sits behind the speaker but there is no cutout for it",
+                                   "run matte.py edits/<name> (it cuts the speaker out where behind cards are up)"))
+            continue
+        if c.get("layout") == "scene" or spread(c):
+            continue    # a full-frame cut-away, or logos laid round the head: the renderer keeps them clear
+        cl, ct, cr = l, top, r
+        if aspect == "9:16" and overlay_led(c):     # plan.free_regions' allowances
+            cl, ct = OVERLAY_EDGE, OVERLAY_TOP
+            if y + h <= RAIL_TOP:
+                cr = OVERLAY_EDGE
+        if x < cl - 0.05 or y < ct - 0.05 or x + w > 100 - cr + 0.05 or y + h > 100 - bottom + 0.05:
             out.append(finding("FAIL", c["start"], f"{name} card {[round(v, 1) for v in c['box']]} reaches under the app's UI "
                                f"(safe: {l}% sides, {top}% top, {bottom}% bottom)",
                                "drop its box in visuals.json/images.json (plan.py fits it), then plan again"))
-        if aspect == "9:16" and c.get("lane") != "logo" and abs(x + w / 2 - 50) > CENTRE_PLAN:
+        if aspect == "9:16" and c.get("lane") != "logo" and not spread(c) and abs(x + w / 2 - 50) > CENTRE_PLAN:
             out.append(finding("FAIL", c["start"], f"{name} card centre at {x + w / 2:.1f}% of the width, not 50",
                                "drop its box x in visuals.json/images.json so plan.py centres it"))
         if heads:
@@ -182,6 +242,20 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S):
                                    f"'{c['trigger_word']}' {c['anim']['type']} {part} fits at {px:.0f} px"
                                    + (f"; floored to {LABEL_MIN} px it runs wider than the card" if label else ""),
                                    "shorten the text in visuals.json or give the card a bigger box"))
+    # the creator's hook (plan "targets", from style.json hook.winner): her winners show a graphic by then
+    want = (plan.get("targets") or {}).get("first_graphic_s")
+    if want is not None:
+        first = min((c["start"] + ((c.get("anim") or {}).get("props") or c.get("props") or {}).get("word_at", 0.1)
+                     for c in cards), default=None)
+        if first is None or first > want + HOOK_TOL_S:
+            ctl = plan["targets"].get("control_first_graphic_s")
+            out.append(finding("WARN", first, ("no graphic at all" if first is None else f"first graphic lands at {first:.1f} s")
+                               + f"; the creator's winners show one by {want:.1f} s" + (f" (her other videos: {ctl:.1f} s)" if ctl is not None else ""),
+                               "anchor a visual to a word in the first sentence (visuals.json)"))
+    # the AI-made look (references/ai-tells.md): BAN -> FAIL, WARN -> WARN
+    from ai_tells import check_plan as ai_tells, for_brand
+    for f in for_brand(ai_tells(plan, visuals), brand):
+        out.append(finding("FAIL" if f["level"] == "BAN" else "WARN", None, f"AI tell '{f['tell']}': {f['where']}", f["fix"]))
     return out
 
 
@@ -241,9 +315,9 @@ STILL_DIFF = 0.4                          # mean abs grey change per sample unde
 FACE_COVER = 0.02                         # card pixels on more than this share of the head = covering it
 
 
-def stream(video, vf, w, h):
+def stream(video, vf, w, h, fps=FPS):
     import numpy as np
-    p = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-filter_complex", f"[0:v]{vf},fps={FPS},scale={w}:{h}",
+    p = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-filter_complex", f"[0:v]{vf},fps={fps},scale={w}:{h}",
                           "-f", "rawvideo", "-pix_fmt", "bgr24", "-"], stdout=subprocess.PIPE)
     n = w * h * 3
     while True:
@@ -284,9 +358,8 @@ def check_render(edit, plan, video):
         if split:
             bg = ground
         else:
-            s = zoom_at(t, plan["zooms"])
-            ox, oy = ZOOM_ORIGIN[0] / 100 * W, ZOOM_ORIGIN[1] / 100 * H
-            bg = cv2.warpAffine(cut, np.float32([[s, 0, ox * (1 - s)], [0, s, oy * (1 - s)]]), (W, H))
+            zm = np.float32(footage_affine(t, plan, W, H))
+            bg = cv2.warpAffine(cut, zm, (W, H))
         diff = cv2.absdiff(cv2.GaussianBlur(frame, (5, 5), 0), cv2.GaussianBlur(bg, (5, 5), 0)).max(axis=2)
         ink = cv2.morphologyEx((diff > INK_DIFF[mode]).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         heads = []
@@ -303,6 +376,15 @@ def check_render(edit, plan, video):
                     heads.append(b)
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        # a behind card may sit inside the head box (beside the hair, behind it): only ink ON the speaker
+        # (the cutout's solid pixels, on the same zoom) counts as covering him
+        person = None
+        if not split and any(cards[i].get("layer") == "behind" for i in up):
+            k = next((x for x in plan.get("cutouts") or [] if x["from"] <= n <= x["to"]), None)
+            png = k and edit / k["src"] / f"{n - k['from']:06d}.png"
+            if png and png.exists():
+                al = cv2.resize(cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3], (W, H), interpolation=cv2.INTER_AREA)
+                person = cv2.warpAffine(al, zm, (W, H)) > 230
         for i in up:
             c, st = cards[i], per[i]
             x0, y0, x1, y1 = pix(c["box"], 2)
@@ -313,7 +395,10 @@ def check_render(edit, plan, video):
             for hb in heads:
                 hx0, hy0, hx1, hy1 = pix(hb)
                 area = max(1, (hx1 - hx0) * (hy1 - hy0))
-                st["cover"].append((t, float(mask[hy0:hy1, hx0:hx1].sum()) / area))
+                on = mask[hy0:hy1, hx0:hx1]
+                if c.get("layer") == "behind" and person is not None:
+                    on = on * person[hy0:hy1, hx0:hx1]
+                st["cover"].append((t, float(on.sum()) / area))
             region = grey[y0:y1, x0:x1]
             if st["prev"] is not None:
                 st["diffs"].append((t, float(np.abs(region - st["prev"]).mean())))
@@ -327,7 +412,7 @@ def check_render(edit, plan, video):
     for i, c in enumerate(cards):
         st, name = per[i], f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         rec = measured.setdefault(f"{i}:{c['trigger_word']}", {})
-        bad = [(t, f) for t, f in st["cover"] if f > FACE_COVER]
+        bad = [(t, f) for t, f in st["cover"] if f > FACE_COVER and c.get("layout") != "scene"]   # a cut-away hides him on purpose
         rec["face_cover_max"] = round(max([f for _, f in st["cover"]], default=0), 3)
         if bad:
             out.append(finding("FAIL", bad[0][0], f"{name} card is drawn over the face at {len(bad)} sample(s), "
@@ -338,7 +423,7 @@ def check_render(edit, plan, video):
             cx = (x0 + x1) / 2
             rec["ink"] = [round(v, 1) for v in st["mid"][1]]
             rec["ink_centre_x"] = round(cx, 1)
-            if aspect_of(plan) == "9:16" and c.get("lane") != "logo" and abs(cx - 50) > CENTRE_INK:
+            if aspect_of(plan) == "9:16" and c.get("lane") != "logo" and not spread(c) and abs(cx - 50) > CENTRE_INK:
                 out.append(finding("FAIL", st["mid"][0], f"{name} card is drawn {cx - 50:+.1f}% of the width off centre "
                                    f"(its content spans {x0:.0f}-{x1:.0f}%)",
                                    "centre the content inside the card (Anims.tsx / the capture's clip), then render again"))
@@ -397,7 +482,7 @@ def demo():
                 {"text": "ok", "start": 0.0, "end": 0.5, "words": [{"text": "ok", "start": 0.0, "end": 0.3}]},
                 {"text": "cloud", "start": 1.0, "end": 4.0, "words": [{"text": "cloud", "start": 1.0, "end": 3.9}]}]},
             "cards": [{"src": "images/a.png", "start": 0.5, "end": 3.0, "trigger_word": "a", "box": [14, 14, 72, 16]},
-                      {"src": "images/b.png", "start": 3.0, "end": 5.0, "trigger_word": "b", "box": [6, 14, 72, 16]},
+                      {"src": "images/b.png", "start": 3.0, "end": 5.0, "trigger_word": "b", "box": [2, 14, 72, 16]},
                       {"src": "images/c.png", "start": 5.0, "end": 7.0, "trigger_word": "c", "box": [14, 20, 72, 20]},
                       {"anim": {"type": "keyword", "props": {"text": "a very long keyword line that will not fit"}},
                        "start": 7.0, "end": 9.0, "trigger_word": "d", "box": [14, 14, 72, 10]},
@@ -407,11 +492,26 @@ def demo():
                        "trigger_word": "f", "box": [14, 14, 72, 16]},
                       {"anim": {"type": "keyword", "props": {"text": "go"}}, "start": 10.0, "end": 10.5,
                        "trigger_word": "g", "box": [14, 14, 72, 16]}]}
+    scene = {**plan, "cards": [{"anim": {"type": "flow"}, "layout": "scene", "start": 0.5, "end": 3,
+                                "trigger_word": "s", "box": [0, 0, 100, 100]}]}
+    assert not any(f["level"] == "FAIL" and "'s'" in f["what"] for f in check_plan(scene, face))
     got = check_plan(plan, face)
     has = lambda lvl, word, s: any(f["level"] == lvl and s in f["what"] and f"'{word}'" in f["what"] for f in got)
     assert not any(f"'a'" in f["what"] for f in got if f["level"] == "FAIL"), got   # clean card passes
-    assert has("FAIL", "b", "centre at 42") and has("FAIL", "b", "under the app's UI"), got
+    assert has("FAIL", "b", "centre at 38") and has("FAIL", "b", "under the app's UI"), got
     assert has("FAIL", "c", "covers the head"), got
+    # a behind card may reach the head, but needs its cutout
+    bh = {**plan, "cards": [{**plan["cards"][2], "layer": "behind"}]}
+    assert any("no cutout" in f["what"] for f in check_plan(bh, face)) and not any("covers the head" in f["what"] for f in check_plan(bh, face))
+    bh["cutouts"] = [{"src": "cutout/x.mov", "from": 0, "to": 10 ** 6}]
+    assert not any("no cutout" in f["what"] for f in check_plan(bh, face))
+    # logo_cluster spans the frame and sits round the head: never "off centre"
+    lc = {**plan, "cards": [{"anim": {"type": "logo_cluster", "props": {}}, "start": 0.5, "end": 2, "trigger_word": "l",
+                             "box": [0, 0, 100, 100]}]}
+    assert not any(f["level"] == "FAIL" and "'l'" in f["what"] for f in check_plan(lc, face))
+    # an overlay in the band above the head may span 4-96% and start 10% down (plan.free_regions)
+    band = {**plan, "cards": [{"src": "images/a.png", "start": 0.5, "end": 2, "trigger_word": "a", "box": [4, 10, 92, 20], "layout": "box"}]}
+    assert not any(f["level"] == "FAIL" and "'a'" in f["what"] for f in check_plan(band, face)), check_plan(band, face)
     assert any(f["level"] == "FAIL" and "'cloud' up 3.0 s" in f["what"] for f in got), got
     assert has("FAIL", "d", "text fits at") and has("WARN", "d", "only text"), got
     assert any(f["level"] == "WARN" and "static for 9.5 s" in f["what"] for f in got), got
@@ -433,7 +533,22 @@ def demo():
     assert [f["t"] for f in looks] == [5] and "dally" in looks[0]["what"], looks
     assert still_runs([(0.25 * i, 0.1 if 2 <= i <= 10 else 3) for i in range(14)], 0.4) == [(0.5, 2.5)]
     assert zoom_at(1, [{"start": 0, "end": 2, "scale": 1.2, "kind": "push", "ease_s": 0.5}]) == 1.2
+    # the creator's hook target: her winners show a graphic by 0.0 s; the first card lands at 0.6 s here
+    hk = {**band, "targets": {"first_graphic_s": 0.0, "control_first_graphic_s": 4.3}}
+    assert any("winners show one by 0.0 s" in f["what"] for f in check_plan(hk, face))
+    hk["targets"]["first_graphic_s"] = 1.0
+    assert not any("winners" in f["what"] for f in check_plan(hk, face))
     print("demo ok")
+
+
+def brand():
+    """The profile's brand kit (a tell the user's own brand names is only a warning)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+        from ai_editor import profile
+        return profile.load().get("brand") or {}
+    except Exception:
+        return {}
 
 
 def main():
@@ -443,7 +558,7 @@ def main():
     ap.add_argument("mode", choices=["plan", "render"])
     ap.add_argument("edit")
     ap.add_argument("--plan", default="plan.json")
-    ap.add_argument("--style", help="style.json: its pace sets how long a static stretch may run")
+    ap.add_argument("--style", help="style.json: its pace sets how long a static stretch may run; render compares its rhythm")
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
@@ -457,13 +572,22 @@ def main():
         static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
         if not face:
             print("note: no face.json, the head check is skipped (run face.py)")
-        found = check_plan(plan, face, cut_points(edit), static_s)
+        found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand())
         extra = {"static_s": static_s}
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():
             sys.exit(f"ERROR: {video} missing; render first")
         found, extra["cards"] = check_render(edit, plan, video)
+        import quality   # every frame, the settled cards, the audio, the files: quality.py
+        style = json.loads(Path(a.style).read_text()) if a.style else None
+        if not style:
+            print("note: no --style, so the rhythm is measured but not compared with the creator")
+        more, q = quality.run(edit, plan, video, plan_path, style, cut_points(edit), brand())
+        found += more
+        for k, v in q.pop("cards", {}).items():
+            extra["cards"].setdefault(k, {}).update(v)
+        extra.update(q)
         rep = rd("report.json")
         if rep and rep.get("frames"):
             found += slivers(rep["frames"], rep.get("fps") or 30)

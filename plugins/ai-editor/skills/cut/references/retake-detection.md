@@ -6,12 +6,19 @@ transcript.
 
 ## What you are given
 
-`words.raw.json`: every word with `start` and `end` in seconds. Fillers, false starts and
-"wait, sorry" are in it on purpose. They are the evidence.
+With a TypeSafe key, `retakes.py propose` has already decided the clear cases and written
+`spans.json`. You read `review.md` (the uncertain items) and fix entries in `spans.json`. The rules
+below are what you judge them by.
+
+Without a key, you decide everything from `transcript.txt`: one line per phrase,
+`[start-end] words`, with `(+1.4s)` marking a pause before a phrase. `candidates.md` lists the
+places code flagged as possible restarts. Never read `words.raw.json`: it is the same words at
+about 12x the size. Fillers, false starts and "wait, sorry" are in the transcript on purpose. They
+are the evidence.
 
 Whisper (the free engine) tidies speech: it drops some fillers and sometimes a false start. Scribe
-keeps them all. On a Whisper transcript, a repeated opening a second apart is often all that is
-left of a false start. Read the timings as well as the words.
+and CrisperWhisper keep them all. On a Whisper transcript, a repeated opening a second apart is
+often all that is left of a false start. Read the timings as well as the words.
 
 ## What you do not decide
 
@@ -35,7 +42,7 @@ audio. Never write a span for silence.
 |---|---|
 | `text` | Words copied from the transcript. Punctuation and case do not matter. |
 | `kind` | `retake`, `false_start`, `filler`, `meta`, `audio_event`, `redundant` |
-| `occurrence` / `after` | Required when the phrase appears more than once. `occurrence` is 1-based. `after` takes the first match starting after that many seconds. |
+| `occurrence` / `after` | Required when the phrase appears more than once. `occurrence` is 1-based. `after` takes the first match starting after that many seconds: use the phrase's start time from `transcript.txt`. |
 | `confidence` | `high` (default), `medium`, `low`. `low` cuts are highlighted for the user. |
 | `note` | Why, in a few words. For a retake, where the keeper is. |
 

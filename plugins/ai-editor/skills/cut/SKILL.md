@@ -1,16 +1,25 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. Also the entry point for "edit my video" and "edit my video like @creator" with a raw take: it asks first whether to stop at the cut or carry straight on into style-edit. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. "Edit my video" and "edit my video like @creator" are start triggers; cut runs when start calls it or when the user asks only to cut. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
+license: MIT
+compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster-whisper). Recommended TypeSafe key (Jev decides the cut for a fraction of a cent; without it Claude decides). Optional ElevenLabs key or CrisperWhisper. Mac, Windows or Linux. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
 
 # Cut
+
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
+
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
 
 One raw take in. A clean jump cut out, with nothing on a timeline for the user to touch.
 
 ```
 edits/<name>/
-  words.raw.json    transcript of the source
-  spans.json        what to remove, quoted (you write this)
+  words.raw.json    transcript of the source (never read it: use transcript.txt)
+  transcript.txt    the same words, one line per phrase with times
+  spans.json        what to remove, quoted (retakes.py proposes it, you review)
+  review.md         the items Jev was unsure of
+  jev-usage.jsonl   what each Jev request cost
   decisions.json    kept spans in source seconds
   report.json       every cut with its reason
   paper-edit.md     the cut as text, for your read-through
@@ -60,7 +69,7 @@ their message ("just cut it", "cut and style it in one go").
 ## 0b. Read the user's taste
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show
 ```
 
 Follow every rule in it; the scripts already read its settings. When the user reacts to the result
@@ -72,22 +81,54 @@ Follow every rule in it; the scripts already read its settings. When the user re
 $PY "$S/transcribe.py" <source> edits/<name>/words.raw.json
 ```
 
-Uses ElevenLabs Scribe when a key is saved (`~/.config/creator-teardown/.env`), else the free local
-Whisper model. `--engine whisper|scribe` overrides. Whisper takes 1-4 minutes for a 3-minute take on a
-laptop. Tell the user Scribe catches more fillers and false starts, once, if they have no key.
+Picks the engine itself: ElevenLabs Scribe when a key is saved, else CrisperWhisper when the
+setup skill installed it, else the free local Whisper model. `--engine whisper|crisper|scribe`
+overrides. Whisper takes 1-4 minutes for a 3-minute take on a laptop, CrisperWhisper about the
+length of the take. Whisper tidies speech (drops some ums and false starts); Scribe and
+CrisperWhisper keep them, and the cut uses them. If the user has neither, say once that setup can
+add either. CrisperWhisper's weights are licensed for non-commercial use only: say so if they ask
+for it.
 
 Whisper `small` sometimes merges a false start into the next run, or garbles a line. When the take
 is full of retakes, `AI_EDITOR_WHISPER_MODEL=medium` hears them better (a 1.5 GB download, about
 twice as slow). Either way, step 5 catches what the transcript missed.
 
-## 2. Decide what to cut (your job)
+**Never read `words.raw.json`.** It is about 12x bigger than the same words as text. Everything
+below reads `transcript.txt` or the files `retakes.py` writes.
 
-Read `references/retake-detection.md` and follow it. Read the whole transcript, then write
-`edits/<name>/spans.json`: the words to remove, quoted, with a kind and a note. Last take wins.
-Never type a timestamp and never write a span for a pause.
+## 2. Decide what to cut
+
+```bash
+python3 "$S/retakes.py" propose edits/<name>
+```
+
+Code finds every place that might be a cut (a line said again, a sentence left unfinished, "wait,
+sorry", fillers) and TypeSafe's Jev model judges them all in one request, for a fraction of a cent.
+It writes `spans.json`, `review.md` and `transcript.txt`, and prints what Jev cost.
+
+- **Exit 0.** Read `review.md` only: the few items Jev was unsure of, each with the words and what
+  was done. Fix any you disagree with in `spans.json` (`references/retake-detection.md` has the
+  format and the rules), then go to step 3. Do not re-decide the items Jev was sure of; the
+  read-through in step 3 catches a wrong one.
+- **Exit 4: no TypeSafe key** (or Jev unreachable). Fall back to deciding yourself: read
+  `transcript.txt` and `candidates.md` (the places code flagged), follow
+  `references/retake-detection.md`, and write `spans.json`. Tell the user once that a
+  TypeSafe key makes this much cheaper (the `setup` skill walks them through it).
+
+`propose` will not overwrite an existing `spans.json`; `--force` replaces it and keeps the old one
+as `spans.prev.json`. Last take wins either way. Never type a timestamp and never write a span for
+a pause.
 
 Only if the user wants it shorter, also read `references/editorial-rules.md` and add `redundant`
-cuts.
+cuts. Jev does not make those: they are content calls.
+
+A misheard word (a name the transcriber spelled wrong) is one command, never a rewrite of the JSON:
+
+```bash
+python3 "$S/retakes.py" fix edits/<name> cloud=Claude jiv=Jev
+```
+
+It fixes `words.raw.json` and `words.json` in place, whole words only, timings untouched.
 
 ## 3. Build
 
@@ -177,4 +218,5 @@ the style when they're ready. Never start style-edit on your own.
 
 ```bash
 python3 "$S/test_build_timeline.py"
+python3 "$S/test_retakes.py"
 ```

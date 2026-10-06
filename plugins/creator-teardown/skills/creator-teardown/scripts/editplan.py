@@ -7,11 +7,19 @@
   render <plan.json>    checks a plan and writes plan.srt (one cue per card:
                         import it into your editor as captions and every card
                         sits at its time) and plan.md (the same list as a table).
+  blend <name> --from a,b [--weights a=0.6,b=0.4] [--captions a] [--pace b] [--visuals c]
+                        [--take captions,pace,graphics,entrances,layout,sound]
+                        several creators' style.json into one, at
+                        creator-teardowns/<name>/style.json. Each part (captions;
+                        pace = pace, zoom, motion; visuals = graphics, face, look, cards)
+                        comes from its owner when one is named, else every creator
+                        weighted: numbers averaged, words from the heaviest.
   demo                  self-check.
 
 Usage:
   python3 scripts/editplan.py style creator-teardowns/<handle>/events.json
   python3 scripts/editplan.py render edit-plans/<name>/plan.json
+  python3 scripts/editplan.py blend mix --from alice,bob --captions alice --pace bob
 
 The events.json and plan.json shapes are in references/edit-plan.md.
 Exit codes: 0 ok - 1 the plan has errors - 2 usage
@@ -165,7 +173,149 @@ def render(plan_path):
     print(f"{len(cards)} cards -> {plan_path.parent / 'plan.srt'} and plan.md")
 
 
+PARTS = {"captions": ["captions"], "pace": ["pace", "zoom", "motion"],
+         "visuals": ["graphics", "face", "look", "cats", "per_min", "first_in_s", "gap_s", "events",
+                     "layout"]}
+
+
+def mix(vals):
+    """[(value, weight)] -> one value. Numbers: weighted mean. Dicts: per key. Anything
+    else (words, colours, lists, booleans): the heaviest creator's."""
+    vals = [(v, w) for v, w in vals if v is not None]
+    if not vals:
+        return None
+    if all(isinstance(v, dict) for v, _ in vals):
+        keys = dict.fromkeys(k for v, _ in vals for k in v)
+        return {k: mix([(v.get(k), w) for v, w in vals]) for k in keys}
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v, _ in vals):
+        tw = sum(w for _, w in vals)
+        x = sum(v * w for v, w in vals) / tw
+        return round(x) if all(isinstance(v, int) for v, _ in vals) else round(x, 3)
+    return max(vals, key=lambda vw: vw[1])[0]
+
+
+def blend(styles, weights, owners):
+    """styles: {handle: style}. weights: {handle: w}. owners: {part: handle}."""
+    tw = sum(weights.values())
+    weights = {h: w / tw for h, w in weights.items()}
+    heavy = max(weights, key=weights.get)
+    out = {k: v for k, v in styles[heavy].items()}
+    for part, keys in PARTS.items():
+        src = [(styles[owners[part]], 1.0)] if owners.get(part) else \
+            [(styles[h], weights[h]) for h in styles]
+        for k in keys:
+            v = mix([(s.get(k), w) for s, w in src])
+            if v is None:
+                out.pop(k, None)
+            else:
+                out[k] = v
+    out["videos"] = sum(s.get("videos") or 0 for s in styles.values())
+    out["blend"] = {"weights": {h: round(w, 3) for h, w in weights.items()},
+                    "owners": {p: owners.get(p) or "weighted" for p in PARTS}}
+    return out
+
+
+# What each box on the teardown page (and the question in SKILL.md) copies: top-level keys,
+# or "graphics.<key>" for one part of the graphics block.
+TAKE = {"captions": ["captions"],
+        "pace": ["pace", "zoom", "camera", "motion"],
+        "graphics": ["graphics.kinds", "graphics.kinds_source", "graphics.per_min", "graphics.share_pct",
+                     "graphics.hold_s", "graphics.palette", "graphics.crop_palette", "graphics.per_min_measured",
+                     "graphics.hold_s_measured", "graphics.measured", "graphics.blur_behind_pct", "cats", "events",
+                     "per_min", "first_in_s", "gap_s"],
+        "entrances": ["graphics.entrances", "graphics.exits", "graphics.secondary_motion", "graphics.ease_in_s"],
+        "layout": ["graphics.layout", "face"],
+        "sound": ["sound"]}
+
+
+def take(style, parts):
+    """Keeps only the parts the user chose; style-edit falls back to its defaults for the rest."""
+    keep = {k for p in parts for k in TAKE[p]}
+    out = dict(style)
+    for p, keys in TAKE.items():
+        for k in keys:
+            if k in keep:
+                continue
+            if k.startswith("graphics."):
+                if isinstance(out.get("graphics"), dict):
+                    out["graphics"] = {kk: vv for kk, vv in out["graphics"].items() if kk != k.split(".", 1)[1]}
+            else:
+                out.pop(k, None)
+    if "sound" not in parts:
+        out["sfx"] = False if style.get("sfx") is False else out.get("sfx", True)
+    out.setdefault("blend", {})["take"] = list(parts)
+    return out
+
+
+def cmd_blend(a, root=None):
+    root = root or Path.cwd() / "creator-teardowns"
+    handles = [h.strip().lstrip("@").lower() for h in a.sources.split(",") if h.strip()]
+    styles = {}
+    for h in handles:
+        p = root / h / "style.json"
+        if not p.exists():
+            sys.exit(f"no {p}. Run the teardown on @{h} first.")
+        styles[h] = json.loads(p.read_text())
+    weights = {h: 1.0 for h in handles}
+    for kv in (a.weights or "").split(","):
+        if "=" in kv:
+            h, w = kv.split("=")
+            weights[h.strip().lstrip("@").lower()] = float(w)
+    owners = {p: getattr(a, p).lstrip("@").lower() for p in PARTS if getattr(a, p, None)}
+    bad = [h for h in list(weights) + list(owners.values()) if h not in styles]
+    if bad:
+        sys.exit(f"not in --from: {', '.join(bad)}")
+    out = blend(styles, weights, owners)
+    if getattr(a, "take", None):
+        parts = [p.strip() for p in a.take.split(",") if p.strip() and p.strip() != "none"]
+        bad = [p for p in parts if p not in TAKE]
+        if bad:
+            sys.exit(f"--take: unknown part(s) {', '.join(bad)}; choose from {', '.join(TAKE)}")
+        out = take(out, parts)
+    out["handle"] = a.name
+    d = root / a.name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "style.json").write_text(json.dumps(out, indent=2))
+    try:  # look.md, when the venv's numpy is here
+        from look import write_summary
+        print(write_summary(d))
+    except ImportError:
+        pass
+    print(f"blend of {', '.join(handles)}: " + ", ".join(f"{p} from {o}" for p, o in out["blend"]["owners"].items()))
+    print(f"-> {d / 'style.json'}")
+    return out
+
+
 def demo():
+    a = {"handle": "a", "videos": 5, "aspect": "9:16", "pace": {"wpm": 200, "median_shot_s": 2.0},
+         "captions": {"present": True, "size_pct": 6.0, "color": "#FFFFFF", "words_per_caption": 3},
+         "motion": {"personality": "snappy", "ease_in_s": 0.1}, "graphics": {"share_pct": 40}}
+    b = {"handle": "b", "videos": 3, "aspect": "9:16", "pace": {"wpm": 150, "median_shot_s": 4.0},
+         "captions": {"present": True, "size_pct": 4.0, "color": "#FFE14D", "words_per_caption": 1},
+         "motion": {"personality": "calm", "ease_in_s": 0.4}, "face": {"framing": "close"}}
+    m = blend({"a": a, "b": b}, {"a": 3, "b": 1}, {})
+    assert m["pace"] == {"wpm": 188, "median_shot_s": 2.5}, m["pace"]
+    assert m["captions"]["size_pct"] == 5.5 and m["captions"]["color"] == "#FFFFFF", m["captions"]
+    assert m["captions"]["words_per_caption"] == 2 and m["motion"]["personality"] == "snappy"
+    assert m["face"] == {"framing": "close"} and m["videos"] == 8
+    m = blend({"a": a, "b": b}, {"a": 1, "b": 1}, {"captions": "b", "pace": "a"})
+    assert m["captions"] == b["captions"] and m["pace"] == a["pace"], m
+    assert m["blend"]["owners"] == {"captions": "b", "pace": "a", "visuals": "weighted"}
+    with tempfile.TemporaryDirectory() as d:
+        for h, s in (("a", a), ("b", b)):
+            (Path(d) / h).mkdir()
+            (Path(d) / h / "style.json").write_text(json.dumps(s))
+        t = take({"captions": {"size_pct": 4}, "pace": {"wpm": 200}, "sound": {"sfx_per_min": 3},
+                  "graphics": {"kinds": {"chart": 100}, "entrances": [{"kind": "slide"}], "layout": {"zones_pct": {}}}},
+                 ["captions", "entrances"])
+        assert set(t) == {"captions", "graphics", "sfx", "blend"} and set(t["graphics"]) == {"entrances"}, t
+        assert t["sfx"] is True and t["blend"]["take"] == ["captions", "entrances"]
+        args = argparse.Namespace(name="mix", sources="@A,b", weights="a=2", captions="b",
+                                  pace=None, visuals=None, take=None)
+        out = cmd_blend(args, Path(d))
+        assert json.loads((Path(d) / "mix" / "style.json").read_text()) == out
+        assert out["handle"] == "mix" and out["captions"]["color"] == "#FFE14D"
+
     doc = {"handle": "demo", "videos": [
         {"duration": 60, "events": [
             {"cat": "logo", "in": 2.7, "out": 5.9, "entrance": "pop", "layer": "above_head",
@@ -204,6 +354,13 @@ def main():
     p.add_argument("events")
     p = sub.add_parser("render")
     p.add_argument("plan")
+    p = sub.add_parser("blend")
+    p.add_argument("name", help="the blend's folder name under creator-teardowns/")
+    p.add_argument("--from", dest="sources", required=True, help="handles, comma-separated")
+    p.add_argument("--weights", help="handle=weight,... (default equal)")
+    for part in PARTS:
+        p.add_argument(f"--{part}", help=f"the one creator whose {part} to take")
+    p.add_argument("--take", help=f"only these parts, comma-separated: {','.join(TAKE)} (the teardown page's boxes)")
     sub.add_parser("demo")
     a = ap.parse_args()
 
@@ -218,6 +375,8 @@ def main():
         print(f"\n-> {src.parent / 'style.json'}")
     elif a.cmd == "render":
         render(Path(a.plan))
+    elif a.cmd == "blend":
+        cmd_blend(a)
     else:
         demo()
 

@@ -59,14 +59,15 @@ MAX_KEYTERM_WORDS = 5
 BAD_KEYTERM_CHARS = set('<>{}[]\\')
 
 
-def find_key():
-    """(key, where it came from), or (None, None)."""
-    if os.environ.get("ELEVENLABS_API_KEY"):
-        return os.environ["ELEVENLABS_API_KEY"].strip(), "the ELEVENLABS_API_KEY variable"
+def find_key(var="ELEVENLABS_API_KEY"):
+    """(key, where it came from), or (None, None). `var` picks which key:
+    ELEVENLABS_API_KEY (transcripts) or GEMINI_API_KEY (the look pass)."""
+    if os.environ.get(var):
+        return os.environ[var].strip(), f"the {var} variable"
     for p in (Path.cwd() / ".env", KEY_FILE):
         if p.exists():
             for line in p.read_text().splitlines():
-                if line.startswith("ELEVENLABS_API_KEY="):
+                if line.startswith(f"{var}="):
                     key = line.split("=", 1)[1].strip().strip('"').strip("'")
                     if key:
                         return key, str(p)

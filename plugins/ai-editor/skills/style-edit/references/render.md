@@ -1,0 +1,128 @@
+# Render targets
+
+Laptop, Modal, GitHub Actions and Lambda detail, moved out of SKILL.md step 7.
+
+## Estimates
+
+`edit.py estimate` never renders the whole video. Laptop: seconds per frame from a 2-second benchmark
+the first time, then from the last full laptop render of 10 s or more (`~/.ai-video-editor/laptop.json`).
+Modal: from the last Modal render (`~/.ai-video-editor/modal.json`); before the first one, a guess of
+0.12 s per frame per machine and 30 s of start-up, said as a guess in the printed line.
+
+## Laptop
+
+Remotion opens one Chrome tab per CPU thread (`os.availableParallelism()`), not its default of
+half. `--draft` renders at 2/3 size (1080x1920 becomes 720x1280) to `render-draft.mp4`, and on a Mac
+encodes with the hardware H.264 encoder (VideoToolbox, 12 Mbit/s at 1080p scaled by pixel count).
+Finals stay on x264 at Remotion's default quality: the encoder Modal and GitHub use, so a final
+looks the same wherever it renders. A draft is never the video to post.
+
+Measured 2026-10-06 on an M4 Pro (14 threads), the sample take (44.2 s, 1326 frames, 1080x1920), with
+other renders running on the same machine (load average 13-24), so each figure is a range:
+
+| Setting | Render time |
+|---|---|
+| Remotion default (7 tabs) | 38-66 s, median 54 (8 runs) |
+| 14 tabs (now the default) | 32-81 s, median 49 (9 runs) |
+| 14 tabs + hardware encoder | 36-53 s, median 38 (5 runs); faster than 14 tabs in each of 3 back-to-back pairs |
+| `--draft` | 35-80 s, median 46 (9 runs) |
+
+Back to back, 14 tabs beat 7 in 4 of 8 pairs: no clear gain, and twice under the heaviest load 14
+tabs were much slower (80 s against 54 s, 80 s against 43 s). A draft is not much faster: the
+time goes on Chrome and reading the source video, not on pixels. The 4 s smoke clip renders in
+3.7-8.6 s with either tab count: Chrome start-up is most of it.
+
+## Modal
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --modal
+```
+
+Needs the setup skill's step 5b. `edit.py` bundles the renderer with the media into
+`edits/<name>/.modal-bundle/` (deleted after), then runs `scripts/modal_render.py` in the editor venv:
+
+1. The render machine is a Modal image built once in the user's account and cached: Debian, Node 22,
+   the renderer's npm packages from the laptop's `package-lock.json`, Chrome Headless Shell and
+   Remotion's Linux libraries. A plugin update that changes `package.json` rebuilds it.
+2. The bundle (source maps dropped) goes up once to the `ai-video-editor-renders` Modal Volume,
+   in a folder for this render.
+3. The frames are split into pieces of about 90 s of work each (at least 150 frames, at most 40
+   machines). Each piece renders on its own container (4 physical cores, 8 GB) with
+   `render.mjs chunk`, the same command the GitHub workflow runs, all at once (`starmap`).
+4. The pieces come back and join on the laptop with the GitHub workflow's join (`edit.py JOIN`):
+   video copied, audio cut to each piece's frames and encoded to AAC once.
+5. The render's folder on the Volume is deleted. The last line printed is JSON: wall time, upload
+   time, CPU seconds, cost, measured seconds per frame. `edit.py` saves it to
+   `~/.ai-video-editor/modal.json` for the next estimate.
+
+Cost is worked out from Modal's published rates (modal.com/pricing, read 2026-10-06): $0.0000131
+per physical core per second and $0.00000222 per GiB of memory per second, each billed on the higher
+of the request and the use. The Modal dashboard has the exact bill. Modal's billing reports API is
+for Team and Enterprise plans, so the free credit left is not shown.
+
+Checked without an account (2026-10-06): the same image built with Docker for linux/amd64 in 80 s,
+rendered frames 400-459 of the sample take there, and matched the laptop render at 38.7 dB PSNR median, the
+same as a GitHub Actions render of that video (39.9 dB); the caption sits a pixel or two over on
+Linux. The split-and-join flow on the laptop (3 pieces, the real join) gave 1326 of 1326 frames, the
+same duration, and 46.9 dB median against a straight laptop render (two laptop renders differ by
+about as much: 53 dB median, 40.7 dB worst).
+
+## GitHub Actions
+
+GitHub Actions, three steps. The repo name is the user's choice (`video-<name>` is a fine default):
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --github               # package
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-push edits/<name> --repo <repo>      # after the user says yes
+python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-fetch edits/<name> --repo <repo>    # waits, downloads
+```
+
+`render --github` writes `edits/<name>/github-render/` (renderer source, plan, workflow; no footage)
+and `edits/<name>/github-render-media.zip` (the footage; over 1.9 GB it is split into
+`github-render-media.zip.part-00`, `-01`, ... because a release file holds 2 GB). `github-push` exits 1
+with `gh auth login --web` when they are not logged in: they run that in their own terminal. It
+refuses a public repo, creates the private one, commits, uploads the media to the `media` release
+(deleting media files left from an earlier push) and starts the `render` workflow. The workflow
+renders in parallel: a `plan` job splits the video into chunks of about 2 minutes (at most 20), one
+`render` job per chunk renders its frames, and a `join` job puts them back together, so a long take
+stays under GitHub's 6-hour job limit. Re-run `github-push` after a new plan: it pushes the
+changes, replaces the media and starts a new run. `github-fetch` waits for the latest run and
+writes `edits/<name>/render-github.mp4`.
+
+## Lambda
+
+Lambda also prints what the render
+really cost. The first Lambda render sets up the function and a storage bucket in their account;
+later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
+
+## Export to another editor
+
+`export_nle.py edits/<name> --to <format>` writes `edits/<name>/export/`. Which file opens where
+(support checked 2026-10-06):
+
+| Editor | File | How | What arrives |
+|---|---|---|---|
+| Final Cut Pro 10.6+ | `<name>.fcpxml` (FCPXML 1.10) | File > Import > XML | cut, cards, titles, sound, markers |
+| DaVinci Resolve 18+ | `<name>.fcpxml`, or `<name>.xml` | File > Import > Timeline; captions: File > Import > Subtitle, the `.srt` | cut, cards, sound, markers; titles may come in plain |
+| Premiere Pro | `<name>.xml` (FCP7 XML, xmeml 4) | File > Import; captions: File > Import, the `.srt` | cut, cards, sound, markers |
+| CapCut | `CAPCUT.md` + `<name>.srt` + `media/` | by hand, about ten minutes; Captions > Add captions takes the `.srt` | everything, placed by hand |
+| Any | `<name>.edl` (CMX3600) | the editor's EDL import | the cut only |
+
+- Premiere does not read FCPXML (Adobe: it reads FCP7 XML; FCPXML needs a converter such as
+  XtoCC), so `premiere` writes xmeml.
+- CapCut has no timeline import. Its desktop project (`draft_info.json`; plain JSON on the Mac
+  in CapCut 9.5, encrypted in some recent versions elsewhere) is undocumented and changes between
+  versions, so the export writes no project file.
+- Cards: a plain capture is a PNG fitted to its box; anything that moves (an anim, a capture
+  with marks or a highlight) is rendered by the Preview composition on a transparent ground,
+  frame by frame (`render.mjs stills`), and cropped to its box as ProRes 4444 with alpha. Measured
+  on the sample take (M4 Pro, 8 cards, 30 s of cards): 11 minutes, 13-26 MB a card. Re-runs reuse a
+  card newer than the plan. Every card file is drawn at 100% (FCPXML `adjust-conform none`).
+- Not exported: zooms, the split layout's sliding window and ground.
+- Positions: FCPXML `adjust-transform position` is the offset from the frame centre in % of the
+  frame height, y up; xmeml Basic Motion `center` is the offset as a fraction of the frame, y down.
+- Checked on the sample take against the sample take: the FCPXML validates against Apple's FCPXML 1.10
+  and 1.11 DTDs (xmllint); the xmeml is well-formed (Apple publishes no DTD for it); the timeline
+  frame mapping matches cut.mp4 (42 dB PSNR at four points, against 27-31 dB one frame off). No
+  editor was installed on the test Mac except CapCut, so no file was import-tested in an editor.
+

@@ -1,13 +1,18 @@
 ---
 name: creator-teardown
-description: Reverse-engineer a short-form creator's video format from their real numbers, then plan your own video in their style. Pulls a TikTok or YouTube Shorts profile with view, like and save counts, transcribes the top videos word for word with timings, measures pace, pauses and fillers, maps each video into timed beats, and writes a teardown.md someone can film from. From the creator's measured edit it also writes an edit plan for the user's own video, every card timed to its word, as a table and an .srt to import into an editor. Use when the user names a creator or account and wants to analyse, break down or study their videos ("analyse @handle", "teardown of @handle", "what makes this creator's videos work"), pastes TikTok or YouTube links and asks what the pattern is, hands over their own video and says "edit this like @handle", or asks to install or set up creator-teardown. Not for researching a topic, and not for cutting raw footage.
+description: Reverse-engineer a short-form creator's video format from their real numbers, then plan your own video in their style. Pulls a TikTok or YouTube Shorts profile (or pasted links, Instagram reels too) with view, like and save counts, transcribes the top videos word for word with timings, measures pace, pauses and fillers, maps each video into timed beats, and writes a teardown.md someone can film from, plus a teardown.html page of their graphics, motion and sound. It also writes an edit plan for the user's own video, every card timed to its word, as a table and an .srt. Use when the user names a creator or account and wants to analyse, break down or study their videos ("analyse @handle", "teardown of @handle", "what makes this creator's videos work"), pastes TikTok, YouTube or Instagram links and asks what the pattern is, hands over their own video and says "edit this like @handle", or asks to install or set up creator-teardown. Not for researching a topic, and not for cutting raw footage.
+license: MIT
+compatibility: Python 3.9+, ffmpeg, yt-dlp and internet access. Optional ElevenLabs key for verbatim transcripts and Gemini key for the look pass. Mac, Windows or Linux.
 ---
 
 # Creator Teardown
 
-Give it a creator. Get back a teardown of their format, with every claim tied to a
-view count and every timing measured off the transcript. Optionally, a plan for
-editing the user's own video the way that creator edits.
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md.
+
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
+
+Give it a creator. Get back a teardown of their format and a page of what they do on
+screen, every claim tied to a view count and every timing measured.
 
 ## Output
 
@@ -21,8 +26,16 @@ creator-teardowns/<handle>/
   metrics.json                measured pace, pauses, fillers per video
   video/<id>.mp4              the picked videos (visual pass)
   video/<id>.visual.json      cut times, shot lengths, zoom events per video
-  sheets/<id>-NN.jpg          contact sheets: 2 frames a second, timestamps burned on
-  style.json                  pace, zoom and captions, for editing in this style
+  video/<id>.look.json        OCR lines, faces and graphics per sample (look.py)
+  video/<id>.look-ai.json     the look pass's words per video (Gemini or fallback)
+  video/<id>.graphics.json    every graphic: box, kind, entrance, exit, hold, motion
+  video/<id>.sound.json       sound effects and music
+  graphics/                   one crop per graphic + heatmap.png
+  sheets/<id>.jpg             one 3 x 3 sheet per video, read only in the fallback
+  style.json                  every measured number, for editing in this style
+  look.md                     the look in under 48 lines: what Claude reads
+  teardown.html               THE PAGE: what the user looks at (report.py)
+  report.json                 hook, winners against control, AI tells
   teardown.md                 THE ANALYSIS
   events.json                 card events, when the card pass ran
 edit-plans/<name>/
@@ -39,34 +52,35 @@ Run it before the first teardown in a session. On Windows, use `py` wherever the
 commands say `python3`.
 
 `Ready.` means go. If it prints `Not ready`, or the user asks to install or set up
-the skill, follow `${CLAUDE_SKILL_DIR}/references/setup.md`. The ElevenLabs key is
-optional. Never ask for it in the chat: the user saves it with `setkey` in their
-own terminal.
+the skill, follow `${CLAUDE_SKILL_DIR}/references/setup.md`. The ElevenLabs and
+Gemini keys are optional. Never ask for either in the chat: the user saves them with
+`setkey` (`setkey --gemini`) in their own terminal.
 
 `VPY` below is the tool venv's Python: `~/.ai-video-editor/venv/bin/python`
 (`%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe` on Windows).
 
 ## Pipeline
 
+### Step 0: Ask, once
+
+1. **Which creators?** One handle, several, or pasted links. Several is normal: people
+   like one creator's captions and another's pace.
+2. With more than one: **which part from whom?** Captions, pace (cuts, zooms, motion),
+   visuals (graphics, face framing, cards). Or a weighting ("mostly Alice"). "Not sure
+   yet" is fine: ask again after Step 3b, with each creator's `look.md` to compare.
+
 ### Step 1: Get the videos
 
-**Whole profile (TikTok or YouTube Shorts, free):**
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" list <handle> --platform tiktok --limit 40
-python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" list <handle> --platform youtube --limit 40
+python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" list <handle> --platform tiktok --limit 40   # or youtube
+python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" list <name> --urls picks.txt   # pasted links, one a line
 ```
-Prints a ranked table (views, ×median, duration) and writes `videos.json`.
-`*` marks videos at 3× or more of that creator's own median.
+Prints a ranked table (views, x median) and writes `videos.json`; `*` marks 3x the median.
 
-**Hand-picked links** (the user pastes the videos they like):
-```bash
-# one URL per line
-python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" list <name> --urls picks.txt
-```
-
-**Instagram:** yt-dlp cannot pull Instagram. It is login-walled even with browser
-cookies. Check whether the creator posts the same videos to TikTok or YouTube and
-use that account.
+**Instagram:** profiles are login-walled, single reel links are not. Ask the user to paste
+the reel links (10 or more, their best and some average ones), write them one per line to
+`picks.txt`, and run `list <name> --urls picks.txt`. Instagram hides views from yt-dlp, so
+the ranking and the control group use likes; say so in the teardown.
 
 ### Step 2: Download and transcribe the winners and a control group
 
@@ -81,13 +95,9 @@ exact videos. The median ones are the control: a move that appears in the 500K
 video *and* the 3K video is that creator's habit, not the reason the 500K one
 worked. Keep at least 2.
 
-**Whisper is the default and free.** It runs on this computer off the downloaded
-video. **Scribe is better for the voice profile when a key exists**: it keeps every
-filler, false start and repetition, which Whisper partly drops. With a key saved,
-`transcribe` uses Scribe automatically ($0.22 per hour of audio; tell the user the
-estimate before more than 10 videos). `--engine whisper|scribe` overrides. When the
-teardown's voice profile leans on filler counts and Whisper made the transcripts,
-say so in the teardown.
+Whisper (free, local) is the default; with an ElevenLabs key `transcribe` uses Scribe,
+which keeps every filler ($0.22 an hour of audio; give the estimate before 10+ videos).
+If filler counts lean on Whisper transcripts, say so in the teardown.
 
 ### Step 3: Measure, then analyse
 
@@ -95,9 +105,8 @@ say so in the teardown.
 python3 "${CLAUDE_SKILL_DIR}/scripts/metrics.py" <handle>
 ```
 
-Writes `metrics.json`: WPM overall and per third, time to first word, sentence length,
-pause rate, longest pause, filler rate, you/I/we counts, repeated phrases. All computed
-off the word timestamps, never estimated.
+Writes `metrics.json` (WPM per third, pauses, fillers, sentence length, you/I/we,
+repeated phrases), all off the word timestamps.
 
 Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its passes:
 
@@ -112,63 +121,98 @@ Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its pas
    `${CLAUDE_SKILL_DIR}/references/edit-plan.md`. `scripts/strip.py` needs ffmpeg,
    `numpy` and `pillow`.
 
-Do not skip the timings. "Hook, then list, then close" is not a format. "Hook lands by
-0:03 and runs 14 words, items are 8–11s each, close is one sentence" is a format
-someone can film.
+Do not skip the timings: "hook lands by 0:03 and runs 14 words, items are 8-11 s each"
+is a format someone can film; "hook, then list, then close" is not.
 
-### Step 3b: The visual pass
+### Step 3b: The visual pass (measured, no images for you to read)
 
 ```bash
 $VPY "${CLAUDE_SKILL_DIR}/scripts/visual.py" measure <handle>
+$VPY "${CLAUDE_SKILL_DIR}/scripts/look.py" measure <handle>
+$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle>
 ```
 
-Per video it finds every cut (frame differencing, so locked-off jump cuts count),
-shot lengths, and zoom events (a punch is an instant scale step, a push is a slow
-one). It writes `video/<id>.visual.json`, contact sheets in `sheets/`, and merges
-`pace` and `zoom` into `style.json`. Run it after `transcribe`, so `pace.wpm` and
-`pace.max_pause_s` have transcripts to read. Those numbers come from the script.
-Never edit them by hand.
+Run them after `transcribe` (`look.py` matches OCR text to the spoken words).
 
-Then fill the `captions` block yourself. Read 2 or 3 sheets per video, from
-different videos: the first sheet (the hook) and one from the middle. Each tile
-is one frame, its time burned top left. To check a colour or font closely, pull
-one full frame: `ffmpeg -ss <t> -i video/<id>.mp4 -frames:v 1 frame.png`, then read it.
+1. `visual.py`: cuts and their kinds, shot lengths, zooms, pans and shake.
+2. `look.py`: OCR 3 frames a second and YuNet faces: the captions (place, size, words,
+   case, colours, weight, entrance), face framing, graphics share, palette, motion
+   personality. About 40 s a video.
+3. `gemini.py look`: Gemini Flash-Lite watches the 5 most-viewed videos (about 5,600
+   tokens each) and names font, graphics style, transitions, what is not generic. Never
+   a number.
 
-Write into `style.json`, keeping every other key:
+**Then read `look.md` (under 48 lines). Do not open frames or sheets.** Every
+field is in `${CLAUDE_SKILL_DIR}/references/look-pass.md`. Numbers in `style.json`
+come from code; never edit them by hand. Where `look.md` and the model's words
+disagree (say `motion: punchy` measured, `smooth` named), the measured one wins
+and the teardown says both.
 
-```json
-"captions": {
-  "present": true,
-  "words_per_caption": 3,
-  "y_pct": 62,
-  "size_pct": 6.5,
-  "case": "lower",
-  "font_match": "Montserrat",
-  "weight": 800,
-  "color": "#FFFFFF",
-  "highlight_color": "#FFE14D",
-  "stroke": true,
-  "box": false,
-  "animation": "pop"
-}
+**No Gemini key** (`gemini.py look` exits 2): offer the free key once
+(`references/setup.md` step 4). If the user skips it, run the fallback: one Agent
+call with `model: "haiku"` that reads `sheets/<id>.jpg` for each video (one 3 x 3
+sheet each, made by `visual.py`) and writes `video/<id>.look-ai.json` per
+`gemini.py prompt`. Exact brief in `references/look-pass.md`. Then
+`$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" merge <handle>`.
+
+**No OCR engine** (doctor says optional): `captions` stays unmeasured and look.md
+says so. Install it (`doctor` prints the line) rather than reading sheets yourself.
+
+### Step 3c: The deep pass and the page
+
+```bash
+$VPY "${CLAUDE_SKILL_DIR}/scripts/graphics.py" measure <handle>
+$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" kinds <handle>
+$VPY "${CLAUDE_SKILL_DIR}/scripts/sound.py" measure <handle>
+$VPY "${CLAUDE_SKILL_DIR}/scripts/report.py" build <handle>
 ```
 
-- `present`: false if the creator burns in no captions. Then the rest can be null.
-- `words_per_caption`: the usual number of words on screen at once.
-- `y_pct`: the caption's vertical centre, as % of frame height from the top.
-- `size_pct`: cap height of the text as % of frame height.
-- `case`: `lower`, `upper` or `sentence`.
-- `font_match`: the closest **Google Font** (free to ship). Name a real one, such as
-  Montserrat, Poppins, Inter, Roboto, Anton, Bebas Neue or TikTok Sans. Never a paid font.
-- `weight`: 400 to 900.
-- `color`, `highlight_color`: hex. `highlight_color` is the colour of the word being
-  spoken, or null if no word is highlighted.
-- `stroke`: an outline or heavy shadow around the letters. `box`: a filled box behind them.
-- `animation`: `pop` (each caption scales in), `word_highlight` (the spoken word
-  changes colour), `slide` or `none`. Compare consecutive tiles to tell them apart.
+Run them after Step 3b (graphics.py masks the speaker with look.py's faces). They add every
+graphic (cropped, its kind, where it sits, how it enters and exits as a fitted GSAP ease),
+cut kinds and camera moves (visual.py), sound effects and music, the first 3 seconds of each
+video, winners against the control group, and an AI-tell scan of the creator's own look.
+Fields, methods, ceilings and cost: `${CLAUDE_SKILL_DIR}/references/teardown-page.md`.
+No Gemini key: `gemini.py kinds` exits 2; the kinds stay the code's guess, or run the haiku
+fallback in that reference.
 
-Judge only what the sheets show. If two videos disagree, take what most of them do
-and say so in the teardown.
+Then open `creator-teardowns/<handle>/teardown.html` for the user (`open` on a Mac, `start` on
+Windows, `xdg-open` on Linux) and offer to publish it as an artifact. Do not read the page or
+its images yourself: look.md has the numbers. Tell the user in two or three lines what the
+winners do differently (the `Winners:` lines in look.md, with n) and any BAN-level AI tell
+in their look.
+
+Then ask in the question box (the page only shows the evidence; it has nothing to tick), one
+multi-select question: "Which parts of @<handle> should your edit copy?" Options: captions,
+pace, graphic kinds, entrance motion, layout, sound (at most 4 options a question: split into two
+questions if needed), each option's description one measured line from look.md (e.g. "slides in
+0.25 s with overshoot"). If any BAN tell sits
+in a part they pick, say which before they confirm. Save the answer:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/editplan.py" blend <handle>-mine --from <handle> \
+    --take captions,pace,graphics,entrances,layout,sound    # only the parts picked
+```
+
+style-edit reads `creator-teardowns/<handle>-mine/style.json`; a part left out uses its
+default.
+
+### Step 3d: Several creators (when the user named more than one)
+
+Run Steps 1 to 3b for each creator into its own folder; each keeps its own
+`style.json`. Then show the user each `look.md` side by side (5 lines each: pace,
+motion, captions, face, graphics) and ask the two questions in Step 0 if they are
+still open. Blend:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/editplan.py" blend <name> --from alice,bob \
+    --captions alice --pace bob --visuals bob        # or --weights alice=0.7,bob=0.3
+```
+
+Writes `creator-teardowns/<name>/style.json` (and its `look.md`). A named owner gives
+its whole part; otherwise numbers are averaged by weight and words come from the
+heaviest. Parts: `captions`; `pace` = pace, zoom, motion; `visuals` = graphics, face,
+look, card events. `--take` (Step 3c) works on a blend too. style-edit takes the blend like
+any creator.
 
 ### Step 4: Write the teardown
 
@@ -185,7 +229,7 @@ Ask whether the format is worth keeping. If yes, follow
 
 When the user hands over their own video, follow
 `${CLAUDE_SKILL_DIR}/references/edit-plan.md`. It needs the creator's `events.json`
-from the visual pass. It plans cards against the user's words; it does not render.
+from the visual pass.; it does not render.
 
 ## Hard rules
 
@@ -197,6 +241,11 @@ from the visual pass. It plans cards against the user's words; it does not rende
   cannot separate the format from the creator's habits.
 - **Never invent a transcript line**, or a stat or quote for a card. If transcription
   failed, retry with `--ids`, then say it failed.
-- **Never ask for the ElevenLabs key in the chat.**
+- **Never ask for the ElevenLabs or Gemini key in the chat.**
 - **Measured numbers only in style.json.** `pace` and `zoom` come from `visual.py`;
-  `captions` comes from what the sheets show.
+  `captions`, `face`, `graphics` and `motion` from `look.py`; only words (`look`,
+  `font_match`) from the model.
+- **Read look.md, not frames.** Open a frame only to settle a question look.md
+  cannot answer, and say which one. The user gets teardown.html; Claude gets look.md.
+- **Winners against control: say n.** Never call a difference proven; "every winner"
+  only means no overlap in this sample.

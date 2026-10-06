@@ -8,6 +8,7 @@ Commands:
 
   setkey      optional. Saves an ElevenLabs key once, for every folder. Paste it
               when asked (it stays hidden), or pipe it in: pbpaste | ... setkey
+              `setkey --gemini` saves a Gemini key the same way (the look pass).
 
   list        yt-dlp --flat-playlist over a profile -> videos.json + a ranked
               table on stdout. No downloads, no API key, no cost.
@@ -25,7 +26,7 @@ start, which makes the voice profile better. --engine picks one.
 
 Usage:
   python3 scripts/fetch.py doctor
-  python3 scripts/fetch.py setkey
+  python3 scripts/fetch.py setkey [--gemini]
   python3 scripts/fetch.py list <handle> [--platform tiktok] [--limit 40]
   python3 scripts/fetch.py transcribe <handle> [--top 8] [--control 2] [--ids ID,ID]
                                                 [--engine whisper|scribe]
@@ -92,15 +93,25 @@ def fix(mac, win, linux):
     return {"Darwin": mac, "Windows": win}.get(OS, linux)
 
 
+def reach(v):
+    """Views, or likes where the platform hides views (single Instagram reels via yt-dlp)."""
+    return v.get("view_count") or v.get("like_count") or 0
+
+
+def platform_of(urls):
+    hosts = {("instagram" if "instagram.com" in u else "youtube" if "youtu" in u else "tiktok") for u in urls}
+    return hosts.pop() if len(hosts) == 1 else "mixed"
+
+
 def pick(videos, median, top, control):
     """The `top` most-viewed, plus the `control` videos closest to the median.
 
     The control group is what separates a creator's habits from the reason a
     video won: a move in the winner AND the median videos is a habit.
     """
-    ranked = sorted(videos, key=lambda v: v.get("view_count") or 0, reverse=True)
-    rest = [v for v in ranked[top:] if v.get("view_count")]
-    rest.sort(key=lambda v: abs(v["view_count"] - median))
+    ranked = sorted(videos, key=reach, reverse=True)
+    rest = [v for v in ranked[top:] if reach(v)]
+    rest.sort(key=lambda v: abs(reach(v) - median))
     return ranked[:top], rest[:control]
 
 
@@ -178,6 +189,26 @@ def cmd_doctor(args):
             "Scribe v2, which keeps every filler.",
             f"{PY} \"{SELF}\" setkey   (run it in a terminal window, not in the Claude chat)")
 
+    # The look pass: OCR reads the captions, Gemini names the font and graphics style.
+    if VENV_PY.exists():
+        ocr = "ocrmac" if OS == "Darwin" else "rapidocr_onnxruntime"
+        alt = "" if OS == "Darwin" else " or rapidocr"
+        has = run([str(VENV_PY), "-c", f"import {ocr}"]).returncode == 0 or (
+            OS != "Darwin" and run([str(VENV_PY), "-c", "import rapidocr"]).returncode == 0)
+        pkg = "ocrmac" if OS == "Darwin" else "rapidocr onnxruntime"
+        if has:
+            row("ok", f"{ocr}{alt}: captions are measured, not read off images")
+        else:
+            row("optional", f"no {ocr}{alt}. Without it captions fall back to frame sheets.",
+                f"\"{VENV_PY}\" -m pip install {pkg}")
+    gkey, gwhere = find_key("GEMINI_API_KEY")
+    if gkey:
+        row("ok", f"Gemini key, from {gwhere}. The look pass runs on Gemini Flash-Lite.")
+    else:
+        row("optional", "no Gemini key. The look pass falls back to one frame sheet per "
+            "video. A free key: aistudio.google.com/apikey",
+            f"{PY} \"{SELF}\" setkey --gemini   (in a terminal window, not in the Claude chat)")
+
     print()
     if required_missing:
         print(f"Not ready: {required_missing} thing{'s' if required_missing > 1 else ''} to fix.")
@@ -185,18 +216,28 @@ def cmd_doctor(args):
     print("Ready.")
 
 
+def save_key(var, key, path=None):
+    """Writes var=key into the key file, keeping the other keys in it."""
+    path = path or KEY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    keep = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
+            if ln.strip() and not ln.startswith(f"{var}=")]
+    path.write_text("\n".join(keep + [f"{var}={key}"]) + "\n")
+
+
 def cmd_setkey(args):
     import getpass
+    name, var, where = (("Gemini", "GEMINI_API_KEY", "aistudio.google.com/apikey") if args.gemini
+                        else ("ElevenLabs", "ELEVENLABS_API_KEY",
+                              "Developers > API Keys on elevenlabs.io"))
     if sys.stdin.isatty():
-        key = getpass.getpass("Paste your ElevenLabs API key and press Enter (it stays hidden): ")
+        key = getpass.getpass(f"Paste your {name} API key and press Enter (it stays hidden): ")
     else:
         key = sys.stdin.readline()
     key = key.strip()
     if not re.fullmatch(r"[A-Za-z0-9_\-]{20,}", key):
-        sys.exit("That doesn't look like an ElevenLabs key. Copy it again from "
-                 "Developers > API Keys on elevenlabs.io.")
-    KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    KEY_FILE.write_text(f"ELEVENLABS_API_KEY={key}\n")
+        sys.exit(f"That doesn't look like a {name} key. Copy it again from {where}.")
+    save_key(var, key)
     try:
         KEY_FILE.chmod(0o600)  # readable by you only
     except OSError:
@@ -219,7 +260,14 @@ def cmd_list(args):
             sys.exit(f"no urls in {args.urls}")
         url = f"{len(targets)} hand-picked urls"
         print(f"pulling {url} ...", file=sys.stderr)
-        r = run(ytdlp() + ["--dump-json", "--no-warnings", *targets])
+        # -i: one private or removed post must not stop the rest.
+        r = run(ytdlp() + ["--dump-json", "--no-warnings", "-i", *targets])
+        args.platform = platform_of(targets)
+        bad = [ln for ln in r.stderr.splitlines() if ln.startswith("ERROR")]
+        if bad:
+            print(f"{len(bad)} link(s) failed (private, removed, or login-walled):", file=sys.stderr)
+            for ln in bad[:10]:
+                print("  " + ln[:200], file=sys.stderr)
     else:
         url = PROFILE_URL[args.platform].format(h=handle)
         print(f"pulling {args.limit} from {url} ...", file=sys.stderr)
@@ -230,9 +278,9 @@ def cmd_list(args):
         hint = ("\n\nUpdate yt-dlp and try again, or pass links to single videos "
                 "with --urls. Run doctor for the update command.")
         if args.platform == "instagram":
-            hint = ("\n\nInstagram is not scrapable by yt-dlp (login-walled even "
-                    "with browser cookies). Most creators cross-post: try their "
-                    "TikTok or YouTube handle instead.")
+            hint = ("\n\nInstagram profiles are login-walled for yt-dlp. Single reel links "
+                    "work: paste them one per line into a file and run `list <name> --urls "
+                    "file`. Or use the creator's TikTok or YouTube handle.")
         sys.exit(f"yt-dlp returned nothing.\n{r.stderr.strip()[:800]}{hint}")
 
     vids = []
@@ -252,23 +300,27 @@ def cmd_list(args):
     if not vids:
         sys.exit(f"parsed 0 videos.\n{r.stderr.strip()[:800]}")
 
-    views = [v["view_count"] for v in vids if v.get("view_count")]
+    by = "views" if any(v.get("view_count") for v in vids) else "likes"
+    views = [reach(v) for v in vids if reach(v)]
     median = statistics.median(views) if views else 0
     for v in vids:
-        vc = v.get("view_count") or 0
+        vc = reach(v)
         v["vs_median"] = round(vc / median, 2) if median else None
         v["outlier"] = bool(median and vc >= 3 * median)
 
-    vids.sort(key=lambda v: v.get("view_count") or 0, reverse=True)
+    vids.sort(key=reach, reverse=True)
     payload = {"handle": handle, "platform": args.platform, "profile_url": url,
-               "count": len(vids), "median_views": median, "videos": vids}
+               "count": len(vids), "median_views": median, "ranked_by": by, "videos": vids}
+    if by == "likes":
+        print("No view counts on these links (Instagram hides them from yt-dlp): ranked by likes.",
+              file=sys.stderr)
     (outdir / "videos.json").write_text(json.dumps(payload, indent=2))
 
-    print(f"\n{len(vids)} videos - median {median:,.0f} views\n")
-    print(f"{'views':>10}  {'xmed':>5}  {'sec':>4}  id")
+    print(f"\n{len(vids)} videos - median {median:,.0f} {by}\n")
+    print(f"{by:>10}  {'xmed':>5}  {'sec':>4}  id")
     for v in vids[:25]:
         flag = " *" if v["outlier"] else "  "
-        print(f"{(v.get('view_count') or 0):>10,}  {str(v['vs_median'] or '-'):>5}"
+        print(f"{reach(v):>10,}  {str(v['vs_median'] or '-'):>5}"
               f"  {str(v.get('duration') or '-'):>4}  {v['id']}{flag}")
     print(f"\n-> {outdir / 'videos.json'}   (* = >=3x median)")
 
@@ -411,6 +463,22 @@ def demo():
     assert [v["id"] for v in control] == ["2", "3"], control
 
     assert slug("@Some.Creator") == "some.creator"
+
+    # Instagram links carry likes, not views: rank and pick on likes.
+    ig = [{"id": "a", "like_count": 900}, {"id": "b", "like_count": 100}, {"id": "c", "like_count": 120}]
+    top, control = pick(ig, 120, 1, 1)
+    assert [v["id"] for v in top] == ["a"] and [v["id"] for v in control] == ["c"], (top, control)
+    assert platform_of(["https://www.instagram.com/reel/X/", "https://instagram.com/p/Y"]) == "instagram"
+    assert platform_of(["https://www.tiktok.com/@a/video/1", "https://youtu.be/x"]) == "mixed"
+
+    # Saving one key keeps the other.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / ".env"
+        save_key("ELEVENLABS_API_KEY", "a" * 24, f)
+        save_key("GEMINI_API_KEY", "b" * 24, f)
+        save_key("GEMINI_API_KEY", "c" * 24, f)
+        assert f.read_text() == f"ELEVENLABS_API_KEY={'a' * 24}\nGEMINI_API_KEY={'c' * 24}\n"
     print("ok")
 
 
@@ -420,7 +488,9 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
-    sub.add_parser("setkey").set_defaults(fn=cmd_setkey)
+    p = sub.add_parser("setkey")
+    p.add_argument("--gemini", action="store_true", help="save a Gemini key instead")
+    p.set_defaults(fn=cmd_setkey)
 
     p = sub.add_parser("list")
     p.add_argument("handle", help="used to name the output folder")

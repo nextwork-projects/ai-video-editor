@@ -1,0 +1,13 @@
+{
+  "$schema": "https://cursor.com/schemas/cursor-plugin/plugin.json",
+  "name": "ai-video-editor",
+  "displayName": "AI Video Editor",
+  "description": "Measure how a short-form creator edits, then cut and edit your own talking-head video in that style: retakes and pauses out, captions, zooms and cards rendered with Remotion.",
+  "version": "1.1.1",
+  "author": { "name": "NextWork", "url": "https://nextwork.ai" },
+  "homepage": "https://github.com/nextwork-projects/ai-video-editor",
+  "repository": "https://github.com/nextwork-projects/ai-video-editor",
+  "license": "MIT",
+  "keywords": ["video", "video-editing", "captions", "jump-cut", "remotion", "creator", "tiktok", "youtube-shorts"],
+  "skills": ["./plugins/ai-editor/skills/", "./plugins/creator-teardown/skills/"]
+}

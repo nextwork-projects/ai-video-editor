@@ -1,324 +1,300 @@
 ---
 name: style-edit
-description: Edits the user's cut video in a creator's measured style. Takes cut.mp4 and words.json from the cut skill plus a creator's style.json from creator-teardown, plans the captions and zooms to match that creator, adds its own visuals timed to the spoken word (real screenshots of what is named, built animations for numbers, steps and comparisons, plus any images the user gives), shows stills for approval, then renders the finished video with Remotion on the laptop, on GitHub Actions (free, in a private repo) or on the user's own AWS Lambda. Output is 9:16 or 16:9. Use when the user says "edit this in the style of @creator", "make it look like <creator>'s videos", "add captions and zooms", "style my video", "add my images to the video", "render the edit", or has a cut and a style.json and wants the finished video. Runs after cut. Not for cutting mistakes out (that is cut) and not for measuring a creator (that is creator-teardown).
+description: Edits the user's cut video in a creator's measured style. Takes cut.mp4 and words.json from the cut skill plus a creator's style.json from creator-teardown, plans the captions and zooms to match that creator, adds its own visuals timed to the spoken word (the user's own images, real screenshots, posts and logos of what is named, the line marked on the real page; no type cards, stock icons or emoji), shows stills for approval, then renders the finished video with Remotion on the laptop, on Modal (cloud), on GitHub Actions (free, in a private repo) or on the user's own AWS Lambda. Output is 9:16 or 16:9. Use when the user says "edit this in the style of @creator", "make it look like <creator>'s videos", "add captions and zooms", "style my video", "add my images to the video", "render the edit", or has a cut and a style.json and wants the finished video. Runs after cut. Not for cutting mistakes out (that is cut) and not for measuring a creator (that is creator-teardown).
+license: MIT
+compatibility: Python 3.9+, ffmpeg, Node 20+ and the Remotion renderer the setup skill installs; internet for captures. Optional Modal, gh or AWS account for cloud renders. Runs from the full ai-editor plugin folder (uses its lib/ and remotion/).
 ---
 
 # Style edit
 
-A cut video and a creator's style in. The finished edit out: captions, zooms and image cards
-timed to the words, in that creator's look.
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
-All paths are relative to the folder Claude Code was started in. File shapes are in the repo's
-`docs/CONTRACTS.md`. Run the scripts with `python3` on Mac and Linux, `py` on Windows.
+A cut video and a creator's style in. The finished edit out: captions, zooms, real captures and
+motion scenes timed to the words, in that creator's look and the user's brand.
+
+Paths are relative to the folder Claude Code was started in. File shapes:
+`references/contracts.md`; templates, look, transitions and marks: `references/motion.md`; what to
+put on screen: `references/visuals.md`. Run the scripts with `python3` on Mac and Linux, `py` on Windows.
+`S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ```
-edits/<name>/cut.mp4 + words.json      (from the cut skill)
-creator-teardowns/<handle>/style.json  (from creator-teardown)
-edits/<name>/visuals.json              (Claude writes it: screenshots + animations)
-edits/<name>/images.json + images/     (the user's images, plus the screenshots)
-   -> plan.json -> stills/ -> render.mp4
+edits/<name>/cut.mp4 + captions.json        (from the cut skill)
+edits/<name>/style.json                     (start skill: the profile's creators blended)
+  or creator-teardowns/<handle>/style.json  (one creator, from creator-teardown)
+~/.ai-video-editor/profile.json             (start skill: brand kit, names, assets, avoid, sound)
+edits/<name>/beats.json -> visuals.json -> images/ + images.json -> plan.json -> stills/ -> render.mp4
 ```
 
-## 0. Read the user's taste
+## 0. Read the user's taste and profile
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" show
 ```
 
-Follow every rule in it; the scripts already read its settings. When the user reacts to the result
-("too slow", "captions too small"), save it with the taste skill before redoing the edit.
+Follow every taste rule; the scripts already read the settings. When the user reacts to the result
+("too slow", "captions too small"), save it with the taste skill before redoing the edit. No
+profile yet and the user wants more than a quick edit: run the `start` skill's intake first.
 
 ## 1. Check the inputs
 
-- **No style.json?** Ask which creator. Run creator-teardown in quick mode on them first.
-- **No cut.mp4 or words.json?** Run the cut skill on their raw take first. It asks whether to stop
-  at the cut for approval or carry straight on into this skill.
-- **Layout?** Ask overlay or split (vertical only). **Overlay** (default): the speaker fills the
-  frame and visuals float in the space above their head, so they stay small. **Split**: while a
-  visual is up it owns the top half of the frame on a plain ground and the speaker sits in a
-  rounded window underneath, framed so the whole head shows; with no visual up the speaker has the
-  whole frame again, and the window slides between the two. Split gives visuals about twice the
-  room. Pass `--layout split` to plan.py (or set `"layout": {"mode": "split", "ground": "#F4F4F2"}`
-  in style.json; `ground` is the panel colour, `seam` where it ends, default 50% of the height).
-- **Images?** Ask if they want any image on screen, and on which word. Put each file in
-  `edits/<name>/images/` and write `edits/<name>/images.json`:
-
-```json
-[{"src": "images/dashboard.png", "word": "dashboard"}]
-```
-
-Optional per image: `"nth": 2` (the second time the word is said), `"box": [x, y, w, h]` in
-percent of the frame, `"entrance"` (`pop`, `slide`, `fade`, `scale`), `"hold_s"`.
-Transparent PNG and Lottie `.json` files both work.
+- **No style.json?** With a profile: `profile.py style edits/<name>`. Without: ask which creator and
+  run creator-teardown in quick mode first. No creator at all is fine: the editorial defaults.
+- **No cut.mp4 or captions?** Run the cut skill first.
+- **The user's images:** everything in the profile's `assets_dir` that fits a line, plus anything
+  they hand over, goes in `edits/<name>/images/` and `images.json`:
+  `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `hold_s`,
+  `entrance`; transparent PNG and Lottie `.json` work).
 
 ## 2. Captions text
 
-Captions come from `edits/<name>/cut.transcript.json`: the cut skill's verify step transcribed the
-finished cut itself, so its words and times match what plays. (`words.json` is the raw take's
-transcript moved onto the cut, and carries the raw take's mishearings.) If it is missing, run the
-cut skill's verify step first.
-
-Copy it to `edits/<name>/captions.json` and proofread it. Fix only `text`, never `start`/`end`:
-- Names and products the transcriber misheard ("cloud" for Claude). Use the script, the video's
-  topic and how the speaker says it elsewhere.
-- A filler heard as a word ("uh" written as "and"): delete that entry.
-Use captions.json in place of words.json from here on.
+Copy `edits/<name>/cut.transcript.json` (the verify step's transcript of the finished cut) to
+`captions.json` and proofread it. Fix only `text`, never times: names the transcriber misheard
+(use the profile's `names`), fillers heard as words (delete them). Use captions.json from here on.
 
 ## 3. Visuals
 
-Add visuals on your own, even when the user gave no images. Read `edits/<name>/captions.json` and write
-`edits/<name>/visuals.json`. Every beat anchors to a word as it appears in captions.json (the
-transcript may misspell a name: anchor on its spelling, not the real one).
+**Read `references/visuals.md` first.** The anti-generic rules and the order of what goes on screen
+are there; plan.py enforces them.
 
-```json
-[{"word": "notion", "nth": 1, "kind": "capture", "url": "https://www.notion.com", "clip": [0, 80, 900, 420],
-  "note": "the product he names"},
- {"word": "faster", "nth": 1, "kind": "anim", "type": "counter",
-  "props": {"from": 0, "to": 10, "suffix": "x", "label": "faster"}}]
-```
+1. **Propose:** `python3 "$S/route.py" beats edits/<name>` splits the transcript into sentences,
+   marks the profile's named things, and with a TypeSafe key Jev picks one route per sentence
+   (`none`, `capture:shot|browser|sticker`, `post`, `logo`, `logo_cluster`, `chat`, `terminal`,
+   `toasts`, `side_by_side`, `video_card`) into beats.json. Without a key the picks are null: decide them yourself from the same file. Most
+   sentences get nothing.
+2. **Real things first:** a named product or doc becomes a `capture` (with `marks` found by text),
+   a quoted post a `post`, an app an `app`, a video a `youtube`, a repo a `github`, a brand in
+   passing a `logo`.
+3. **Fill the overlays:** for the overlay picks, write only the props (visuals.md "Template-filler
+   contract"). Hand it to the `template-filler` agent (haiku) when available, else write them. Only
+   words and numbers the speaker said. There are no type cards.
+4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube
+   and GitHub images into `images/`, hides cookie banners, measures marks. Look at every capture.
 
-- **capture** for a NAMED thing: a product, website, doc, post. The real page, cropped to the part
-  that is the evidence. `"clip": [x, y, w, h]` in page px, or `"selector": "css"`. `"width"` sets the
-  viewport (default 1000): a narrow one (400-550) reflows docs so their text reads on a phone.
-  `"highlight": "the exact sentence"` (copied from the page, as it reads there) makes the card open
-  on the clip, travel down the page to that sentence and sweep a highlighter over it. Use it on
-  docs and articles, where one sentence is the evidence. Give the card `hold_s` of 3 s or more so the
-  sweep finishes. capture.mjs stops with an error if the sentence is not on the page.
-- **logo** every time a brand or product is named (`"brand": "claude"`, plus `"domain": "example.com"`
-  for brands Simple Icons lacks). A small logo tile pops above the caption for 1.2 s (split: the logo
-  gets the panel to itself for 1.5 s, and is skipped while a bigger visual is up). Logos run in
-  their own lane, so one can land while a bigger card is up. Mark a named brand with a logo even
-  when it also gets a capture; skip generic words ("email", "AI").
-- **anim** for an EXPLAINING beat, one idea per card. Only words and numbers the speaker said. Never
-  invent a figure. **Prefer a scene** (`flow`, `race`, `pile`): logos and icons that move, each part
-  landing on its own word. A text card (`counter`, `steps`, `versus`, `keyword`) is the last resort:
-  at most one or two per video, for a line with nothing to picture (a call to action).
-
-Scenes. A part is `{"icon": "mail"}` (any name on lucide.dev/icons), `{"logo": "claude"}` (plus
-`"domain"` for brands Simple Icons lacks) or `{"src": "images/x.png"}`, with an optional 1-2 word
-`label` and a `"word"` to land on (as captions.json spells it, the first time it is said once the
-card is up; `"nth"` for a later time). `"off_word"` dims a part again. A label can swap on words:
-`[{"text": "task"}, {"text": "small task", "word": "small"}]`. Set `hold_s` so the card is still up
-on its last word (plan.py warns when it is not).
-
-| scene | shows | props |
-|---|---|---|
-| `flow` | a process or a decision: nodes joined by arrows that draw in, each lighting on its word; the last node can split to 2-3 | `nodes`, optional `split`, `tag` |
-| `race` | "X times faster/cheaper": bars led by logos grow to the values said, the winner counts up | `rows` (`value`, optional `from`, `label`), `prefix`, `suffix` |
-| `pile` | volume: `count` icons fly from a `source` into 1-3 `stacks` | `icon`, `count`, `source`, `stacks`, `word` (when they start) |
-
-Every scene takes `tag: {"text": "< 5¢", "word": "cents"}`, a small badge for the one number said.
-
-```json
-{"word": "Before", "nth": 1, "kind": "anim", "type": "flow", "hold_s": 10,
- "props": {"nodes": [{"icon": "list-todo", "label": "task", "word": "task"},
-                     {"logo": "typesafe", "domain": "typesafe.ai", "label": "jev", "word": "Jev"}],
-           "split": [{"logo": "claude", "label": "haiku", "word": "Haiku", "off_word": "harder,"},
-                     {"logo": "claude", "label": "opus", "word": "Opus"}]}}
-```
-
-Text cards:
-
-| type | props |
-|---|---|
-| `counter` | `to`, optional `from`, `prefix`, `suffix`, `label`, `decimals` (counts up to what was said) |
-| `steps` | `items`: 2-4 short lines, landing one by one |
-| `versus` | `a`, `b`, optional `a_label`, `b_label` |
-| `logo` | `src` (an image in `images/`), `label` |
-| `keyword` | `text`, optional `sub` |
-
-All kinds take `nth` (always set it), `box`, `hold_s`, `entrance`. About one card every 4-6 s,
-never two cards at once, none in the first second unless it is the hook's subject. Leave `hold_s` out to
-use the creator's measured hold.
-
-```bash
-node "${CLAUDE_SKILL_DIR}/scripts/capture.mjs" edits/<name>
-```
-
-Fetches every logo into `images/logo-<brand>.svg|png` (Simple Icons, CC0, then the site's own icon)
-and every scene icon into `images/icon-<name>.svg` (Lucide, ISC),
-and screenshots every capture beat into `images/capture-*.png` and lists them in `images.json` (your
-own images there are kept). It uses the browser the renderer installs, so run `edit.py stills` once
-first on a fresh machine. Look at every capture: if a cookie banner or the wrong part of the page
-shows, change `clip`, `selector` or `wait_ms` and run it again.
-
-Nothing lands where the app draws its own buttons. On vertical video, `plan.py` keeps every card and
-the captions out of the top 14% (the top bar), the right 14% (the like and share rail) and the
-bottom 22% (the username and description), and caps a card at the top at 22% tall so it stays off
-the head. In split, every visual fills the top panel between the top 14% and the seam instead.
+Pacing: about one card every 4-6 s, never two at once, and leave the speaker alone between runs of
+scenes. On vertical every explaining card is a full-frame scene (or sits in the split panel),
+never a small box over the face.
 
 ## 4. Plan
 
-Find the speaker's head first, so no card or logo covers the face:
+Find the speaker's head first, so no box covers the face and scenes open from it:
 
 ```bash
-~/.ai-video-editor/venv/bin/python "${CLAUDE_SKILL_DIR}/scripts/face.py" edits/<name>   # Windows: Scripts\python.exe
+~/.ai-video-editor/venv/bin/python "$S/face.py" edits/<name>   # Windows: Scripts\python.exe
+python3 "$S/plan.py" edits/<name>/style.json edits/<name>/captions.json  [--aspect 9:16|16:9] [--layout overlay|split]
 ```
 
-It writes `edits/<name>/face.json`. `plan.py` reads it: a card at the top shrinks into the space
-above the head, a logo moves below the chin or beside the head, and a card that cannot fit is
-dropped with a warning. Covering the face is never the fallback. In split it frames the speaker's
-window instead: the hair sits just under the seam, the head centred, scaled up if it is small.
-
-```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/plan.py" creator-teardowns/<handle>/style.json edits/<name>/captions.json  [--aspect 9:16|16:9] [--layout overlay|split]
-```
-
-Writes `edits/<name>/plan.json`. The output matches the cut's shape unless `--aspect` says
-otherwise. A wide cut made vertical is centre-cropped. A vertical cut made wide sits over a
-blurred copy of itself. For both shapes, write a second plan with `--out edits/<name>/plan-16x9.json`
-and pass `--plan plan-16x9.json` to every command below (its files get the same `-16x9` suffix).
-To compare layouts the same way, write `--layout split --out edits/<name>/plan-split.json`.
+Writes `edits/<name>/plan.json`, the cut's shape unless `--aspect` says otherwise (a wide cut made
+vertical is centre-cropped; a vertical cut made wide sits over a blurred copy). For a second shape
+or layout, `--out edits/<name>/plan-16x9.json` and pass `--plan plan-16x9.json` below.
 
 What the plan does:
-- Captions: `words_per_caption` words at a time, never held more than 0.3 s past the last word, a new line at every pause and comma. The word being
-  said turns the highlight colour.
-- Zooms: about `zoom.per_min` a minute on sentence starts, stressed words or cuts (`zoom.on`),
-  alternating in and out so the frame never keeps creeping tighter.
-- Cards: images, screenshots and the anims in `visuals.json` (read automatically). Each lands 0.1 s
-  before its word and stays for the creator's hold time, cut short when the next one lands. A warning
-  names any word that is never said.
-- Motion: every card moves the whole time it is up. Screenshots push in slowly (a tall page, or
-  one with a `highlight`, travels down inside its card); scene parts spring in on their words and
-  float; a card that lands right after the last one slides it out as it slides in. In split, the
-  panel stays open across gaps under 1.2 s, so a run of visuals swaps inside one panel.
+- **Anti-generic** first: stock captures and icon-only cards are skipped, emoji stripped, the AI
+  default look (purple-blue, glass with neon, Inter) replaced. Read every warning.
+- **Look** (motion.md): the profile's brand kit > the creator's measured palette and fonts >
+  `editorial`. **Motion personality** from the creator's median shot (punchy, snappy, smooth, calm).
+- **Layout per card:** overlay first: every card floats over the footage in the free space round
+  the head; a beat asking for `"layout": "scene"` gets a full-frame cut-away with a designed
+  transition; logos, arrow callouts and caption pages stay boxes. There are no type cards. A beat's `layout` overrides, except that an
+  explaining card on vertical is never a box. `--layout overlay` never opens the panel.
+- **Timing:** each card lands 0.1 s before its word; every part, bar, item and capture mark lands on
+  its own word (`word` / `at_word`); a caption_page gets the words said while it is up.
+- **Captions:** `words_per_caption` at a time, never held 0.3 s past the last word, the stressed
+  word of a line marked; the creator's effect, sizes and colours passed through.
+- **Zooms:** about `zoom.per_min` a minute, alternating in and out so the frame never creeps.
+
+### Behind the speaker
+
+When the profile says `"behind": true` (or `plan.py ... --behind on`), shots, stickers, social
+posts and logo clusters get `"layer": "behind"`: they draw over the footage and under a cutout of
+the speaker, and a card above the head grows down behind the hair while its marked words stay
+clear of the head. Overlay layout only. Then cut the speaker out where those cards are up:
+
+```bash
+~/.ai-video-editor/venv/bin/python "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
+```
+
+It writes `edits/<name>/cutout/<range>/` (RGBA PNGs, about 0.5 MB a frame) and the plan's `cutouts`, then prints, per card,
+how much of its key region the speaker covers and that the face is solid. On a WARNING, shrink or
+move that card. Laptop CPU: about 0.2-0.5 s a frame (free). `--modal` runs each range on
+its own Modal CPU container (8 cores; about $0.00003 a frame at Modal's rates, about $0.06 per minute of behind-card time, not yet measured). Skip this step when the profile says no.
+`check.py plan` FAILs a behind card with no cutout. Re-run matte.py after every plan.py run; ranges
+already cut are reused.
 
 ### Sound
 
-`plan.py` adds sound cues on its own: a whoosh when a card lands, a whoosh when a card leaves
-while a sentence is still going, a pop when a scene part or logo lands, a soft hit for a counter
-or a scene's tag, and a punch on a zoom. Never two within 0.25 s, at most one per 1.5 s on average.
-Each cue starts early by its attack, so its hit is heard on the frame the thing lands.
+`plan.py` adds a few cues: a whoosh when a card slides in, a pop when a sticker, part or logo
+pops in, a soft hit for a scene's tag, a punch on a zoom; cards that scale or fade in land silent.
+Never two within 0.25 s, never the same cue twice running, about one per 5 s, each started early by
+its attack. `scripts/sfx.py` synthesises the kit from a
+fixed seed into `edits/<name>/.sfx/` (nothing to licence), set about 4 dB under the speech. No sound:
+the profile's `sound.sfx: false`, `"sfx": false` in style.json, or `plan.py ... --no-sfx`. A copied
+creator's measured `sound` (cues a minute, kinds) sets the budget and the cues (references/visuals.md
+"From the teardown").
 
-The first plan builds the kit into `edits/<name>/.sfx/` with `scripts/sfx.py`: every cue is
-synthesised by ffmpeg from a fixed seed (nothing to licence), then set about 4 dB under this
-cut's speech (the pop 6, the zoom 5), measured on the loudest 50 ms. The level lives in the file,
-so change it there, not in the renderer. A new cut.mp4 rebuilds the kit on the next plan.
-`sfx.py build edits/<name>` rebuilds it by hand.
+**Music.** Unless the profile says `sound.music: false`, ask once in the question box: **Generated for
+this cut (Recommended)** / **Your own track** (a file) / **A YouTube link** (or any link yt-dlp reads) /
+**None**. For a link, ask for an optional start and end, then who holds the rights: "It's my own track" /
+"YouTube Audio Library or Creative Commons (I'll credit it)" / "Licensed (Epidemic, Artlist etc.)" /
+"Not sure". Then:
 
-No sound: `"sfx": false` in style.json, or `plan.py ... --no-sfx`.
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/product-video/scripts/product.py" music edits/<name> --url '<link>' \
+  [--start S --end S] --rights own|cc|licensed|unsure [--credit '...']
+```
+
+It writes `audio/track.wav` and `audio/MUSIC-LICENSE.md`; the download never leaves the edit folder. On
+"Not sure", warn that platforms may mute or claim the video and offer the generated option. Then lay the
+bed under the voice (a file of their own: copy it into the edit folder and pass it as `--track`):
+
+```bash
+~/.ai-video-editor/venv/bin/python "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
+```
+
+`.sfx/music.wav`: the track, or a bed generated for this cut's length (product-video sound.py, nothing
+to licence), set `--under-db` under the speech in the gaps (default: the copied creator's measured
+`sound.music.level_db`, else 18), ducked 9 dB more under every word, faded out over the last 2 s.
+plan.py picks it up as plan.json `"music"`; run plan.py after it.
 
 ### Check the plan
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/check.py" plan edits/<name> [--plan plan-split.json] [--style creator-teardowns/<handle>/style.json]
+python3 "$S/check.py" plan edits/<name> [--plan plan-split.json] [--style edits/<name>/style.json]
 ```
 
-Instant. It FAILs a card under the app's UI, a vertical card whose centre is more than 1.5% off
-the middle, a card on the head while it is up (zooms and the split window included), captions
-outside the safe band, a caption up longer than 1.2 s a word or held more than 0.3 s past its last
-word, and text-card text under 34 px. It WARNs a stretch with no card, zoom or cut longer than
-2.5 x the creator's median shot (6 s without `--style`) and text cards that outnumber picture
-cards. Every line has the time and the fix. Fix every FAIL, plan again, check again, before the
-stills. `edit.py stills` runs it first and stops on a FAIL (`--no-check` to look anyway).
+Instant. FAILs a box under the app's UI or on the head, an off-centre vertical card, captions outside
+the safe band or held too long, text-card text under 34 px. WARNs long stretches with nothing
+moving. Fix every FAIL and plan again. `edit.py stills` runs it first and stops on a FAIL.
 
 ## 5. Stills, then wait
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" stills edits/<name>
+python3 "$S/edit.py" stills edits/<name>
 ```
 
-The first run installs the renderer (a few minutes, once). Writes `stills/1-opening.png`,
-`2-caption.png`, `3-zoom.png`, then one still per card (`4-card.png`, `5-card.png`, ...), and for
-each card `N-card-early.png` and `N-card-late.png` so its motion can be judged, and `N-swap.png`
-mid-move where a card slides in over the one before it. Look at
-every still yourself before showing them. Fix before showing if a caption or card covers the face, a
-zoom cuts off the head, a screenshot shows the wrong part of the page, or text is too small to read
-on a phone. Change `captions.y_pct` or `size_pct` in style.json, or a beat's `box` or `clip` in
-visuals.json, then capture and plan again.
+The first run installs the renderer (a few minutes, once). Writes one still per beat (opening,
+caption, zoom, then each card with early, late and swap frames) and `stills/sheet.png`, one numbered
+contact sheet labelled with beat, time and card kind (about 1,600 tokens). Review the sheet; open a
+single still only to zoom in. Fix before showing: a box on the face, a zoom cutting the head, a
+capture showing the wrong part, text too small for a phone, anything that looks like a default AI
+edit (icon tiles, emoji, dark glass with neon). The `stills-critic` agent can check a sheet.
 
-Show the user the four stills. **Do not render until they approve.** Their notes go back into
-style.json or images.json, then plan and stills again.
+Show the user the sheet. **Do not render until they approve.** Their notes go into the taste
+skill, visuals.json or images.json, then plan and stills again.
 
-## 6. Laptop, GitHub Actions or Lambda
+## 5b. Preview
+
+After the stills are approved, offer the live preview before the render question:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" estimate edits/<name>
+python3 "$S/preview.py" edits/<name> [--plan plan.json]
 ```
 
-Renders two seconds to time this computer, then prints three lines:
+Opens a local page (no account, works offline) that plays the real edit: the same composition and
+props as the render. The user can drag a card in time or trim it, drag it on the frame (it snaps to
+the free regions round the head, never onto the face), swap its picture for another in `images/`,
+delete it, fix a misheard caption word (empty it to remove it), and nudge a sound cue's level.
+Every change is a small diff in `edits/<name>/overrides.json` and a line in `corrections.jsonl`
+(what, from, to). The script waits until they press **Render**, which writes
+`edits/<name>/preview-done.json` with a summary and stops it.
 
+Then: read preview-done.json, save its corrections with the taste skill where they are a
+preference rather than a one-off fix, run `plan.py` again with the same arguments (it applies
+overrides.json) or `python3 "$S/preview.py" apply edits/<name> [--plan plan.json]` to apply the
+overrides to the existing plan without re-planning, and go to step 6. `preview.py demo` self-checks.
+
+## 6. Laptop, Modal or other
+
+```bash
+python3 "$S/edit.py" estimate edits/<name>
 ```
-Laptop: about 0.9 min (measured 2.3 s for 60 frames, 1326 frames in all). Free.
-GitHub Actions: about 7.3 min on 1 runner, uses about 10 of the 2,000 free private-repo minutes a month; media 36 MB, fits one release file. Free.
-Lambda: about 70 s on 9 Lambdas in us-east-1, about $0.011. A guess until a real render is measured; the render prints the real cost.
-```
 
-Then ask the user **one question**: where to render. Use the AskUserQuestion tool when it is
-available, else a numbered question. Exactly three options, in this order, none marked
-recommended, each description carrying its printed time and cost:
+Prints `Laptop:`, `Modal:` and two `Other:` lines (GitHub Actions, Lambda) with this video's time
+and cost. Ask **one question** for every video, in the question box (the AskUserQuestion tool;
+numbered text only in an agent without it). Exactly three options in this order, none marked
+recommended, each label or description carrying the printed numbers:
 
-1. **Laptop**: the Laptop line's time. Free, nothing to set up.
-2. **GitHub Actions**: the GitHub line's time and minutes. Free. Needs a GitHub account and `gh`
-   logged in. The footage goes into a **private** GitHub repo in their account.
-3. **Lambda**: the Lambda line's time and cost, on their own AWS account. Needs an AWS account; if
-   `aws sts get-caller-identity` fails, say the setup skill's Lambda section sets it up first.
+1. **Laptop**: its time, free.
+2. **Modal**: its time and cost (Modal's Starter plan includes $30 of free credit a month). If the
+   line says `Not set up yet`, say so in the description.
+3. **Other: GitHub Actions or AWS Lambda**: both `Other:` lines in the description. On this pick,
+   ask a second question with the two. GitHub Actions: free, needs `gh` logged in, the footage goes
+   into a **private** repo in their account; ask before creating the repo. Lambda: their own AWS
+   account; if `aws sts get-caller-identity` fails, the setup skill's Lambda section first.
 
-Run the path they pick. For GitHub, ask before creating the repo, and say plainly that the
-footage goes into it as a private release file.
+Modal picked but not set up: run the setup skill's step 5b (Modal) first, then render.
 
 ## 7. Render
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name>            # laptop
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --lambda   # AWS Lambda
+python3 "$S/edit.py" render edits/<name>            # laptop
+python3 "$S/edit.py" render edits/<name> --modal    # Modal
+python3 "$S/edit.py" render edits/<name> --lambda   # AWS Lambda
+python3 "$S/edit.py" render edits/<name> --draft    # laptop, 2/3 size, quick look: render-draft.mp4
 ```
 
-Both write `edits/<name>/render.mp4` and print how long it took.
-
-GitHub Actions, three steps. The repo name is the user's choice (`video-<name>` is a fine default):
-
-```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" render edits/<name> --github               # package
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-push edits/<name> --repo <repo>      # after the user says yes
-python3 "${CLAUDE_SKILL_DIR}/scripts/edit.py" github-fetch edits/<name> --repo <repo>    # waits, downloads
-```
-
-`render --github` writes `edits/<name>/github-render/` (renderer source, plan, workflow; no footage)
-and `edits/<name>/github-render-media.zip` (the footage; over 1.9 GB it is split into
-`github-render-media.zip.part-00`, `-01`, ... because a release file holds 2 GB). `github-push` exits 1
-with `gh auth login --web` when they are not logged in: they run that in their own terminal. It
-refuses a public repo, creates the private one, commits, uploads the media to the `media` release
-(deleting media files left from an earlier push) and starts the `render` workflow. The workflow
-renders in parallel: a `plan` job splits the video into chunks of about 2 minutes (at most 20), one
-`render` job per chunk renders its frames, and a `join` job puts them back together, so a long take
-stays under GitHub's 6-hour job limit. Re-run `github-push` after a new plan: it pushes the
-changes, replaces the media and starts a new run. `github-fetch` waits for the latest run and
-writes `edits/<name>/render-github.mp4`.
-
-Lambda also prints what the render
-really cost. The first Lambda render sets up the function and a storage bucket in their account;
-later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
+All but `--draft` write `edits/<name>/render.mp4`. A Modal render prints its wall time and cost
+when it finishes. GitHub Actions, Lambda, Modal and draft details: `references/render.md`.
 
 ### Check the render
 
 ```bash
-~/.ai-video-editor/venv/bin/python "${CLAUDE_SKILL_DIR}/scripts/check.py" render edits/<name> [--plan plan-split.json]
+~/.ai-video-editor/venv/bin/python "$S/check.py" render edits/<name> [--plan plan-split.json] [--style edits/<name>/style.json]
 ```
 
-Before the user sees the render. Four samples a second: it FAILs a card whose drawn pixels land on
-the face (YuNet, as face.py), a vertical card whose drawn content sits more than 2% of the width
-off centre at mid-life, a silence over 0.3 s inside the speech (cut.mp4, the cut skill's derived
-threshold) and a kept span under 0.2 s between two splices. It WARNs a card that holds still for
-more than 1.5 s. It lists (LOOK) caption words that differ from what cut.transcript.json heard.
-FAILs go back to the plan (re-plan, re-render) or the cut (re-cut). At most two fix rounds; then
-show the user the render with what is still listed. Overlay cards sit on a dark panel, so their
-centre is the panel's, not the art inside it. Results land in `edits/<name>/check.json`.
+Before the user sees it. Runs `scripts/quality.py` too. FAILs: a render older than its plan or
+inputs (never show one), a card on the face, a card off centre, a silence inside the speech, a tiny
+kept span, frozen frames, a first-frame flash, a card landing over 0.15 s late, text into a card's
+edge, contrast under 3:1, a caption touching the frame's side, true peak over 0 dBTP, SFX louder
+than the voice. WARNs: early landings, one-frame pops, jitter, long static stretches, rhythm
+outside 0.5-2x the creator's, contrast under 4.5:1, loudness outside -23 to -9 LUFS, and the AI
+default look (a dark panel with one neon colour, a blue-purple gradient, emoji, more than 3 stock
+icons in a card or more stock icons than real images). FAILs go back to the plan or the cut; at
+most two fix rounds, then show the render with what is still listed. Results: `check.json`.
 
 ## 8. Open it
 
-Open the result for the user (`open` on Mac, `start ""` on Windows, `xdg-open` on Linux) and give
-the full path. Ask for notes. Caption, zoom, card and visual notes need a new plan and stills, then a render.
-Notes about what was cut go back to the cut skill.
+Open the result (`open` on Mac, `start ""` on Windows, `xdg-open` on Linux) and give the full path.
+Ask for notes. Caption, zoom, card and visual notes need a new plan and stills, then a render. Notes
+about what was cut go back to the cut skill.
+
+## 9. Export to another editor
+
+When the user wants to finish the edit by hand ("open it in Final Cut", "send it to Premiere",
+"I want to tweak it in Resolve / CapCut"):
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/export_nle.py" edits/<name> --to fcpxml|premiere|resolve|capcut|edl|srt|all
+```
+
+Into `edits/<name>/export/`: the jump cut as trims of the raw take (so every cut can be re-opened),
+captions (titles + `.srt`), each card on its own track at its time and place, sound cues on their
+own audio track, a marker per beat. Moving cards are rendered with alpha first (about 0.7 s per card
+frame on a laptop); `--no-render` skips them. If the raw take moved, pass `--source <file>`. Tell
+the user which file to open and how, from `references/render.md` "Export to another editor".
 
 ## Files
 
-- `scripts/plan.py`: style.json + captions.json (+ images.json, visuals.json, face.json) to plan.json. `plan.py demo` self-checks.
-- `scripts/sfx.py`: the sound cues, synthesised and level-matched to the cut into `.sfx/`. `sfx.py demo` self-checks.
-- `scripts/capture.mjs`: visuals.json to screenshots, logos and icons in `images/`. No dependencies.
-- `scripts/face.py`: the speaker's head per 0.5 s into face.json (OpenCV YuNet). `face.py demo` self-checks.
-- `scripts/check.py`: the automatic check of a plan (stdlib) and a render (venv). `check.py demo` self-checks.
-- `scripts/edit.py`: stills, estimate and render. `edit.py demo` self-checks.
-- `../../remotion/`: the Remotion project, copied to `~/.ai-video-editor/remotion` (installed once,
-  its source refreshed on every run). `src/Anims.tsx` holds the anim templates. It reads `edits/<name>/.render/`, which holds a copy of the cut
-  sized for the output and the card images.
+- `references/visuals.md`: anti-generic rules, what goes on screen in what order, layouts, every
+  beat kind, free sources, safe areas.
+- `references/motion.md`: templates and props, the look, personalities, transitions, capture marks.
+- `references/render.md`: the GitHub Actions and Lambda render steps.
+- `references/contracts.md`: the shape of every file the skills hand each other.
+- `scripts/route.py`: sentences and Jev route picks into beats.json; `highlight` picks a capture's
+  evidence line. `route.py demo` self-checks.
+- `scripts/capture.mjs`: visuals.json to screenshots, marks, logos, posts, app, YouTube and GitHub
+  images in `images/`. No dependencies.
+- `scripts/plan.py`: style + captions (+ images, visuals, face, profile) to plan.json. `plan.py demo`.
+- `scripts/sfx.py`: the sound kit, synthesised and level-matched into `.sfx/`. `sfx.py demo`.
+- `scripts/face.py`: the speaker's head per 0.5 s into face.json (OpenCV YuNet). `face.py demo`.
+- `scripts/matte.py`: the speaker cut out (Robust Video Matting + stabilise + edge unmix) for behind
+  cards, RGBA PNG frames into cutout/. `matte.py demo`.
+- `scripts/check.py`, `scripts/quality.py`: the plan and render checks. `check.py demo`.
+- `scripts/sheet.py`: the numbered stills contact sheet.
+- `scripts/edit.py`: stills, estimate and render. `edit.py demo`.
+- `scripts/export_nle.py`: the edit as FCPXML, FCP7 XML, EDL, SRT or CapCut steps. `export_nle.py demo`.
+- `scripts/preview.py`: the live preview page (`../../preview/`) and overrides.json. `preview.py demo`.
+- `../../agents/template-filler.md`: the haiku agent that fills template props from beats.json.
+- `../../lib/ai_editor/profile.py`: the profile, the creator blend, the look order.
+- `../../remotion/`: the renderer, copied to `~/.ai-video-editor/remotion` and refreshed on every run.
+- `../../../../tests/golden.py`: golden frames; `--update` after an intended look change.

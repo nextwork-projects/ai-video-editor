@@ -2,6 +2,8 @@
 """The sound cues: synthesised by ffmpeg from pinned seeds, then level-matched to this cut's speech.
 
     python3 sfx.py build edits/NAME     writes edits/NAME/.sfx/*.wav + kit.json
+    ~/.ai-video-editor/venv/bin/python sfx.py music edits/NAME [--track audio/track.wav | --mood linear] [--under-db 18]
+                                        the music bed: .sfx/music.wav, ducked under the speech
     python3 sfx.py demo                 self-check
 
 Every cue is generated, not sampled, so there is nothing to licence. Level is baked into
@@ -43,7 +45,7 @@ KIT = {
     "pop": ("anoisesrc=d=0.06:c=white:a=1:r=48000:seed=7,highpass=f=2200,lowpass=f=7000,"
             "afade=t=out:st=0.002:d=0.043:curve=exp[n];"
             "sine=f=1100:d=0.06:sample_rate=48000,afade=t=out:st=0.001:d=0.012:curve=exp,volume=0.6[b];"
-            "[n][b]amix=inputs=2:normalize=0,afade=t=in:st=0:d=0.001", -6),
+            "[n][b]amix=inputs=2:normalize=0,afade=t=in:st=0:d=0.001", -4),   # -6 measured as not heard in renders
     # A big number lands: air swelling into a soft 200 Hz body at 0.5 s.
     "hit": ("anoisesrc=d=0.7:c=pink:a=1:r=48000:seed=1729,highpass=f=900,highpass=f=900,"
             "lowpass=f=5000,lowpass=f=5000,"
@@ -180,10 +182,57 @@ def demo():
     print("demo ok")
 
 
+MUSIC_UNDER_DB = 18     # the bed's level under the speech in the gaps, when the creator measured none
+DUCK_DB = -9            # and a further dip while he speaks (product-video sound.duck)
+
+
+def music(edit_dir, track=None, mood="linear", under_db=None):
+    """edits/NAME/.sfx/music.wav: the user's track (product.py music writes audio/track.wav) or a bed generated
+    for this cut (product-video sound.py, nothing to licence), the cut's length, under_db under the speech,
+    ducked DUCK_DB more under every word, faded out over the last 2 s. Needs numpy (the venv)."""
+    import numpy as np
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "product-video" / "scripts"))
+    import sound
+    edit_dir = Path(edit_dir)
+    cut = edit_dir / "cut.mp4"
+    length = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(cut)],
+                                  capture_output=True, text=True).stdout)
+    bed = sound.read_audio(edit_dir / track, length) if track else sound.compose(mood, length)[0][:, :int(length * sound.SR)]
+    vo = sound.read_audio(cut, length)
+    rms = lambda x: float(np.sqrt(np.mean(x ** 2)) or 1e-9)  # noqa: E731
+    under = MUSIC_UNDER_DB if under_db is None else abs(under_db)
+    bed = bed * 10 ** ((speech_db(cut) - under - db(rms(bed))) / 20)
+    bed = sound.duck(bed, vo, DUCK_DB)
+    f = int(min(2.0, length / 5) * sound.SR)
+    bed[:, -f:] *= np.linspace(1, 0, f) ** 1.5
+    (edit_dir / ".sfx").mkdir(exist_ok=True)
+    out = edit_dir / ".sfx" / "music.wav"
+    sound.write_wav(out, bed)
+    print(f"{out}: {'track ' + str(track) if track else 'generated (' + mood + ')'}, {under} dB under the speech, "
+          f"{-DUCK_DB} dB more under each word")
+    return out
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["demo"]:
         demo()
     elif len(sys.argv) == 3 and sys.argv[1] == "build":
         build(sys.argv[2])
+    elif len(sys.argv) >= 3 and sys.argv[1] == "music":
+        import argparse
+        ap = argparse.ArgumentParser()
+        ap.add_argument("cmd")
+        ap.add_argument("edit")
+        ap.add_argument("--track", help="a file in the edit folder, e.g. audio/track.wav (product.py music)")
+        ap.add_argument("--mood", default="linear", help="the generated bed's mood (product-video sound.py MOODS)")
+        ap.add_argument("--under-db", type=float, help=f"dB under the speech (default: the creator's sound.music.level_db, else {MUSIC_UNDER_DB})")
+        a = ap.parse_args()
+        st = Path(a.edit) / "style.json"
+        lvl = a.under_db
+        if lvl is None and st.exists():
+            from plan import took
+            sty = json.loads(st.read_text())
+            lvl = ((sty.get("sound") or {}).get("music") or {}).get("level_db") if took(sty, "sound") else None
+        music(a.edit, a.track, a.mood, lvl)
     else:
         sys.exit(__doc__)

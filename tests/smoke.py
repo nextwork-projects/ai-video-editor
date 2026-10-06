@@ -61,6 +61,11 @@ def main():
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json",
         "--layout", "split", "--out", edit / "plan-split.json", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    # graphics behind the speaker: the capture card goes behind, the speaker is cut out under it
+    run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", "--layout", "overlay",
+        "--behind", "on", "--out", edit / "plan-behind.json", cwd=work)
+    run(VPY, SK / "style-edit/scripts/matte.py", edit, "--plan", "plan-behind.json", cwd=work)
+    run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, "--plan", "plan-behind.json", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", edit, cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", edit, "--plan", "plan-split.json", cwd=work)
     for f in ("render.mp4", "render-split.mp4"):

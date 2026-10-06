@@ -1,0 +1,17 @@
+{
+  "description": "Checks the editor's tools at session start. Silent when everything is installed.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/setup/scripts/setup.py\" doctor --quiet 2>/dev/null || py \"${CLAUDE_PLUGIN_ROOT}/skills/setup/scripts/setup.py\" doctor --quiet 2>/dev/null || true",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
