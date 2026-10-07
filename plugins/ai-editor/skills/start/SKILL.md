@@ -36,7 +36,7 @@ videos, websites, music. Each item has a `kind`:
 | `creator` | creator-teardown quick mode on `handle` and `platform` (no platform: ask, TikTok first). With `urls`, write them to `picks.txt` and use `list <handle> --urls picks.txt`. Save it as the profile creator. |
 | `own` | `python3 "$L" fetch "<url>" edits/<name>` (`name` is in the item). It prints the file path; that is the video for step 1. |
 | `long` | the clips skill, with this link as its source. |
-| `product` | the product-video skill with this URL. |
+| `product` | the product-video skill with this URL. A plain website (not a video site, file or share link) is always `product`, even after "edit my video": go straight to its brief, with no "did you mean your own footage" line. |
 | `music` | the music question with rights (style-edit, or product-video's `music` step). |
 | `unsupported` | say its `note` to the user, word for word, and go on with the rest. |
 

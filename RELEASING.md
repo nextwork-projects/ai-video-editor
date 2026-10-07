@@ -30,15 +30,36 @@ without a version range.
 ## Evals
 
 Each plugin has an `evals/` suite (`claude plugin eval`, Claude Code 2.1.269 or later). Every run is a
-real model call on your account.
+real model call on your account. Run both suites from the repo root:
 
 ```bash
-cd plugins/creator-teardown && claude plugin eval . --runs 1 --ablation none --no-publish
+tests/run_evals.sh                       # 3 runs per case, both plugins
+tests/run_evals.sh --runs 1 --case start-asks
 ```
 
-ai-editor declares dependencies, so it only loads with them installed. Run its suite against the
-installed copy after adding the three marketplaces in the README:
+Results land in `eval-results/` (`<plugin>.json` and `<plugin>.html`). The script fails when a case
+scores under `EVAL_THRESHOLD` (default 0.8) and stops at `EVAL_MAX_COST` dollars per suite
+(default 15). A full 3-run pass of both suites cost $13 on 2026-10-07 (ai-editor $12.08, creator-teardown $0.95); `--runs 1` is about a third of that.
 
-```bash
-claude plugin eval ai-editor@nextwork --runs 1 --ablation none --no-publish
-```
+Why the repo root: ai-editor depends on creator-teardown, and `claude plugin eval` does not install
+dependencies or take `--plugin-dir`. Each ai-editor case lists both plugin folders in its
+`plugins:` frontmatter, and eval only loads plugin folders under the directory it was pointed at,
+so it has to point at the root (`--eval-dir plugins/ai-editor/evals`). Running from
+`plugins/ai-editor` fails with "outside the containment root".
+
+Headless eval runs have no AskUserQuestion tool (it is listed in `allowed_tools` but never
+offered), so the asking graders are `llm` graders that accept a question with choices in the reply.
+
+Eval runs also have no shell: granting Bash needs the OS sandbox, which refuses to start on a Mac
+whose `~/.docker` holds a symlink, and the editor is never installed in the run's temporary home.
+So each case sets `append_system_prompt` to a dry run: write each command and its likely result,
+treat the editor as installed and named files as present, and stop at the next question. The
+suites test the decision path (what the agent routes to, asks and refuses), not the scripts;
+those have their own `demo` self-checks and `tests/smoke.py`. The judge is Sonnet
+(`EVAL_JUDGE` to change it): Haiku failed replies that met the rubric.
+
+### CI
+
+The `evals` job in `.github/workflows/check.yml` runs `tests/run_evals.sh --runs 1` on manual
+dispatch only, and only when the repo has an `ANTHROPIC_API_KEY` secret. Add the secret under
+Settings > Secrets and variables > Actions to turn it on.

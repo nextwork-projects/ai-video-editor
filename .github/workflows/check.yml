@@ -171,3 +171,27 @@ jobs:
         with:
           name: golden-out
           path: golden-out
+
+  # Plugin evals (tests/run_evals.sh): real model calls, so manual only and only when the repo has
+  # an ANTHROPIC_API_KEY secret. Without the secret the job is skipped.
+  evals:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Evals
+        if: env.ANTHROPIC_API_KEY != ''
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          tests/run_evals.sh --runs 1
+      - if: always() && env.ANTHROPIC_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results

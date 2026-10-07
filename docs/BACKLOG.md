@@ -35,7 +35,6 @@ and passes after. Done items move to CHANGELOG.md.
   TikTok step goes red.
 - Python 3.15: the lock resolves for 3.10+, but faster-whisper's ctranslate2 and onnxruntime ship
   wheels late. Add a CI job on the newest Python to see a gap before users do.
-- Evals load the plugin: `claude plugin eval` cannot resolve the creator-teardown dependency for ai-editor (and rejects --plugin-dir), so every ai-editor eval runs without the plugin. Make the dependency resolvable in eval runs (tagged release or a self-contained eval marketplace), then confirm AskUserQuestion graders work headless.
 
 6. Measured cost per video on a real run (needs a TypeSafe key on the test machine).
 7. Modal render tested live (needs a Modal login on the test machine).

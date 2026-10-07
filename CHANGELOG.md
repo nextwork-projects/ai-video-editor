@@ -4,6 +4,18 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Evals load the plugin: every ai-editor eval case lists `plugins: ["../..",
+  "../../../creator-teardown"]`, so `claude plugin eval` loads creator-teardown beside ai-editor
+  and the dependency resolves (before, every ai-editor case ran without the plugin and scored 0).
+  Run both suites from the repo root with `tests/run_evals.sh`; an optional CI job runs it when
+  the repo has an `ANTHROPIC_API_KEY` secret. Headless eval runs have no AskUserQuestion tool, so
+  the `tool_used: AskUserQuestion` graders are now `asks-and-waits` llm graders that pass on a
+  question with choices, recommended first, that stops the turn. Eval runs have no shell, so
+  each case runs as a dry run (`append_system_prompt`). Fixed on the way: `start` now routes a
+  plain website to product-video even after "edit my video" (it asked what the link was), and
+  product-video makes the animatic and asks Approve before a "just render it" on an unstamped
+  plan. Graders for edit-like-creator and paste-tiktok-profile follow the `start` front door,
+  and tear-down-handle names two creators, the case where the skill has a question to ask
 - Drop in any link (backlog item 1): `start` routes every pasted link, @handle or file path before
   anything else, with no question about what it is. `lib/ai_editor/links.py` classifies offline
   (own footage to cut + style-edit, a creator to tear down, a long video or podcast to clips, a

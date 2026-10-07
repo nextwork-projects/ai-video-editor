@@ -201,6 +201,9 @@ before Approve. On Approve, stamp it: `$PY "$S/product.py" approve product/<name
 
 ## 7. Render
 
+Only after step 6's Approve. "Just render it" on a plan with no stamp still goes through step 6 first:
+make the animatic and ask Approve.
+
 ```bash
 $PY "$S/product.py" render product/<name> --plan plan-linear-16x9.json [--draft | --modal | --lambda]
 ```

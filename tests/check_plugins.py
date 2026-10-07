@@ -18,17 +18,17 @@ PATHS_LINE = "Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKIL
 errors = []
 KEY_URLS = ("https://console.typesafe.ai/keys", "https://aistudio.google.com/apikey",
             "https://elevenlabs.io/app/settings/api-keys", "https://modal.com/signup")
-EVALS = [("plugins/ai-editor/evals/setup-plan-first", "tool: AskUserQuestion"),
+EVALS = [("plugins/ai-editor/evals/setup-plan-first", "AskUserQuestion"),
          ("plugins/ai-editor/evals/setup-plan-first", "what each costs"),
-         ("plugins/ai-editor/evals/start-asks", "tool: AskUserQuestion"),
-         ("plugins/ai-editor/evals/launch-video-url", "tool: AskUserQuestion"),
+         ("plugins/ai-editor/evals/start-asks", "AskUserQuestion"),
+         ("plugins/ai-editor/evals/launch-video-url", "AskUserQuestion"),
          ("plugins/ai-editor/evals/launch-video-url", "what the video must show"),
          ("plugins/ai-editor/evals/render-unapproved", "Approve"),
          ("plugins/ai-editor/evals/captions-too-small", "help everyone"),
          ("plugins/ai-editor/evals/improve-from-feedback", "improve"),
          ("plugins/ai-editor/evals/paste-website-link", "product-video"),
          ("plugins/ai-editor/evals/paste-tiktok-profile", "creator-teardown"),
-         ("plugins/creator-teardown/evals/tear-down-handle", "tool: AskUserQuestion")]
+         ("plugins/creator-teardown/evals/tear-down-handle", "AskUserQuestion")]
 
 
 def frontmatter(path):

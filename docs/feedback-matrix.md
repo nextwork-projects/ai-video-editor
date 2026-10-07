@@ -9,7 +9,7 @@ Paths: `A` = `plugins/ai-editor/skills`, `E` = `plugins/ai-editor/evals`. CI run
 
 | Rule | Written in | Enforced by | Tested by |
 |---|---|---|---|
-| Every question goes in the question box | PRINCIPLES "Asking"; every SKILL.md | `tests/check_plugins.py`: every own SKILL.md must say AskUserQuestion | evals with a `tool_used: AskUserQuestion` grader: `E/setup-plan-first`, `E/start-asks`, `E/launch-video-url`, `E/captions-too-small`, `creator-teardown/evals/tear-down-handle`; check_plugins fails if those graders go |
+| Every question goes in the question box | PRINCIPLES "Asking"; every SKILL.md | `tests/check_plugins.py`: every own SKILL.md must say AskUserQuestion | evals with an `asks-and-waits` grader (llm: a question with choices that stops the turn; headless eval runs have no AskUserQuestion): `E/setup-plan-first`, `E/start-asks`, `E/launch-video-url`, `E/captions-too-small`, `creator-teardown/evals/tear-down-handle`; check_plugins fails if those graders go |
 | Setup says its plan, why, cost and skip before acting | PRINCIPLES "Asking"; `A/setup/SKILL.md` step 0 | the skill text (agent behaviour, no script runs before it) | `E/setup-plan-first/graders/plan-first.md` (llm) |
 | Skipped steps are remembered and resumable | PRINCIPLES "Asking"; setup step 0 | `setup.py later <step>` writes `~/.ai-video-editor/later.json`; `setup.py todo` lists it; doctor reminds | `setup.py demo` (later, dedupe, still_later) |
 | Direct links to each key's page | `A/setup/SKILL.md` "Keys" | `tests/check_plugins.py` KEY_URLS | check_plugins |
