@@ -1,124 +1,225 @@
 # AI Video Editor
 
-Edit your own talking-head video in the style of a creator you like.
+Edit your own talking-head video in the style of a creator you like. Open the folder in Claude Code
+and say **edit my video**, or paste a link.
 
-Give Claude Code a creator. It measures how they edit: how fast they cut, how often they zoom, what
-their captions look like. Then it cuts your video (retakes and pauses out) and renders it in that
-style, on your laptop or in the cloud.
+1. Give it your video. It cuts out the retakes, false starts and pauses.
+2. Give it a creator. It measures how they edit: cut speed, zooms, captions, graphics, transitions.
+3. It renders your video in that style, on your laptop or in the cloud, after you approve each step.
 
-Built by [NextWork](https://nextwork.ai). Free and open source (MIT).
+It also makes three other things:
 
-<!-- demo video: before / after goes here -->
+- **Shorts from a long video or podcast.** Paste the link; it finds the clips and edits each one.
+- **A product video from a website.** Paste the URL; it asks what to show, records the real product
+  and cuts a launch film with its own music.
+- **A creator teardown.** Paste a profile; you get what makes their videos work and a style you can
+  edit with.
 
-## What you get
+<!-- TODO(owner): drop a 10-second before/after demo GIF at docs/demo.gif, then replace this comment with: ![Before and after](docs/demo.gif) -->
 
-Two Claude Code plugins, installed together:
+Built by [NextWork](https://nextwork.ai). Free and open source (MIT). Works on Mac, Windows and Linux.
 
-| Plugin | What it does |
-|---|---|
-| `creator-teardown` | Breaks down a creator's top TikTok or YouTube Shorts videos: views, word-level transcripts, pace, cuts per 10 seconds, zooms and caption style. Writes `teardown.md` and `style.json`. |
-| `ai-editor` | `setup` installs everything. `cut` removes retakes, false starts and dead air from your video. `style-edit` renders it in the creator's style. `taste` remembers every correction you give. |
+## Start here
 
-What `style-edit` adds on its own, each timed to the word you say:
+You need [Claude Code](https://claude.com/claude-code) and a Claude account (a paid plan or an API
+key). Pick one of three ways.
 
-- Captions in the creator's look, and zoom punches at the creator's rate.
-- A logo when you name a brand, and a real screenshot when you name a website, scrolled to the
-  sentence and highlighted.
-- Animated scenes built from logos and icons: a flow (this goes into that), a race (how much
-  faster), a pile (thousands of emails sorted).
-- Sound effects, generated on your computer and levelled under your voice.
-- Two layouts: **overlay** (you full frame, visuals above your head) or **split** (the visual on
-  top, you underneath).
+### Way 1: open this folder in Claude Code (easiest)
 
-Nothing lands on your face or under the app's buttons, and an automatic check measures every edit
-for that before you see it.
+**1. Install Claude Code** (skip if you have it). Open a terminal:
 
-## Install
+- **Mac:** press Cmd + Space, type `Terminal`, press Enter. Paste this and press Enter:
+  ```
+  curl -fsSL https://claude.ai/install.sh | bash
+  ```
+- **Windows:** press the Windows key, type `PowerShell`, press Enter. Paste this and press Enter:
+  ```
+  irm https://claude.ai/install.ps1 | iex
+  ```
+- **Linux:** open your terminal app and paste the Mac line.
 
-You need [Claude Code](https://claude.com/claude-code). Then, inside Claude Code:
+**2. Get this folder.** Either:
+
+- **No git:** at the top of this page click the green **Code** button, then **Download ZIP**. Unzip
+  it (double-click on Mac, right-click > **Extract All** on Windows). You get a folder called
+  `ai-video-editor-main`.
+- **With git:** `git clone https://github.com/nextwork-projects/ai-video-editor.git`
+
+**3. Open Claude Code in that folder.** In the terminal type `cd ` (with a space after it), drag the
+folder onto the terminal window, press Enter. Then type `claude` and press Enter. The first time,
+it asks you to log in.
+
+**4. Say yes when it asks whether you trust this folder.** That lets the editor load. Then type
+**edit my video**.
+
+The folder's `.claude/settings.json` turns the editor on. If Claude says the editor is not loaded,
+it offers to install it: say yes, then type `/reload-plugins`.
+
+### Way 2: install the plugin, then use any folder
+
+Inside Claude Code, type these two lines (same on every computer):
 
 ```
 /plugin marketplace add nextwork-projects/ai-video-editor
 /plugin install ai-editor@nextwork
 ```
 
-`creator-teardown` installs with it. Then say **"set up the editor"**. Claude checks your computer
-and installs what is missing (Python, ffmpeg, Node, the transcription model and the renderer),
-asking before each step. Works on Mac, Windows and Linux.
+If it asks, type `/reload-plugins`. Then say **edit my video**. `creator-teardown` installs with it.
+Your edits land in whatever folder you started Claude Code in.
 
-The full install is about 1.5 GB, most of it the renderer.
+### Way 3: other agents (Codex, Cursor, Gemini CLI, Copilot)
 
-## Use it
+In a terminal, on a computer with [Node.js](https://nodejs.org):
 
-Start Claude Code in an empty folder, then:
+```
+npx skills add nextwork-projects/ai-video-editor
+```
 
-1. **"Break down @creator on TikTok"** (or paste a few video links).
-2. **"Edit my video like @creator"** and give the path to your video (an mp4 or mov of you talking
-   to camera).
-   No video of your own yet? Practise on the sample take (a raw take with retakes and
-   pauses left in): say **"use the sample video"**, or download it yourself:
-   `curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4`
-3. Claude asks: **just the cut first**, or the cut and the styled edit in one go. Cut first uses
-   fewer tokens, because the visuals only get built once the cut is right.
-4. Claude shows you the cut: your transcript with the removed parts struck through. Approve it, or
-   say which lines to keep. On "cut first", say **"now style it"** when you're happy.
-5. Claude asks overlay or split, then shows stills of the styled edit. Approve them, or say what
-   to change.
-6. Pick where to render. Claude times each option on your video first:
-   - **Your laptop** (free).
-   - **GitHub Actions** (free, in a private repo). See [Render on GitHub](#render-on-github-actions).
-   - **AWS Lambda** (fast, costs a little on your own AWS account). See
-     [Render in the cloud](#render-in-the-cloud).
+`AGENTS.md` (and its copy `GEMINI.md`) tells the agent where to start. The skills share code in
+`plugins/ai-editor/lib/` and the renderer in `plugins/ai-editor/remotion/`, so if your agent copies
+single skill folders, clone the whole repo too.
 
-7. Tell Claude what you'd change ("captions too small", "fewer zooms"). It saves that to your
-   taste in `~/.ai-video-editor/taste.md` and uses it on every video after.
+## What happens next
 
-Everything lands in the folder you started in: `creator-teardowns/<handle>/` and `edits/<name>/`.
+1. **Setup**, first time only. Claude checks your computer and installs what is missing: Python,
+   ffmpeg, Node, the free transcription model and the renderer (2-10 minutes, about 1.5 GB, most of
+   it the renderer). It asks before each step. Anything that needs your password, Claude gives you
+   to paste into your own terminal.
+2. **Keys**, optional, about 5 minutes. Three free or near-free accounts that make each edit use
+   less of your Claude usage. Skip them and add them later by saying **finish setup**. Never paste
+   a key into the chat: Claude gives you a command that saves it from your own terminal.
+3. **A few questions, once.** Platform, creators you like, brand, names to show, captions, sound.
+   Each is multiple choice and the first option is fine to accept. Saved in
+   `~/.ai-video-editor/profile.json`.
+4. **Your first edit.** Give the path to your video (an mp4 or mov of you talking to camera), or
+   paste a link to it. No video yet? Pick **Use the sample take**.
+5. **Approve the cut.** You see your transcript with the removed parts struck through. Approve it,
+   or say which lines to keep.
+6. **Approve the stills.** A sheet of frames from the styled edit. Approve, or say what to change.
+   You can also open the edit in your browser and move, trim, swap or delete anything by hand.
+7. **Pick where to render.** Claude times each option on your video and shows the cost first.
+8. **Say what you'd change** ("captions too small", "fewer zooms"). It is saved to
+   `~/.ai-video-editor/taste.md` and used on every video after.
 
-## Costs
+Your files land in the folder you started in: `edits/<name>/`, `clips/<name>/`, `product/<name>/`
+and `creator-teardowns/<handle>/`.
 
-| Part | Cost |
-|---|---|
-| Transcription (default) | Free. Whisper runs on your computer. |
-| Transcription (optional) | ElevenLabs Scribe keeps every "um" and false start, so cuts are better. The free ElevenLabs plan covers a few hours a month. |
-| Render on your laptop | Free. |
-| Render on GitHub Actions | Free: 2,000 minutes a month on private repos. |
-| Render on AWS Lambda | Pay-as-you-go on your own AWS account. Claude quotes it before each render. |
+## What you can say
 
-Remotion, the renderer, is free for individuals and companies of up to 3 people. Larger companies
-need a [Remotion company licence](https://www.remotion.dev/license).
+| Skill | Say | You can paste |
+|---|---|---|
+| `start` | "edit my video", "make my video look like @creator", "new video" | a video file path; a Google Drive, Dropbox or OneDrive share link; a YouTube or TikTok link; a creator profile |
+| `setup` | "set up the editor", "finish setup", "add my Gemini key", "set up Modal" | |
+| `creator-teardown` | "break down @creator", "tear down @creator" | a TikTok, YouTube or Instagram profile, or single video links |
+| `cut` | "cut my video", "remove my mistakes" | a video file path |
+| `style-edit` | "style it", "add captions and zooms", "render the edit", "export to Final Cut" (or Premiere, Resolve, CapCut) | |
+| `taste` | "captions too small", "fewer zooms" | |
+| `clips` | "clip this video", "make shorts from my podcast" | a long video, a YouTube link, a podcast episode (Apple Podcasts, RSS, YouTube) |
+| `product-video` | "make a launch video for my site" | a website URL |
+| `improve` | "improve the editor", "process suggestions" (for people working on this repo) | |
 
-## Render in the cloud
+`motion-design` is a reference the other skills read; you do not call it yourself.
 
-If your laptop is slow or the video is long, render on AWS Lambda instead. Your video is split
-across many machines and comes back in minutes.
+A Spotify episode is usually locked: paste the same episode from Apple Podcasts, YouTube or its RSS
+feed. An iCloud link opens a web page, not the file: download the video first and give its path.
 
-You need an AWS account with a card on it. Say **"set up Lambda rendering"** and Claude walks you
-through creating the access key, deploying the renderer to your account once, and checking it
-works. After that, pick **Lambda** when Claude asks where to render.
+## What it costs
 
-## Render on GitHub Actions
+The editor is free. These are what you may pay for. Numbers marked *estimate* are worked out from
+published prices, not measured on a bill.
 
-Free, no card. The video is split into pieces of about 2 minutes, up to 20 GitHub machines render
-them at once, and a last step joins them. A 44-second vertical video takes about 7 minutes; a
-40-minute take about 20. Each machine-minute counts against the 2,000 free minutes a month that
-private repos get, and Claude prints the count before you choose. You need a GitHub account and
-the GitHub CLI (`gh`); say **"set up GitHub rendering"** and Claude installs it and logs you in.
+| Part | Cost | Notes |
+|---|---|---|
+| Claude | Your Claude plan's usage | Not yet measured per video. The three keys below lower it. |
+| TypeSafe key (decides the cut) | Under 1 cent a video | $0.042 per million tokens; a 3-minute video is about 5,000 tokens. Finding clips in a 12-13 minute video measured $0.013-0.016. |
+| Gemini key (reads a creator's look) | Free | Google AI Studio's free tier, no card. On the paid tier a 7-video teardown measured about $0.02. |
+| ElevenLabs key (keeps every "um") | Free for a few hours a month | Optional. Without it, Whisper transcribes on your computer for free. |
+| Render on your laptop | Free | Often the fastest for a short video. On the 46.8-second sample, `edit.py estimate` gave laptop 63 s, Modal 2.0 min and GitHub Actions 7.7 min; the laptop render took 42 s. Claude prints these numbers for your video before you pick. |
+| Render on Modal | About $0.02 for 60 s, $0.17 for 10 min (*estimate*) | The Starter plan includes $30 of free credit a month. Your first render measures the real speed. |
+| Render on GitHub Actions | Free | Counts against 2,000 free minutes a month on private repos. A 44-second vertical video took about 7 minutes. |
+| Render on AWS Lambda | A few cents to a few dollars (*estimate*) | Your own AWS account, card needed. Claude quotes each render first. |
 
-Pick **GitHub Actions** when Claude asks where to render. Claude packs the renderer and your plan
-into a **private** repo in your account, uploads the footage to that repo as a release file,
-starts the render and downloads the finished video when it is done. Footage over 2 GB goes up in
-parts. Claude asks before creating
-the repo. The footage stays private to you.
+### Cloud renders
+
+- **Modal** (modal.com): your video is split into pieces that render at once on rented machines,
+  then joined on your laptop. Say **set up Modal**; Claude walks you through the free account and
+  logs this computer in.
+- **GitHub Actions**: free, no card. Claude packs the renderer and your footage into a **private**
+  repo in your account (it asks first), renders on up to 20 machines and downloads the result. Say
+  **set up GitHub rendering**.
+- **AWS Lambda**: many machines at once on your own AWS account. One-time setup of about 20 minutes.
+  Say **set up Lambda rendering**.
+
+## Your data
+
+- Everything runs on your computer unless you pick a cloud render. After a cloud render your footage
+  is deleted from the service, unless you said to keep it.
+- A product video of a logged-in site uses its own browser profile, never your main one. You log in
+  by hand, and Claude asks to delete the login when the video is done.
+- Names, emails and account details on screen are blurred by default, your own included.
+- It never clicks anything that creates, deletes, pays, publishes or invites unless you said yes
+  for that video.
+- A suggestion you share to help everyone has your names, handles and web addresses removed first.
 
 ## Troubleshooting
 
-Say **"run the editor doctor"**. Every line reads `ok`, or `FIX` with the exact command for your
-computer.
+| Problem | What to do |
+|---|---|
+| Something is missing or broken | Say **run the editor doctor**. Every line reads `ok`, or `FIX` with the exact command for your computer. |
+| Doctor says something moved off the pinned versions | Say **repair the editor setup**. Claude runs `setup.py repair` from wherever the plugin is installed, and it puts the exact pinned set back. From a cloned folder (Way 1) you can run it yourself: `python3 plugins/ai-editor/skills/setup/scripts/setup.py repair` (`py` instead of `python3` on Windows). |
+| You skipped a key or step | Say **finish setup**. Only the skipped steps run. |
+| Claude does not know "edit my video" | The editor is not loaded. Type `/reload-plugins`, or install it with Way 2. |
+| `python3` not found | Mac: `brew install python`. Windows: `winget install -e --id Python.Python.3.12`, then open a new terminal. Linux: `sudo apt install -y python3 python3-venv`. |
+| Node is too old on Debian or Ubuntu | Doctor prints the fix: it adds NodeSource's signed package source, then installs Node. |
+| Chrome or Chromium installed as a Flatpak | Only logged-in product videos need your Chrome, and a Flatpak one cannot be used. Install Google Chrome or your distro's `chromium` package; doctor says which it found. |
+| A tool installed on Windows is still "not found" | Close and reopen Claude Code: a `winget` install only shows up in a new terminal. |
+| `yt-dlp returned nothing` | The site changed. Doctor shows how to update yt-dlp, or paste single video links. |
+| An Instagram profile fails | Instagram has no free way to list a profile. Paste 10 or more reel links. |
+| `Gemini rejected the key` | Make a new key at the link it prints. The teardown carries on without it meanwhile. |
+| A Drive or Dropbox link fails | Share it as **Anyone with the link**, and link the video file, not the folder. |
+| `the Modal render failed` | Claude offers the laptop render instead. |
+| You logged into a site for a product video and want that login gone | Say **log me out of <site>**. Claude runs `login.mjs logout <site>`. From a cloned folder (Way 1): `node plugins/ai-editor/skills/product-video/scripts/login.mjs logout <site>`. |
+| Where are my keys? | `~/.config/creator-teardown/.env`, shared by both plugins. With `AI_EDITOR_HOME` set, `$AI_EDITOR_HOME/.env` instead, and the shared file is never read. |
+
+Without Claude, from a cloned folder (Way 1), one command does the whole install and is safe to re-run:
+
+```
+python3 plugins/ai-editor/skills/setup/scripts/setup.py bootstrap
+```
+
+Every install gets the same versions: Python packages from a hashed lock file
+(`plugins/ai-editor/requirements/requirements.lock`), Node packages from `package-lock.json`, and
+each model checked against its sha256.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+This repo is MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The tools it runs have their own licences:
+
+| Tool | Licence | What it means for you |
+|---|---|---|
+| [Remotion](https://www.remotion.dev/license) (the renderer) | Remotion License | Free for individuals and for companies of up to 3 people. Bigger companies need a Remotion company licence. |
+| [GSAP](https://gsap.com/community/standard-license/) (animation in the renderer, and the `gsap-skills` plugin) | GSAP Standard License | Free, commercial use included, every plugin too. Not an OSI open-source licence. It bans using GSAP in a no-code visual animation builder that competes with Webflow's. |
+| [HyperFrames](https://github.com/heygen-com/hyperframes) (the `hyperframes` plugin, and code ported from it) | Apache-2.0 | Free. Ported code keeps HeyGen's copyright, listed in [NOTICE](NOTICE). |
 
 Assets fetched while editing: brand logos from [Simple Icons](https://simpleicons.org) (CC0), icons
 from [Lucide](https://lucide.dev) ([ISC licence](https://lucide.dev/license)).
+
+## Contributing
+
+- The rules every video follows, for every user:
+  [plugins/ai-editor/PRINCIPLES.md](plugins/ai-editor/PRINCIPLES.md).
+- Open this folder in Claude Code and say **improve the editor**: the `improve` skill turns the
+  corrections users marked "would help everyone" into rules, checks and tests here.
+- What is next: [docs/BACKLOG.md](docs/BACKLOG.md). What changed: [CHANGELOG.md](CHANGELOG.md).
+- In this folder the editor loads from your working copy. To turn it off while you work, set
+  `"ai-editor@nextwork": false` under `enabledPlugins` in `.claude/settings.local.json`.
+- Run the checks before a pull request:
+  ```
+  python3 tests/check_plugins.py
+  claude plugin validate --strict .
+  python3 tests/smoke.py
+  ```
+  plus each script's `demo` (the list is in `.github/workflows/check.yml`). The model evals cost
+  money; `tests/run_evals.sh --runs 1 --case <case>` runs one.

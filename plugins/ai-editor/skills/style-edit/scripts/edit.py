@@ -2,8 +2,9 @@
 """Stills, estimates and renders for a plan.json. Stdlib only.
 
     python3 edit.py stills   edits/NAME [--plan plan.json] [--no-check]   runs check.py plan, then PNGs into edits/NAME/stills/
-    python3 edit.py estimate edits/NAME [--plan plan.json]   laptop (measured), GitHub Actions, Lambda (guess)
-    python3 edit.py render   edits/NAME [--plan plan.json] [--lambda]   -> edits/NAME/render.mp4
+    python3 edit.py estimate edits/NAME [--plan plan.json]   Laptop, Modal, then GitHub Actions and Lambda: time + cost
+    python3 edit.py render   edits/NAME [--plan plan.json] [--modal | --lambda]   -> edits/NAME/render.mp4
+    python3 edit.py render   edits/NAME [--plan plan.json] --draft   laptop, 2/3 size -> edits/NAME/render-draft.mp4
     python3 edit.py render   edits/NAME [--plan plan.json] --github   -> edits/NAME/github-render/ + github-render-media.zip
     python3 edit.py github-push  edits/NAME --repo NAME [--plan plan.json]   private repo + media release, starts a render
     python3 edit.py github-fetch edits/NAME --repo NAME [--plan plan.json]   waits, then -> edits/NAME/render-github.mp4
@@ -14,6 +15,7 @@ The renderer lives in ~/.ai-video-editor/remotion (the setup skill installs it; 
 refreshes its source from the plugin on every run).
 """
 import argparse
+import filecmp
 import inspect
 import json
 import math
@@ -35,13 +37,31 @@ SETUP = PLUGIN / "skills" / "setup" / "scripts" / "setup.py"
 
 def sync_renderer():
     """Install on first use; afterwards copy the source over so plugin updates take effect."""
-    same_deps = (REMOTION / "package.json").exists() and \
-        (REMOTION / "package.json").read_bytes() == (SRC / "package.json").read_bytes()
+    lock = "package-lock.json"     # the pinned set: a changed lock means npm ci again
+    same_deps = (REMOTION / lock).exists() and (REMOTION / lock).read_bytes() == (SRC / lock).read_bytes()
     if not (REMOTION / "node_modules" / "remotion").exists() or not same_deps:
         subprocess.run([sys.executable, str(SETUP), "remotion"], check=True)
-    shutil.copytree(SRC / "src", REMOTION / "src", dirs_exist_ok=True)
+    mirror(SRC / "src", REMOTION / "src")
     for f in ("render.mjs", "tsconfig.json"):
-        shutil.copy2(SRC / f, REMOTION / f)
+        copy_changed(SRC / f, REMOTION / f)
+
+
+def mirror(src, dst):
+    """Make dst an exact copy of src: changed files copied, files gone from src removed from dst."""
+    shutil.copytree(src, dst, dirs_exist_ok=True, copy_function=copy_changed)
+    for p in sorted(dst.rglob("*"), reverse=True):     # children before their folder
+        if not (src / p.relative_to(dst)).exists():    # missing_ok: parallel stills may race to the same file
+            shutil.rmtree(p, ignore_errors=True) if p.is_dir() and not p.is_symlink() else p.unlink(missing_ok=True)
+
+
+def copy_changed(src, dst):
+    """Copy only a changed file, through a temp name: several clips' stills run at once, and an
+    unchanged file rewritten in place is briefly empty while another run bundles it."""
+    if not (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)):
+        tmp = f"{dst}.{os.getpid()}.tmp"
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    return dst
 
 
 def proxy_filter(sw, sh, w, h):
@@ -76,10 +96,16 @@ def prepare_public(edit, plan, tag):
                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-g", "15",
                         "-keyint_min", "15", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                         "-c:a", "copy", str(proxy)], check=True)
-    # Card images, plus every image an anim's props name (a logo card, a scene's icons and logos).
+    # Card images, plus every image an anim's or a capture card's props name (a logo card, a diagram's logos, props.logo_src).
     rels = [c["src"] for c in plan["cards"] if c.get("src")]
-    rels += re.findall(r'"(images/[^"]+)"', json.dumps([c.get("anim") for c in plan["cards"]]))
+    rels += re.findall(r'"(images/[^"]+)"', json.dumps([[c.get("anim"), c.get("props")] for c in plan["cards"]]))
     rels += [c["src"] for c in plan.get("sfx", [])]   # sound cues, from sfx.py
+    rels += [plan["music"]["src"]] if plan.get("music") else []   # the music bed, from sfx.py music
+    for c in plan.get("cutouts", []):   # the speaker cut out for behind cards: a folder of PNGs from matte.py
+        if not (edit / c["src"]).is_dir():
+            sys.exit(f"ERROR: {edit / c['src']} missing (run matte.py)")
+        shutil.copytree(edit / c["src"], pub / c["src"], dirs_exist_ok=True, copy_function=lambda a, b: None if (
+            os.path.exists(b) and os.path.getmtime(b) >= os.path.getmtime(a)) else shutil.copy2(a, b))   # only new frames
     for rel in dict.fromkeys(rels):
         src = edit / rel
         if not src.exists():
@@ -130,12 +156,121 @@ def aws_env():
 
 def node(*args):
     return subprocess.run(["node", str(REMOTION / "render.mjs"), *map(str, args)], cwd=REMOTION,
-                          check=True, capture_output=args[0] in ("bench", "lambda-estimate"), text=True,
+                          check=True, capture_output=args[0] in ("bench", "lambda-estimate", "bundle"), text=True,
                           env=aws_env())
 
 
-# GitHub Actions, measured 2026-09-30 (minimus7/ai-video-editor-render-test): ubuntu-latest rendered
-# img-5845, 44.2 s of 1080x1920 (1326 frames), in 409 s, plus about 25 s of npm ci, browser and media download.
+# Laptop speed: benchmarked once (2 s of the first video), then replaced by every full laptop render.
+LAPTOP_JSON = HOME / "laptop.json"
+
+
+def laptop_speed(plan_path, pub):
+    try:
+        return json.loads(LAPTOP_JSON.read_text())
+    except (OSError, ValueError):
+        b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
+        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "source": "benchmark"}
+        LAPTOP_JSON.write_text(json.dumps(m))
+        return m
+
+
+def save_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+
+
+# Modal (modal.com): one container per chunk, all at once. Rates from modal.com/pricing, read
+# 2026-10-06: CPU $0.0000131 per physical core per second, memory $0.00000222 per GiB per second,
+# billed on the higher of what is requested and what is used. modal_render.py does the render.
+MODAL_CPU = 4                  # physical cores per container (8 vCPU)
+MODAL_MEM_MB = 8192
+MODAL_CPU_USD_S = 0.0000131
+MODAL_MEM_USD_S = 0.00000222
+MODAL_CHUNK_S = 90             # each container renders about 90 s worth of frames
+MODAL_MAX_CONTAINERS = 40
+MODAL_MIN_CHUNK = 150
+MODAL_JSON = HOME / "modal.json"   # the last Modal render's measured speed
+MODAL_S_PER_FRAME = 0.12       # container seconds per 1080p frame until a render measures it
+MODAL_STARTUP_S = 30           # past the upload and the longest chunk: boot, download, join
+MODAL_UP_BYTES_S = 10e6        # upload speed guess
+
+
+def modal_ranges(frames, s_per_frame):
+    """Inclusive [from, to] pieces, each about MODAL_CHUNK_S of work on one container."""
+    per = max(MODAL_MIN_CHUNK, math.ceil(MODAL_CHUNK_S / s_per_frame))
+    k = min(MODAL_MAX_CONTAINERS, math.ceil(frames / per))
+    step = math.ceil(frames / k)
+    return [[a, min(frames, a + step) - 1] for a in range(0, frames, step)]
+
+
+def modal_cost(chunks):
+    """USD for chunks [{wall_s, cpu_s}]: core-seconds are the higher of the request (cores x wall)
+    and the use (cpu_s is vCPU seconds; a Modal core is 2 vCPU). Memory at the request."""
+    core_s = sum(max(MODAL_CPU * c["wall_s"], c["cpu_s"] / 2) for c in chunks)
+    mem_s = sum(MODAL_MEM_MB / 1024 * c["wall_s"] for c in chunks)
+    return core_s * MODAL_CPU_USD_S + mem_s * MODAL_MEM_USD_S
+
+
+def modal_speed():
+    """(s_per_frame, startup_s, measured?) from the last Modal render, else the guesses above."""
+    try:
+        m = json.loads(MODAL_JSON.read_text())
+        return m["s_per_frame"], m["startup_s"], True
+    except (OSError, ValueError, KeyError):
+        return MODAL_S_PER_FRAME, MODAL_STARTUP_S, False
+
+
+def modal_estimate(frames, media_bytes):
+    """(wall s, usd, containers, measured?)"""
+    spf, startup, measured = modal_speed()
+    r = modal_ranges(frames, spf)
+    wall = media_bytes / MODAL_UP_BYTES_S + startup + max(b - a + 1 for a, b in r) * spf
+    usd = modal_cost([{"wall_s": 10 + (b - a + 1) * spf, "cpu_s": 0} for a, b in r])   # ~10 s boot each
+    return wall, usd, len(r), measured
+
+
+def venv_python():
+    vpy = HOME / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return str(vpy) if vpy.exists() else sys.executable
+
+
+def modal_ready():
+    """modal installed in the venv and a token saved (no network call)."""
+    has_pkg = subprocess.run([venv_python(), "-c", "import modal"], capture_output=True).returncode == 0
+    has_token = (Path.home() / ".modal.toml").exists() or bool(os.environ.get("MODAL_TOKEN_ID"))
+    return has_pkg and has_token
+
+
+def render_modal(edit, plan_path, pub, out):
+    bundle_dir = edit / ".modal-bundle"
+    node("bundle", pub, bundle_dir)
+    r = subprocess.run([venv_python(), str(Path(__file__).parent / "modal_render.py"), "render",
+                        str(bundle_dir), str(plan_path), str(out)], stdout=subprocess.PIPE, text=True)
+    shutil.rmtree(bundle_dir, ignore_errors=True)
+    print(r.stdout, end="")
+    if r.returncode:
+        sys.exit("ERROR: the Modal render failed (above). Nothing was written to " + str(out))
+    m = json.loads(r.stdout.strip().splitlines()[-1])
+    save_json(MODAL_JSON, m)
+
+
+def render_laptop(edit, plan_path, pub, out, draft):
+    t0 = time.time()
+    node("local", pub, plan_path, out, *(["--draft"] if draft else []))
+    frames = json.loads(plan_path.read_text())["durationInFrames"]
+    # The next estimate uses this video's real speed. ponytail: a clip under 10 s is mostly Chrome
+    # starting up, so it would overstate the speed of a long video; those are skipped.
+    if not draft and frames >= 300:
+        try:
+            bundle_s = json.loads(LAPTOP_JSON.read_text())["bundle_s"]
+        except (OSError, ValueError, KeyError):
+            bundle_s = 3.0
+        save_json(LAPTOP_JSON, {"s_per_frame": max(0.001, (time.time() - t0 - bundle_s) / frames),
+                                "bundle_s": bundle_s, "source": f"render of {edit.name}"})
+
+
+# GitHub Actions, measured 2026-09-30 (a private test repo): ubuntu-latest rendered
+# the sample take, 44.2 s of 1080x1920 (1326 frames), in 409 s, plus about 25 s of npm ci, browser and media download.
 GH_S_PER_FRAME = 0.31
 GH_INSTALL_S = 25
 GH_CHUNK_S = 120          # about 2 min of video per runner
@@ -163,16 +298,25 @@ def github_estimate(frames, fps, media_bytes):
             f"uses about {minutes} of the 2,000 free private-repo minutes a month; {media}. Free.")
 
 
+def minutes(s):
+    return f"{s:.0f} s" if s < 90 else f"{s / 60:.1f} min"
+
+
 def estimate(plan_path, pub):
-    b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
-    laptop = b["bundle_s"] + b["s_per_frame"] * b["frames"]
-    lam = json.loads(node("lambda-estimate", plan_path).stdout.strip().splitlines()[-1])
     plan = json.loads(plan_path.read_text())
+    frames = plan["durationInFrames"]
     media = sum(f.stat().st_size for f in pub.rglob("*") if f.is_file())
-    print(f"Laptop: about {laptop / 60:.1f} min (measured {b['bench_s']:.1f} s for "
-          f"{b['bench_frames']} frames, {b['frames']} frames in all). Free.")
-    print(github_estimate(plan["durationInFrames"], plan["fps"], media))
-    print(f"Lambda: about {lam['wall_s']} s on {lam['lambdas']} Lambdas in {lam['region']}, "
+    lap = laptop_speed(plan_path, pub)
+    print(f"Laptop: about {minutes(lap['bundle_s'] + lap['s_per_frame'] * frames)} ({frames} frames, speed from "
+          f"the last {'benchmark' if lap['source'] == 'benchmark' else lap['source']}). Free.")
+    wall, usd, n, measured = modal_estimate(frames, media)
+    print(f"Modal: about {minutes(wall)} on {n} machine{'s' * (n > 1)}, about ${usd:.2f} "
+          f"({'speed measured on the last Modal render' if measured else 'a guess until the first Modal render'}; "
+          f"the Starter plan includes $30 of free credit a month)." +
+          ("" if modal_ready() else " Not set up yet: the setup skill's Modal step runs first."))
+    lam = json.loads(node("lambda-estimate", plan_path).stdout.strip().splitlines()[-1])
+    print("Other: " + github_estimate(frames, plan["fps"], media))
+    print(f"Other: Lambda: about {lam['wall_s']} s on {lam['lambdas']} Lambdas in {lam['region']}, "
           f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost.")
 
 
@@ -248,7 +392,7 @@ __JOIN__
         with:
           name: render
           path: out/render.mp4
-          retention-days: 7
+          retention-days: 1
       - run: |
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \\
             -q '.artifacts[] | select(.name | startswith("chunk-")) | .id' |
@@ -258,7 +402,7 @@ __JOIN__
 """
 # Chunks carry PCM audio that runs a few samples past the last frame (16 at 30 fps). Each chunk's audio
 # is cut to exactly its frames, the pieces laid end to end and encoded to AAC once; the video is copied.
-# Measured on img-5845 (3 chunks): no gap or step at the joins, sync held to the sample.
+# Measured on the sample take (3 chunks): no gap or step at the joins, sync held to the sample.
 JOIN = """import json, os, subprocess
 fps, sr = float(os.environ["FPS"]), 48000
 chunks = json.loads(os.environ["CHUNKS"])
@@ -291,7 +435,8 @@ it, as the `{zip}` asset of the `media` release.
 
 Actions > render > Run workflow renders `plan.json` with Remotion, about 2 minutes of video per
 runner in parallel, then joins the pieces. The video is the `render` artifact on the finished run
-(kept 7 days). `edit.py github-fetch` downloads it.
+(kept 1 day). `edit.py github-fetch` downloads it, then deletes the footage (the `media` release) and
+the run's artifacts unless the profile says `"cloud_cleanup": false`.
 """
 
 
@@ -360,6 +505,29 @@ def need_gh():
         sys.exit(1)
 
 
+# The render repo's own .git/config: an empty helper clears the user's global ones for this repo only, then
+# gh supplies the login. `gh auth setup-git` would rewrite the user's global git config instead.
+GIT_CREDENTIAL = [["config", "--local", "--replace-all", "credential.helper", ""],
+                  ["config", "--local", "--add", "credential.helper", "!gh auth git-credential"]]
+
+
+def cloud_cleanup():
+    """The profile's answer to "Delete the uploaded footage from <service> after rendering?". Unanswered: yes."""
+    sys.path.insert(0, str(PLUGIN / "lib"))
+    from ai_editor import profile
+    return profile.load().get("cloud_cleanup", True) is not False
+
+
+def github_cleanup(repo_name, run_id, gh=gh):
+    """After the render is downloaded: delete the footage from GitHub. The `media` release (and its tag) and every
+    artifact of the run. The repo stays (renderer source and plan, no footage) for the next push."""
+    gh("release", "delete", "media", "-y", "--cleanup-tag", "-R", repo_name, check=False)
+    arts = gh("api", f"repos/{repo_name}/actions/runs/{run_id}/artifacts", check=False).stdout
+    for a in (json.loads(arts).get("artifacts", []) if arts.strip() else []):
+        gh("api", "-X", "DELETE", f"repos/{repo_name}/actions/artifacts/{a['id']}", check=False)
+    print(f"deleted the footage from {repo_name}: the media release and the run's artifacts")
+
+
 def github_push(edit, repo_name, tag):
     need_gh()
     repo, zip_path = gh_paths(edit, tag)
@@ -373,7 +541,8 @@ def github_push(edit, repo_name, tag):
     git = lambda *a, **kw: subprocess.run(["git", *a], cwd=repo, check=True, **kw)
     if not (repo / ".git").exists():
         git("init", "-q", "-b", "main")
-    gh("auth", "setup-git")                        # git pushes with the gh login
+    for c in GIT_CREDENTIAL:                       # git pushes with the gh login, in this repo only
+        git(*c)
     git("add", "-A")
     if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo).returncode:
         who = subprocess.run(["git", "config", "user.email"], cwd=repo, capture_output=True, text=True).stdout.strip()
@@ -431,9 +600,26 @@ def github_fetch(edit, repo_name, tag):
     out = edit / f"render-github{tag}.mp4"
     shutil.move(str(tmp / "render.mp4"), out)
     shutil.rmtree(tmp, ignore_errors=True)
+    if cloud_cleanup():
+        github_cleanup(repo_name, run_id)
+    else:
+        print(f"kept on GitHub (profile cloud_cleanup false): the footage is the media release of {repo_name}")
     dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                           str(out)], capture_output=True, text=True).stdout.strip()
     print(f"{out} ({float(dur):.1f} s)")
+
+
+def contact_sheet(edit, plan_name):
+    """sheet.py in the venv (it needs Pillow): one labelled sheet of every still, printed as THE review image."""
+    r = subprocess.run([venv_python(), str(Path(__file__).parent / "sheet.py"), str(edit), "--plan", plan_name],
+                       capture_output=True, text=True)
+    if r.returncode:
+        print(f"note: no contact sheet ({(r.stderr.strip().splitlines() or ['sheet.py failed'])[-1]}); review the stills one by one")
+        return
+    s = json.loads(r.stdout.strip().splitlines()[-1])
+    print(f"REVIEW THIS: {s['sheet']}\n  {s['stills']} stills on one sheet, {s['size'][0]}x{s['size'][1]}, about "
+          f"{s['tokens_sheet']} image tokens (the stills one by one: about {s['tokens_stills']}). "
+          f"Open a single still from {Path(s['sheet']).parent} only to zoom in on a tile.")
 
 
 def demo():
@@ -460,6 +646,23 @@ def demo():
             assert (repo / f).exists(), f
         assert not list(repo.rglob("*.mp4")), "footage leaked into the git folder"
         assert set(zipfile.ZipFile(z).namelist()) >= {"cut.mp4", "images/a.png"}, zipfile.ZipFile(z).namelist()
+        # an unchanged renderer file is never rewritten (parallel stills bundle it); a changed one is
+        a, b = Path(t) / "a.ts", Path(t) / "b.ts"
+        a.write_text("same"), b.write_text("same")
+        ino = b.stat().st_ino
+        copy_changed(a, b)
+        assert b.stat().st_ino == ino, "an unchanged file was rewritten"
+        a.write_text("new")
+        copy_changed(a, b)
+        assert b.read_text() == "new" and not list(Path(t).glob("b.ts.*.tmp"))
+        # the renderer copy is exact: a component deleted upstream leaves the user's copy too
+        up, mine = Path(t) / "up", Path(t) / "mine"
+        (up / "keep").mkdir(parents=True), (mine / "old").mkdir(parents=True)
+        (up / "keep" / "A.tsx").write_text("a"), (mine / "Gone.tsx").write_text("x"), (mine / "old" / "B.tsx").write_text("b")
+        (Path(t) / "outside.txt").write_text("user")
+        mirror(up, mine)
+        assert sorted(p.relative_to(mine).as_posix() for p in mine.rglob("*")) == ["keep", "keep/A.tsx"], list(mine.rglob("*"))
+        assert (Path(t) / "outside.txt").exists()
         wf = (repo / ".github/workflows/render.yml").read_text()
         assert "-p 'github-render-media.zip*'" in wf
         for job in ("  plan:", "  render:", "  join:", "name: render\n", "render.mjs chunk", '"concat"'):
@@ -476,6 +679,21 @@ def demo():
         split_file(big, 1000)
         assert [p.name for p in media_files(big)] == ["big.zip.part-00", "big.zip.part-01", "big.zip.part-02"]
         assert b"".join(p.read_bytes() for p in media_files(big)) == bytes(range(256)) * 10
+    # git pushes use the gh login in the render repo only: the user's global credential helper is never rewritten
+    assert "setup-git" not in inspect.getsource(github_push)
+    assert GIT_CREDENTIAL and all(c[:2] == ["config", "--local"] for c in GIT_CREDENTIAL), GIT_CREDENTIAL
+    # after a downloaded render the footage leaves GitHub: the media release and the run's artifacts, nothing else
+    assert "retention-days: 7" not in WORKFLOW and WORKFLOW.count("retention-days: 1") == 2
+    calls = []
+
+    def fake_gh(*args, check=True, cwd=None):
+        calls.append(args)
+        out = '{"artifacts": [{"id": 11, "name": "render"}, {"id": 12, "name": "chunk-00"}]}' if args[:1] == ("api",) and "-X" not in args else ""
+        return subprocess.CompletedProcess(args, 0, out, "")
+    github_cleanup("me/video-x", "99", fake_gh)
+    assert ("release", "delete", "media", "-y", "--cleanup-tag", "-R", "me/video-x") in calls, calls
+    assert {c[-1] for c in calls if "DELETE" in c} == {"repos/me/video-x/actions/artifacts/11", "repos/me/video-x/actions/artifacts/12"}, calls
+    assert not any("repo" in c[:1] or "delete" == c[0] for c in calls), "never the repo itself"
     assert chunk_ranges(1326, 30) == [[0, 1325]]
     r = chunk_ranges(40 * 60 * 30, 30)
     assert len(r) == 20 and r[0] == [0, 3599] and r[-1][1] == 71999, r
@@ -483,6 +701,18 @@ def demo():
     assert all(b - a + 1 > 0 for a, b in chunk_ranges(9, 1))
     assert "1 runner," in github_estimate(1326, 30, 34e6) and "fits one" in github_estimate(1326, 30, 34e6)
     assert "20 runners" in github_estimate(72000, 30, 5e9) and "3 parts" in github_estimate(72000, 30, 5e9)
+    # Modal: chunks cover every frame once, in order; about 90 s of work each; capped
+    assert modal_ranges(1326, 0.12) == [[0, 662], [663, 1325]], modal_ranges(1326, 0.12)
+    assert modal_ranges(100, 0.12) == [[0, 99]]
+    r = modal_ranges(10 * 60 * 30, 0.12)
+    assert len(r) == 24 and r[-1][1] == 17999 and all(b - a + 1 <= 750 for a, b in r), (len(r), r[-1])
+    assert len(modal_ranges(3 * 3600 * 30, 0.12)) == MODAL_MAX_CONTAINERS
+    assert [f for a, b in modal_ranges(9999, 0.05) for f in range(a, b + 1)] == list(range(9999))
+    # billed at the request when the render used less (400 core-s), at the use when it used more
+    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 6}]) - (400 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
+    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 1000}]) - (500 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
+    wall, usd, n, _ = modal_estimate(1800, 50e6)
+    assert n >= 1 and wall > 0 and 0 < usd < 0.2, (wall, usd, n)
     print("demo ok")
 
 
@@ -494,6 +724,8 @@ def main():
     ap.add_argument("edit")
     ap.add_argument("--plan", default="plan.json")
     ap.add_argument("--lambda", dest="use_lambda", action="store_true")
+    ap.add_argument("--modal", action="store_true", help="render on Modal (modal.com)")
+    ap.add_argument("--draft", action="store_true", help="laptop render at 2/3 size, to render-draft.mp4")
     ap.add_argument("--github", action="store_true", help="package for GitHub Actions instead of rendering here")
     ap.add_argument("--repo", help="GitHub repo name (github-push, github-fetch)")
     ap.add_argument("--no-check", action="store_true", help="stills even when check.py plan finds a FAIL")
@@ -515,14 +747,20 @@ def main():
             sys.exit("check.py plan found a FAIL: fix it and plan again (edit.py stills --no-check to look anyway)")
         pairs = [f"{k}={v}" for k, v in still_frames(plan).items()]
         node("stills", pub, plan_path, edit / f"stills{tag}", *pairs)
+        contact_sheet(edit, a.plan)
     elif a.cmd == "estimate":
         estimate(plan_path, pub)
     elif a.github:
         package_github(edit, plan_path, pub, tag)
     elif a.use_lambda:
-        node("lambda", pub, plan_path, edit / f"render{tag}.mp4", re.sub(r"[^a-z0-9-]+", "-", f"ai-editor-{edit.name}{tag}".lower()))
+        node("lambda", pub, plan_path, edit / f"render{tag}.mp4", re.sub(r"[^a-z0-9-]+", "-", f"ai-editor-{edit.name}{tag}".lower()),
+             *(["--cleanup"] if cloud_cleanup() else []))
+    elif a.modal:
+        if not modal_ready():
+            sys.exit("Modal is not set up on this computer: run the setup skill's Modal step first.")
+        render_modal(edit, plan_path, pub, edit / f"render{tag}.mp4")
     else:
-        node("local", pub, plan_path, edit / f"render{tag}.mp4")
+        render_laptop(edit, plan_path, pub, edit / f"render{tag}{'-draft' if a.draft else ''}.mp4", a.draft)
 
 
 if __name__ == "__main__":

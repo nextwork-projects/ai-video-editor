@@ -1,0 +1,13 @@
+# What the editor's venv needs. The installer reads requirements.lock, never this file.
+# After editing, regenerate the lock with the uv command at the top of requirements.lock, then
+# python3 ../lib/ai_editor/lock.py teardown (RELEASING.md, Refreshing the lock).
+pip
+faster-whisper
+av<16
+numpy
+pillow>=10.1
+yt-dlp
+opencv-python-headless>=4.8
+onnxruntime
+ocrmac; sys_platform == "darwin"
+rapidocr; sys_platform != "darwin"

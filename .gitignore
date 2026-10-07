@@ -2,3 +2,15 @@ __pycache__/
 *.pyc
 node_modules/
 .DS_Store
+plugins/*/evals/results/
+eval-results/
+
+# What users make when they start Claude Code in this folder
+/edits/
+/clips/
+/product/
+/creator-teardowns/
+/*.mp4
+/*.mov
+/*.MOV
+.claude/settings.local.json

@@ -2,7 +2,7 @@ name: check
 
 # Runs the self-checks on Mac, Linux and Windows every Monday, and on every push.
 # The TikTok step can't fail the run: GitHub's servers are sometimes blocked by
-# TikTok. When it goes red for a few weeks running, yt-dlp needs an update.
+# TikTok. weekly.yml says when the pinned yt-dlp itself broke (RELEASING.md: refresh the lock).
 on:
   push:
   workflow_dispatch:
@@ -10,6 +10,24 @@ on:
     - cron: "0 9 * * 1"
 
 jobs:
+  # Manifests, skill and agent frontmatter, the shared contracts copy. Linux only: nothing OS-specific.
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Skills frontmatter
+        run: python tests/check_plugins.py
+      - name: claude plugin validate --strict
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          for p in . plugins/ai-editor plugins/creator-teardown; do claude plugin validate --strict "$p"; done
+
   check:
     strategy:
       fail-fast: false
@@ -24,34 +42,25 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install tools
-        run: python -m pip install yt-dlp numpy "pillow>=10.1" opencv-python-headless
+      - name: Install tools (the pinned set)
+        run: python -m pip install --no-deps --require-hashes -r plugins/ai-editor/requirements/requirements.lock
       # setup-ffmpeg has no Apple Silicon build; macOS runners are arm64.
       - if: runner.os != 'macOS'
         uses: FedericoCarboni/setup-ffmpeg@v3
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
       - name: Self-checks
-        env:
-          T: plugins/creator-teardown/skills/creator-teardown/scripts
-          A: plugins/ai-editor/skills
-        run: |
-          python $T/fetch.py demo
-          python $T/editplan.py demo
-          python $T/visual.py demo
-          python $A/cut/scripts/test_build_timeline.py
-          python $A/style-edit/scripts/plan.py demo
-          python $A/style-edit/scripts/edit.py demo
-          python $A/setup/scripts/setup.py demo
-          python $A/taste/scripts/taste.py demo
-          python $A/style-edit/scripts/face.py demo
-          python $A/style-edit/scripts/check.py demo
+        run: tests/demos.sh
       - name: List a TikTok profile
         continue-on-error: true
         run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py list tiktok --limit 3
 
-  # The whole editor, installed from scratch the way a learner installs it, then run end to end
-  # on a made-up 4 s video: transcribe, capture, face, sound, plan both layouts, stills, render.
+  # The whole editor, installed from zero into a fresh AI_EDITOR_HOME with the one bootstrap
+  # command, re-run to prove it changes nothing, drifted and repaired (tests/fresh_install.py),
+  # then run end to end on a made-up 4 s video: transcribe, capture, face, sound, plan both
+  # layouts, stills, render. Windows runs the bootstrap through `py` in PowerShell, as a learner
+  # does, and skips the optional matting step there (slow on the runner); smoke still fetches
+  # and runs the matting model on every OS.
   e2e:
     strategy:
       fail-fast: false
@@ -77,12 +86,15 @@ jobs:
         uses: FedericoCarboni/setup-ffmpeg@v3
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
-      - name: Install (setup skill)
-        run: |
-          S=plugins/ai-editor/skills/setup/scripts/setup.py
-          python $S venv
-          python $S model
-          python $S remotion
+      - name: Fresh AI_EDITOR_HOME
+        run: echo "AI_EDITOR_HOME=$RUNNER_TEMP/ave-home" >> "$GITHUB_ENV"
+      - name: Bootstrap from zero, twice; drift; repair
+        if: runner.os != 'Windows'
+        run: python tests/fresh_install.py --matte
+      - name: Bootstrap from zero, twice; drift; repair (py, PowerShell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: py -3.12 tests/fresh_install.py
       - name: Doctor
         env:
           ELEVENLABS_API_KEY: placeholder-not-a-real-key-for-ci
@@ -91,3 +103,58 @@ jobs:
           python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py doctor
       - name: End to end
         run: python tests/smoke.py
+      - name: Recording safety (deny list, blur on a synthetic page)
+        run: node tests/test_record.mjs --require-chrome
+
+  # The renderer's look pinned by four stills (tests/golden/linux/; each OS rasterises fonts its own
+  # way, so each has its own set, and a Mac checks tests/golden/darwin/ locally). On a failure the
+  # fresh stills and diffs are uploaded: if the change was meant, download them into
+  # tests/golden/linux/ (or run tests/golden.py --update on Linux) and commit.
+  golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install (setup skill)
+        run: |
+          S=plugins/ai-editor/skills/setup/scripts/setup.py
+          python $S venv
+          python $S remotion
+      - name: Golden stills
+        run: ~/.ai-video-editor/venv/bin/python tests/golden.py --out golden-out
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-out
+          path: golden-out
+
+  # Plugin evals (tests/run_evals.sh): real model calls, so manual only and only when the repo has
+  # an ANTHROPIC_API_KEY secret. Without the secret the job is skipped.
+  evals:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Evals
+        if: env.ANTHROPIC_API_KEY != ''
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          tests/run_evals.sh --runs 1
+      - if: always() && env.ANTHROPIC_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results

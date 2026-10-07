@@ -26,8 +26,8 @@ Options:
                    <out>.clean.json.
   --lang CODE      ISO-639-1 language code (default: en)
 
-The key comes from the ELEVENLABS_API_KEY variable, a .env in the current
-folder, or the file `fetch.py setkey` writes, in that order.
+The key comes from the ELEVENLABS_API_KEY variable, else the file `fetch.py setkey`
+writes. A .env in the current folder is never read (it is another project's).
 
 Scribe keyterms add $0.05 per hour of audio. Cap is 1000 terms, <=50 chars each,
 <=5 words each; this script enforces those limits and drops what violates them.
@@ -46,9 +46,11 @@ from pathlib import Path
 API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 MODEL = "scribe_v2"
 # One key for every folder. Outside the skill folder, so git pull and plugin
-# updates never touch it.
-KEY_FILE = Path.home() / ".config" / "creator-teardown" / ".env"
-HOME = Path.home() / ".ai-video-editor"
+# updates never touch it. With AI_EDITOR_HOME set (an isolated run) the key file is
+# $AI_EDITOR_HOME/.env and the shared one is never read, as in ai_editor/keys.py.
+HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
+KEY_FILE = (HOME / ".env" if os.environ.get("AI_EDITOR_HOME", "").strip()
+            else Path.home() / ".config" / "creator-teardown" / ".env")
 VENV_PY = HOME / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 FILLER_PROMPT = "Umm, uh, so, like, you know, I mean... uh, okay, um, right."
 
@@ -59,14 +61,15 @@ MAX_KEYTERM_WORDS = 5
 BAD_KEYTERM_CHARS = set('<>{}[]\\')
 
 
-def find_key():
-    """(key, where it came from), or (None, None)."""
-    if os.environ.get("ELEVENLABS_API_KEY"):
-        return os.environ["ELEVENLABS_API_KEY"].strip(), "the ELEVENLABS_API_KEY variable"
-    for p in (Path.cwd() / ".env", KEY_FILE):
+def find_key(var="ELEVENLABS_API_KEY"):
+    """(key, where it came from), or (None, None). `var` picks which key:
+    ELEVENLABS_API_KEY (transcripts) or GEMINI_API_KEY (the look pass)."""
+    if os.environ.get(var):
+        return os.environ[var].strip(), f"the {var} variable"
+    for p in (KEY_FILE,):   # never a .env in the working folder: another project's key would be billed
         if p.exists():
             for line in p.read_text().splitlines():
-                if line.startswith("ELEVENLABS_API_KEY="):
+                if line.startswith(f"{var}="):
                     key = line.split("=", 1)[1].strip().strip('"').strip("'")
                     if key:
                         return key, str(p)
@@ -200,7 +203,9 @@ def whisper(media, lang, keyterms):
         print("ERROR: faster-whisper is not installed. Run fetch.py doctor for the fix.",
               file=sys.stderr)
         sys.exit(2)
-    model = WhisperModel(os.environ.get("AI_EDITOR_WHISPER_MODEL", "small"), device="cpu",
+    name = os.environ.get("AI_EDITOR_WHISPER_MODEL", "small")
+    pinned = HOME / "models" / f"faster-whisper-{name}"   # the ai-editor setup's pinned copy
+    model = WhisperModel(str(pinned) if (pinned / "model.bin").exists() else name, device="cpu",
                          compute_type="int8", download_root=str(HOME / "models"))
     prompt = FILLER_PROMPT + (" " + ", ".join(keyterms) + "." if keyterms else "")
     segs, info = model.transcribe(str(media), language=lang or None, word_timestamps=True,

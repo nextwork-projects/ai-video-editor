@@ -5,6 +5,8 @@
 
 Reads   <edit_dir>/words.raw.json   the transcript of the source
         <edit_dir>/spans.json       what to remove, QUOTED from the transcript
+        <edit_dir>/lead.json        optional, one quoted range that plays first (an alternate
+                                    hook recorded after the body; retakes.py hook writes it)
 Writes  <edit_dir>/decisions.json   kept spans in source seconds (docs/CONTRACTS.md)
         <edit_dir>/report.json      every cut with its kind, evidence and note
         <edit_dir>/words.json       the kept words re-timed onto cut.mp4's timeline
@@ -40,6 +42,7 @@ import argparse
 import array
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -47,7 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from textnorm import load_words, locate  # noqa: E402
 
-KINDS = {"retake", "false_start", "filler", "meta", "audio_event", "redundant"}
+KINDS = {"alt_hook", "retake", "false_start", "filler", "meta", "audio_event", "redundant"}
 CONF = {"high", "medium", "low"}
 DEFAULT_MAX_PAUSE = 0.15
 GAP_QUIET_DB = 12.0   # a word gap counts as a pause only if it stays this far under speech
@@ -67,7 +70,12 @@ def probe(src):
     fps = float(n) / float(d or 1)
     dur = float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                      "-of", "default=nw=1:nk=1", str(src)]))
-    return fps, dur
+    # The frame count comes from the video stream, never duration * fps: a phone's audio often
+    # runs a frame or two past its video, and a last span sized from the format duration asks
+    # render.py for frames that do not exist ("span N: 179 frames, wanted 180").
+    n = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+             "stream=nb_read_packets", "-of", "default=nw=1:nk=1", str(src)])
+    return fps, dur, int(n) if n.isdigit() else int(round(dur * fps))
 
 
 # --- 1. quoted spans -> cuts on token edges ----------------------------------
@@ -169,11 +177,16 @@ def snap_and_pad(cuts, words, pad):
 # A fixed dB threshold is wrong: what it has to separate is a DISTANCE (this
 # speaker's speech vs this room's floor), and both move from take to take. So:
 # speech = p99 of 20 ms window levels, threshold = speech - 26 dB, never closer
-# than 6 dB above the room floor. Under 20 dB between speech and floor no single
-# threshold separates them, and the run stops rather than guess: a wrong
-# threshold does not error, it ships a cut with every pause still in it.
+# than 6 dB above the room floor.
+# Under 20 dB between speech and floor there is a music bed (or a loud room) under
+# the voice. Measured silence cannot see a pause there, and a threshold high enough
+# to see one also sees the quiet ends of words. So the transcript becomes the
+# authority: only gaps BETWEEN words are trimmed, and only where the audio stays
+# near the bed, measured per file from the quietest 10% of the take (the bed level)
+# plus a third of the speech-to-bed distance. Under 10 dB the run stops rather than guess.
 SPEECH_OFFSET_DB = 26.0
 MIN_SEPARATION_DB = 20.0
+BED_PERCENTILE = 0.10
 FLOOR_SEARCH_DB = 10
 FLOOR_HEADROOM_DB = 6.0
 RMS_WIN_S = 0.020
@@ -217,6 +230,71 @@ def audible_start(lvl, noise_db, t, limit):
     return None if i >= end else max(t, i * RMS_WIN_S - ONSET_MARGIN_S)
 
 
+# A label far longer than the word can be said in (over 2.5x a speech-rate length and 0.4 s more) is a
+# transcriber artefact: Whisper times a 0.15 s "if" at 0.7 s, or folds a 3 s pause into an "I". Judged
+# on that label, a pause cut "clips" a word the render still plays, and the cut is rebuilt for nothing. So such a label is fitted to where the
+# audio has energy inside it (or just after it, when the label runs ahead of the word), and failing
+# that its end is clamped to a speech-rate length.
+def plausible_s(text):
+    return 0.1 + 0.065 * len(re.sub(r"[^a-z0-9]", "", str(text).lower()))
+
+
+def implausible(w):
+    d, est = w["end"] - w["start"], plausible_s(w["text"])
+    return d > max(2.5 * est, est + 0.4)
+
+
+def fit_labels(toks, lvl, noise_db):
+    """{index: (start, end)} for each implausibly long word label, fitted to the audio: from the first
+    audible window to the end of that audible run, at most a speech-rate length.
+    ponytail: a breath before the word inside the label is taken for the word; judged by level, not voice."""
+    out = {}
+    for i, w in enumerate(toks):
+        if w.get("type") != "word" or not implausible(w):
+            continue
+        est = plausible_s(w["text"])
+        nxt = next((t["start"] for t in toks[i + 1:] if t.get("type") in ("word", "audio_event")), w["end"] + est)
+        a = audible_start(lvl, noise_db, w["start"], min(nxt, w["end"] + est)) if lvl else None
+        if a is None:
+            out[i] = (w["start"], round(w["start"] + est, 3))
+            continue
+        j = int((a + ONSET_MARGIN_S) / RMS_WIN_S)   # the word ends where its first audible run does
+        while j < len(lvl) and lvl[j] > noise_db and j * RMS_WIN_S < a + est:
+            j += 1
+        out[i] = (round(a, 3), round(max(min(j * RMS_WIN_S, nxt), a + 0.04), 3))
+    return out
+
+
+def unheard(toks, lvl, noise_db):
+    """[(index, voiced_s)]: implausibly long labels holding more voiced audio than their word can.
+    Whisper can fold a whole spoken repeat into one label (the sample's "content" over "and to break
+    down competitor ads and"); fitting the label cannot bring those words back, so transcribe.py
+    re-transcribes the stretch, and transcript.txt marks what is still missing."""
+    out = []
+    for i, w in enumerate(toks):
+        if w.get("type") != "word" or not implausible(w):
+            continue
+        voiced = sum(v > noise_db for v in lvl[int(w["start"] / RMS_WIN_S):int(w["end"] / RMS_WIN_S)]) * RMS_WIN_S
+        est = plausible_s(w["text"])
+        if voiced > max(2 * est, est + 0.5):   # the sample's "content": 1.3 s voiced, 0.56 s word
+            out.append((i, round(voiced, 2)))
+    return out
+
+
+def apply_labels(toks, labels):
+    """toks with fitted labels as copies; the raw list is never changed."""
+    return [dict(t, start=labels[i][0], end=labels[i][1]) if i in labels else t for i, t in enumerate(toks)]
+
+
+def load_fitted(d):
+    """words.raw.json with build_timeline's fitted labels (report.json): the words paper-edit.md,
+    words.json and verify_cut.py all judge, so the three agree."""
+    toks = load_words(Path(d) / "words.raw.json")
+    rep = Path(d) / "report.json"
+    labels = json.loads(rep.read_text()).get("labels", {}) if rep.exists() else {}
+    return apply_labels(toks, {int(k): v for k, v in labels.items()})
+
+
 def derive_noise_db(lvl):
     """(noise_db or None, diag)."""
     if len(lvl) < 50:
@@ -232,9 +310,9 @@ def derive_noise_db(lvl):
     sep = speech - floor
     diag = {"speech": float(speech), "floor": float(floor), "sep": float(sep)}
     if sep < MIN_SEPARATION_DB:
-        diag["reason"] = (f"speech {speech} dB and floor {floor} dB are only {sep:.0f} dB apart "
-                          f"(need {MIN_SEPARATION_DB:.0f})")
-        return None, diag
+        bed = srt[int(BED_PERCENTILE * (len(srt) - 1))]
+        diag.update(bed=round(bed, 1), noise=round(bed + (speech - bed) / 3, 1))
+        return diag["noise"], diag
     diag["noise"] = noise = max(speech - SPEECH_OFFSET_DB, floor + FLOOR_HEADROOM_DB)
     return noise, diag
 
@@ -259,17 +337,18 @@ def detect_silence(src, noise_db, min_dur):
     return [tuple(s) for s in spans]
 
 
-def quiet_word_gaps(words, gap_max, lvl, speech_db):
-    """Gaps between words that the audio confirms are not speech. Breaths sit
-    above the silence threshold, so measured silence alone leaves every breath
-    in. A gap Whisper left by dropping a word is loud, so the level check keeps it."""
+def quiet_word_gaps(words, gap_max, lvl, quiet_db):
+    """Gaps between words that the audio confirms are not speech (90% of the gap's
+    windows under quiet_db). Breaths sit above the silence threshold, so measured
+    silence alone leaves every breath in. A gap Whisper left by dropping a word is
+    loud, so the level check keeps it."""
     out = []
     for p, n in zip(words, words[1:]):
         a, b = p["end"], n["start"]
         if b - a <= gap_max or not lvl:
             continue
         win = sorted(lvl[int(a / RMS_WIN_S):int(b / RMS_WIN_S)])
-        if win and win[int(0.9 * (len(win) - 1))] < speech_db - GAP_QUIET_DB:
+        if win and win[int(0.9 * (len(win) - 1))] < quiet_db:
             out.append((a, b))
     return out
 
@@ -402,12 +481,12 @@ MIN_KEPT_S = 0.2
 END_TAIL_S = 0.4   # room after the final word, so the video does not stop mid-release
 
 
-def kept_frames(cuts, fps, dur):
+def kept_frames(cuts, fps, dur, total=None):
     """Cuts -> kept [start_frame, end_frame) pairs. Cut start floored (a flub's
     onset starts before its label; rounding later re-admits it), cut end ceiled
     but clamped to the frame the next kept word starts in (ceiling into it
-    deletes the word)."""
-    total = int(round(dur * fps))
+    deletes the word). total: the video stream's real frame count."""
+    total = int(round(dur * fps)) if total is None else total
     kept, cursor = [], 0
     for c in cuts:
         a = max(0, min(total, math.floor(c["start"] * fps)))
@@ -424,6 +503,14 @@ def kept_frames(cuts, fps, dur):
     if cursor < total:
         kept.append([cursor, total])
     return kept
+
+
+def lead_first(frames, a, b):
+    """Kept frame ranges with source frames [a, b) moved to the front, split at a and b."""
+    cut = []
+    for s, e in frames:
+        cut += [[x, y] for x, y in ((s, min(e, a)), (max(s, a), min(e, b)), (max(s, b), e)) if y > x]
+    return [f for f in cut if a <= f[0] and f[1] <= b] + [f for f in cut if not (a <= f[0] and f[1] <= b)]
 
 
 def is_kept(w, spans):
@@ -449,7 +536,7 @@ def retime(words, spans):
         out.append({"text": w["text"], "type": "word",
                     "start": round(max(w["start"], s["start"]) - s["start"] + o, 3),
                     "end": round(min(w["end"], s["end"]) - s["start"] + o, 3)})
-    return out
+    return sorted(out, key=lambda w: w["start"])
 
 
 def main():
@@ -465,49 +552,69 @@ def main():
     a = ap.parse_args()
 
     d = Path(a.edit_dir)
-    toks = load_words(d / "words.raw.json")
-    toks = [t for t in toks if t.get("type") in ("word", "audio_event")]
-    words = [t for t in toks if t["type"] == "word"]
-    if not words:
+    raw = load_words(d / "words.raw.json")
+    toks = [t for t in raw if t.get("type") in ("word", "audio_event")]
+    if not any(t["type"] == "word" for t in toks):
         sys.exit("ERROR: transcript has no words")
     sp = d / "spans.json"
-    model_cuts = resolve_spans(json.loads(sp.read_text()) if sp.exists() else [], toks)
+    spans_in = json.loads(sp.read_text()) if sp.exists() else []
+    resolve_spans(spans_in, toks)   # a bad quote fails before the audio is read
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "taste" / "scripts"))
-    import taste    # the user's own pause setting (taste skill) beats the default
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import taste    # the user's own pause setting (taste skill) beats the default
     max_pause = a.max_pause or taste.load_json().get("cut", {}).get("max_pause") or DEFAULT_MAX_PAUSE
     gap_max, gap_keep, splice_max = max_pause, round(2 / 3 * max_pause, 3), max_pause
 
-    fps, dur = probe(a.source)
+    fps, dur, nframes = probe(a.source)
     lvl = window_rms_db(a.source)
-    noise = a.noise
+    derived, diag = derive_noise_db(lvl)
+    bed = "bed" in diag      # music under the voice: word gaps only, never inside a word
+    noise = a.noise if a.noise is not None else derived
     if noise is None:
-        noise, diag = derive_noise_db(lvl)
-        if noise is None:
-            sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
-                     "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
-                     "pass --noise <dB> (about 10 dB above the mean volume).")
+        sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
+                 "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
+                 "pass --noise <dB> (about 10 dB above the mean volume).")
+    labels = fit_labels(raw, lvl, noise)
+    if labels:
+        print(f"labels     {len(labels)} implausibly long word label(s) fitted to the audio: "
+              + ", ".join(f"{raw[i]['text'].strip()!r} {raw[i]['end'] - raw[i]['start']:.1f}s" for i in list(labels)[:5]))
+    raw = apply_labels(raw, labels)
+    toks = [t for t in raw if t.get("type") in ("word", "audio_event")]
+    words = [t for t in toks if t["type"] == "word"]
+    model_cuts = resolve_spans(spans_in, toks)
+    if a.noise is None:
         print(f"noise      {noise:.0f} dB derived (speech {diag['speech']:.0f}, "
-              f"floor {diag['floor']:.0f})")
-    heard = detect_silence(a.source, noise, gap_max)
-    if not heard:
-        sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
-
-    speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
+              + (f"music bed {diag['bed']:.0f}: trimming only between words)" if bed
+                 else f"floor {diag['floor']:.0f})"))
     kept_words = [w for w in words if not covered_by(w, model_cuts)]
-    heard = merge_spans(heard + quiet_word_gaps(kept_words, gap_max, lvl, speech_db))
+    if bed:
+        heard = quiet_word_gaps(kept_words, gap_max, lvl, noise)
+    else:
+        heard = detect_silence(a.source, noise, gap_max)
+        if not heard:
+            sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
+        speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
+        heard = merge_spans(heard + quiet_word_gaps(kept_words, gap_max, lvl, speech_db - GAP_QUIET_DB))
+    splice_noise = None if bed else noise    # over a bed, word labels bound the splices
     allcuts = merge(snap_and_pad(model_cuts, words, a.pad)
                     + silence_cuts(words, gap_max, gap_keep, heard)
                     + lead_trail_cuts(kept_words, dur, gap_keep))
-    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, noise)
+    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, splice_noise)
     if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out
         last = max(w["end"] for w in kept_words)
         allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
-    frames = kept_frames(allcuts, fps, dur)
+    frames = kept_frames(allcuts, fps, dur, nframes)
+    lead = d / "lead.json"
+    if lead.exists():   # split halfway into the pauses either side, so no word is halved
+        lc = resolve_spans([{**json.loads(lead.read_text()), "kind": "alt_hook"}], toks)[0]
+        before = max([t["end"] for t in toks if t["end"] <= lc["start"]], default=0.0)
+        after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
+        frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
+        print(f"lead       {lc['evidence'][:60]!r} plays first")
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)
 
-    gaps = sorted(splice_gaps(allcuts, words, model_cuts, lvl, noise))
+    gaps = sorted(splice_gaps(allcuts, words, model_cuts, lvl, splice_noise))
     print(f"pause      target {max_pause:.2f}s (tighten over {gap_max:.2f}s to {gap_keep:.2f}s)")
     print(f"source     {dur:.2f}s at {fps:.3f} fps")
     print(f"cuts       {len(model_cuts)} from spans.json, {len(allcuts)} after merging with pauses")
@@ -528,7 +635,8 @@ def main():
     (d / "decisions.json").write_text(json.dumps(spans, indent=1))
     (d / "report.json").write_text(json.dumps(
         {"source": str(Path(a.source).resolve()), "fps": fps, "duration": dur, "final_s": final,
-         "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts},
+         "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts,
+         "labels": {str(i): v for i, v in labels.items()}},
         indent=1))
     (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1))
     import preview_cut

@@ -1,70 +1,64 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. Also the entry point for "edit my video" and "edit my video like @creator" with a raw take: it asks first whether to stop at the cut or carry straight on into style-edit. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before style-edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (style-edit), and not for analysing someone else's videos (creator-teardown).
+license: MIT
+compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster-whisper). Recommended TypeSafe key (Jev decides the cut for a fraction of a cent; without it Claude decides). Optional ElevenLabs key or CrisperWhisper. Mac, Windows or Linux. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
 
 # Cut
 
-One raw take in. A clean jump cut out, with nothing on a timeline for the user to touch.
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
+
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
+
+One raw take in, a clean jump cut out.
 
 ```
-edits/<name>/
-  words.raw.json    transcript of the source
-  spans.json        what to remove, quoted (you write this)
-  decisions.json    kept spans in source seconds
-  report.json       every cut with its reason
-  paper-edit.md     the cut as text, for your read-through
-  cut-check.html    the page the user approves
-  cut.mp4           the render
-  words.json        words re-timed onto cut.mp4
+edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (what to remove, quoted),
+  review.md (what Jev was unsure of), paper-edit.md (the cut as text), cut-check.html (the approval
+  page), cut.mp4 + words.json (the render and its words).
 ```
 
-`<name>` is a short slug of the file name (`IMG_1234.MOV` -> `img-1234`). Paths are relative to the
-folder Claude Code was started in. Never modify, move or copy the source file. Pass its path.
+`<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
+started in. Never modify, move or copy the source file. Pass its path.
 
-Python: `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
-If it is missing, run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
+`$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`, the tool venv. On Windows, use `py`
+wherever these commands say `python3`.
+No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ## No video yet?
 
-The user's own talking-head video is the main path: ask for its path first. If they have none,
-offer the sample take (a raw vertical take with retakes, false starts and pauses left in)
-and download it into their folder:
+Ask for the path of their own take first. If they have none, offer the sample take (a raw vertical
+take with retakes, false starts and pauses left in) and download it into their folder:
 
 ```bash
 curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4
 ```
 
-`curl` ships with Mac, Linux and Windows 10 and later.
-
 ## 0. Ask: the cut first, or everything at once
 
-Before anything else, ask the user one question, even if they said "edit my video like @creator":
+Before anything else, ask one question in the question box (start decides this itself for a whole edit):
 
 > Do you want just the cut first, or the cut and the styled edit in one go?
-> - **Just the cut first.** I take out the retakes, false starts and pauses, and you approve that
->   before I add captions, zooms or visuals. If the cut changes, the visuals don't have to be
->   rebuilt, so it uses fewer tokens.
-> - **Everything at once.** I cut it, then carry straight on into the style without waiting for you
->   to approve the cut. You still see the cut page and the stills before anything renders.
+> - **Just the cut first (Recommended).** You approve the cut before I add captions, zooms or
+>   visuals, so a changed cut never rebuilds the visuals (fewer tokens).
+> - **Everything at once.** I cut, then style without waiting. You still see the cut page and the
+>   stills sheet before anything renders.
 
-List "just the cut first" first. Skip the question only when the user already answered it in
-their message ("just cut it", "cut and style it in one go").
-
-- **Just the cut first:** run steps 1-6 and stop. Do not start style-edit until the user approves
-  the cut **and** asks for the style ("style it", "now edit it like @creator").
-- **Everything at once:** run steps 1-5, open the cut page (step 6), then go straight on to
-  style-edit without waiting. If the user changes the cut afterwards, rebuild the cut and re-run
-  style-edit from its plan step.
+Skip it only when the user already answered ("just cut it", "cut and style it in one go") or start or
+clips called this skill. **Just the cut first:** steps 1-6, then stop until the user approves the cut
+**and** asks for the style. **Everything at once:** steps 1-5, open the cut page, go straight on to
+style-edit; a later cut change re-runs style-edit from its plan step.
 
 ## 0b. Read the user's taste
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/../taste/scripts/taste.py" show
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show --edit edits/<name>
 ```
 
-Follow every rule in it; the scripts already read its settings. When the user reacts to the result
-("too slow", "captions too small"), save it with the taste skill before redoing the edit.
+Follow every rule in it. Save a reaction to a result ("too slow") with the taste skill before redoing.
 
 ## 1. Transcribe
 
@@ -72,22 +66,40 @@ Follow every rule in it; the scripts already read its settings. When the user re
 $PY "$S/transcribe.py" <source> edits/<name>/words.raw.json
 ```
 
-Uses ElevenLabs Scribe when a key is saved (`~/.config/creator-teardown/.env`), else the free local
-Whisper model. `--engine whisper|scribe` overrides. Whisper takes 1-4 minutes for a 3-minute take on a
-laptop. Tell the user Scribe catches more fillers and false starts, once, if they have no key.
+Say the time first: Whisper takes 1-4 minutes for a 3-minute take on a laptop, CrisperWhisper about
+the length of the take. It picks ElevenLabs Scribe when a key is saved, else CrisperWhisper if setup
+installed it, else the free local Whisper (`--engine whisper|crisper|scribe` overrides). Whisper drops
+some ums and false starts; Scribe and CrisperWhisper keep them for the cut. With neither, say once that
+setup can add one (CrisperWhisper's weights are non-commercial only). A take full of retakes:
+`AI_EDITOR_WHISPER_MODEL=medium` hears them better (1.5 GB, twice as slow). Step 5 catches the rest.
 
-Whisper `small` sometimes merges a false start into the next run, or garbles a line. When the take
-is full of retakes, `AI_EDITOR_WHISPER_MODEL=medium` hears them better (a 1.5 GB download, about
-twice as slow). Either way, step 5 catches what the transcript missed.
+**Never read `words.raw.json`** (12x the size of `transcript.txt`, which has the same words).
 
-## 2. Decide what to cut (your job)
+## 2. Decide what to cut
 
-Read `references/retake-detection.md` and follow it. Read the whole transcript, then write
-`edits/<name>/spans.json`: the words to remove, quoted, with a kind and a note. Last take wins.
-Never type a timestamp and never write a span for a pause.
+```bash
+python3 "$S/retakes.py" propose edits/<name>
+```
+
+Code finds every possible cut (a line said again, an unfinished sentence, "wait, sorry", fillers) and
+TypeSafe's Jev judges them in one request (a fraction of a cent) into `spans.json` and `review.md`.
+
+- **Exit 0.** Read `review.md` only: the few items Jev was unsure of. Fix any you disagree with in `spans.json` (shape: `references/shapes.md`; rules:
+  `references/retake-detection.md`), then go to step 3. Do not re-decide the items Jev was sure of; the
+  read-through in step 3 catches a wrong one.
+- **Exit 4: no TypeSafe key** (or Jev unreachable); **exit 5: the key was rejected.** Decide yourself:
+  read `transcript.txt` and `candidates.md` (the places code flagged), follow
+  `references/retake-detection.md`, and write `spans.json` (`references/shapes.md`). Tell the user once
+  that a TypeSafe key (exit 5: a new one) makes this much cheaper, via the `setup` skill.
+
+Last take wins, except alternate hooks. Never type a timestamp and never write a span for
+a pause.
 
 Only if the user wants it shorter, also read `references/editorial-rules.md` and add `redundant`
-cuts.
+cuts. Jev does not make those: they are content calls.
+
+A misheard name is one command, never a JSON rewrite: `python3 "$S/retakes.py" fix edits/<name>
+cloud=Claude jiv=Jev` (whole words, timings untouched, kept in `fixes.json` for the captions).
 
 ## 3. Build
 
@@ -96,14 +108,9 @@ python3 "$S/build_timeline.py" <source> edits/<name> --dry-run
 python3 "$S/build_timeline.py" <source> edits/<name>
 ```
 
-Every pause longer than `--max-pause` (default 0.15 s) is shortened to 0.10 s. Breaths count as
-pauses: a gap between words is cut when the audio in it stays well under speech level. `--dry-run` prints the cut list and the resulting length.
-Fix any `ERROR` it prints (a quote that does not match, or a phrase that appears twice without
-`occurrence`), then run it for real.
-
-If it stops with "cannot derive a silence threshold", the room is noisy. Measure with
-`ffmpeg -i <source> -af volumedetect -vn -f null -` and pass `--noise <dB>` about 10 dB above the
-mean volume.
+Every pause (breaths included) over `--max-pause` (0.15 s) becomes 0.10 s; under music only gaps
+between words are trimmed. Fix any `ERROR` the dry run prints (a quote that does not match, or a
+phrase found twice without `occurrence`), then run it for real.
 
 Then read `edits/<name>/paper-edit.md` straight through. It is what the viewer will hear, with
 `<<n>>` at each join. Critique it yourself before rendering:
@@ -121,8 +128,8 @@ Loop until it reads clean. It costs nothing; a render costs minutes.
 python3 "$S/render.py" <source> edits/<name>
 ```
 
-Plain ffmpeg. Source resolution, H.264 CRF 18, AAC 192k, frame-accurate, short audio fades at
-every join. A 3-minute 4K take renders in a few minutes. Run it in the background for long takes.
+Source resolution, frame-accurate, short audio fades at every join. A 3-minute 4K take takes a few
+minutes: run long takes in the background.
 
 ## 5. Verify
 
@@ -131,50 +138,46 @@ $PY "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 ```
 
 Re-transcribes cut.mp4 and diffs it against the words the cut meant to keep.
-- **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span that ate it),
-  rebuild, re-render.
-- **SURVIVED**: printed as phrases in context. A repeat or stumble there is real: map its cut time
-  back to source time with `decisions.json`, quote the raw tokens at that time in a new span. Clean
-  speech there only means the raw transcript misheard that line.
-- Notes about fillers or other small differences are transcriber variance, not errors.
+- **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
+- **SURVIVED**: a repeat or stumble there is real: map its cut time to source time with
+  `decisions.json` and quote the raw tokens in a new span. Clean speech there is a mishearing.
+- **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
 
 One fix cycle, then show the user whatever is left.
 
 ## 6. The user approves
 
-Every time a cut is rendered, the first one and every re-cut, rebuild the page so it includes the
-video. The script opens it in the browser itself:
+After every render (the first and every re-cut) run `python3 "$S/preview_cut.py" edits/<name>`. It
+opens the page in the browser itself; never skip it or tell the user to open it (no browser, as on a
+remote machine: give the full path to `cut-check.html`). Tell the user in two lines how many seconds
+came out and what the page shows (struck-through words are cut, highlighted ones are judgement
+calls). Then **wait**. "keep <line>": delete or narrow that span. "cut <line>": add one. Pauses
+rushed or slow: rebuild with another `--max-pause`. After any change: build, render, verify, reopen.
 
-```bash
-python3 "$S/preview_cut.py" edits/<name>
-```
+`hooks.json` exists: after approval, ask about hook variants (`references/retake-detection.md`).
 
-Never skip this, and never tell the user to open the page themselves. If the browser does not open
-(a remote machine), give them the full path to `cut-check.html`.
+Only the user's approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
+cut first", say they can ask for the style. Never start style-edit on your own.
 
-Tell the user in two lines: how many seconds came out, and what the page shows (struck-through
-words are cut, highlighted ones are judgement calls). Then **wait**.
+## If a script stops
 
-- "keep <line>": delete or narrow that entry in `spans.json`.
-- "cut <line>": add an entry.
-- Pauses feel rushed or slow: rebuild with a different `--max-pause`.
-
-After any change: build, render, verify, reopen the page. Only when the user approves is the cut
-done. `cut.mp4` and `words.json` are what style-edit takes next.
-
-On "just the cut first", stop here after approval: say the cut is done and that they can ask for
-the style when they're ready. Never start style-edit on your own.
+| message | do |
+|---|---|
+| `no such file` / `ffmpeg could not read audio` | ask for the right path; never copy or convert the source |
+| `faster-whisper missing` / `CrisperWhisper missing` | run with `$PY`, or the setup skill's step 3 |
+| `no ElevenLabs key` (exit 2) / `HTTP 4xx`, `unreachable` (3) | drop `--engine scribe`, or re-save the key with the setup skill |
+| `spans.json exists. Pass --force` | only on a fresh decision: `propose --force` (keeps spans.prev.json) |
+| build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |
+| `cannot derive a silence threshold` / `marked no silence` | speech and background are under 10 dB apart: `ffmpeg -i <source> -af volumedetect -vn -f null -`, pass `--noise` about 10 dB above the mean |
+| render `ERROR ... (kept in <tmp>)` | say the message; re-run render once; the temp folder has the segments |
 
 ## Rules
 
 1. Every cut quotes the transcript. No quote, no cut.
-2. A script, if the user has one, breaks ties between two takes of the same line. Nothing is cut
-   for being off-script.
-3. Never stream-copy (`-c copy`) across cuts. It snaps to keyframes and lands up to 2 s off.
+2. A script, if the user has one, breaks ties between takes. Nothing is cut for being off-script.
+3. Never stream-copy (`-c copy`) across cuts: it lands up to 2 s off.
 4. Never hand over a render that has not been verified and approved.
 
 ## Self-check
 
-```bash
-python3 "$S/test_build_timeline.py"
-```
+`python3 "$S/test_build_timeline.py"`, `test_retakes.py`, `test_media.py` (needs ffmpeg).

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end smoke test: the whole editor on a made-up 4 s video, on whatever OS runs it.
 
-    python tests/smoke.py        (after setup.py venv, model and remotion)
+    python tests/smoke.py            (after setup.py venv, model and remotion)
+    python tests/smoke.py --load 8   the same with 8 busy loops pinning the CPU (stills and renders under load)
 
 Makes a vertical test video with ffmpeg, then runs every step a learner runs: transcribe,
 capture (an icon, a logo and a real page), face, sound, plan in both layouts, stills and a
@@ -32,6 +33,15 @@ def run(*cmd, cwd):
 
 def main():
     work = Path(tempfile.mkdtemp(prefix="ave-smoke-"))
+    try:
+        steps(work)
+    except BaseException:
+        print(f"SMOKE: kept the work folder for a look: {work}", file=sys.stderr)
+        raise
+    shutil.rmtree(work, ignore_errors=True)
+
+
+def steps(work):
     edit = work / "edits" / "smoke"
     edit.mkdir(parents=True)
     # A 4 s vertical clip with a tone, the shape of a phone video.
@@ -50,7 +60,9 @@ def main():
     (work / "style.json").write_text(json.dumps(style))
     (edit / "visuals.json").write_text(json.dumps([
         {"word": "notion", "nth": 1, "kind": "logo", "brand": "notion"},
-        {"word": "notion", "nth": 1, "kind": "capture", "url": "https://example.com", "width": 500},
+        {"word": "notion", "nth": 1, "kind": "capture", "url": "https://example.com", "width": 500, "format": "sticker",
+         "marks": [{"kind": "highlight", "find": "This domain is for use in"}]},
+        # a page's body text reads on a phone only re-set as a sticker (check.py plan FAILs a capture under 28 px x-height)
         {"word": "faster", "nth": 1, "kind": "anim", "type": "flow",
          "props": {"nodes": [{"icon": "mail", "label": "email"}, {"logo": "notion", "label": "notion"}]}},
     ]))
@@ -61,6 +73,11 @@ def main():
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json",
         "--layout", "split", "--out", edit / "plan-split.json", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    # graphics behind the speaker: the capture card goes behind, the speaker is cut out under it
+    run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", "--layout", "overlay",
+        "--behind", "on", "--out", edit / "plan-behind.json", cwd=work)
+    run(VPY, SK / "style-edit/scripts/matte.py", edit, "--plan", "plan-behind.json", cwd=work)
+    run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, "--plan", "plan-behind.json", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", edit, cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", edit, "--plan", "plan-split.json", cwd=work)
     for f in ("render.mp4", "render-split.mp4"):
@@ -68,13 +85,46 @@ def main():
                               str(edit / f)], capture_output=True, text=True).stdout.strip()
         if not out or abs(float(out) - 4) > 0.3:
             sys.exit(f"SMOKE FAIL: {f} duration {out!r}, expected about 4 s")
+    contrast(work)
     stills = list((edit / "stills").glob("*.png"))
     if not stills:
         sys.exit("SMOKE FAIL: no stills")
-    print(f"SMOKE OK on {platform.system()}: {len(stills)} stills, both renders 4 s ({work})")
-    if os.environ.get("CI"):
-        shutil.rmtree(work, ignore_errors=True)
+    print(f"SMOKE OK on {platform.system()}: {len(stills)} stills, both renders 4 s")
+
+
+def contrast(work):
+    """White captions with no stroke (the creator's look) on a bright desk: plan.py adds the treatment
+    and check.py render passes; on a dark desk the plan keeps her plain look. A creator measured with no
+    drop shadow still gets the treatment rendered on the bright desk."""
+    words = [{"text": t, "start": round(0.2 + i * 0.32, 2), "end": round(0.48 + i * 0.32, 2), "type": "word"}
+             for i, t in enumerate("this desk is far too bright for white words".split())]
+    style = {"handle": "plain", "captions": {"present": True, "words_per_caption": 3, "y_pct": 68, "size_pct": 5,
+             "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": False}}
+    (work / "plain.json").write_text(json.dumps(style))
+    style["captions"]["shadow"] = False
+    (work / "noshadow.json").write_text(json.dumps(style))
+    for name, colour, sj in (("bright", "0xE6E1D8", "plain.json"), ("dark", "0x262626", "plain.json"),
+                             ("noshadow", "0xE6E1D8", "noshadow.json")):
+        ed = work / "edits" / name
+        ed.mkdir(parents=True)
+        run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=540x960:r=30:d=3", "-f", "lavfi",
+            "-i", "sine=f=220:d=3", "-vf", "noise=alls=12:allf=t", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", ed / "cut.mp4", cwd=work)
+        (ed / "captions.json").write_text(json.dumps(words))
+        run(PY, SK / "style-edit/scripts/plan.py", work / sj, ed / "captions.json", "--no-sfx", cwd=work)
+        treats = {c.get("treat") for c in json.loads((ed / "plan.json").read_text())["captions"]["chunks"]}
+        if treats != ({None} if name == "dark" else {"backing"}):   # aimed at the render WARN line (4.7:1)
+            sys.exit(f"SMOKE FAIL: {name} desk captions treated {treats}")
+        if name != "dark":
+            run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
+            run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on a contrast FAIL
 
 
 if __name__ == "__main__":
-    main()
+    n = int(sys.argv[sys.argv.index("--load") + 1]) if "--load" in sys.argv else 0
+    hogs = [subprocess.Popen([PY, "-c", "while True: pass"]) for _ in range(n)]
+    try:
+        main()
+    finally:
+        for h in hogs:
+            h.kill()

@@ -37,6 +37,29 @@ def count_frames(path):
     return int(r.stdout.strip() or 0)
 
 
+def starts(path):
+    """(video stream start, file start) in seconds. With -copyts the video trim sees the stream's
+    own timestamps, which can begin a frame or two in (B-frame delay, an edit list); the audio
+    pass is rebased to the file start."""
+    def one(entry, *sel):
+        r = subprocess.run(["ffprobe", "-v", "error", *sel, "-show_entries", entry, "-of",
+                            "default=nw=1:nk=1", str(path)], capture_output=True, text=True)
+        try:
+            return float(r.stdout.split()[0])
+        except (ValueError, IndexError):
+            return 0.0
+    return one("stream=start_time", "-select_streams", "v:0"), one("format=start_time")
+
+
+def video_window(s, e, fps, vstart):
+    """Trim times that select frames s..e-1 of the video stream exactly. Frame k sits at
+    vstart + k/fps only up to the container's timestamp rounding (a 1/600 s timescale moves a
+    29.97 fps frame by up to 0.8 ms either way), so a trim on the exact frame time keeps or drops
+    that frame by the rounding: two edges rounded differently give N-1 or N+1. Half a frame
+    early on both edges is immune to any rounding under half a frame."""
+    return vstart + (s - 0.5) / fps, vstart + (e - 0.5) / fps
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source")
@@ -50,19 +73,25 @@ def main():
     fps, frames = rep["fps"], rep["frames"]
     src, out = a.source, d / "cut.mp4"
     hw = sys.platform == "darwin" and not a.no_hw
+    vstart, fstart = starts(src)
+    off = vstart - fstart     # where frame 0 plays on the audio's timeline
     tmp = Path(tempfile.mkdtemp(prefix="cut_render_"))
     print(f"{len(frames)} spans, {sum(e - s for s, e in frames)} frames -> {out}", flush=True)
 
     def one(i):
         s, e = frames[i]
-        t0, t1 = s / fps, e / fps
+        t0, t1 = video_window(s, e, fps, vstart)
         seg = tmp / f"{i:05d}.mp4"
         # -copyts is load-bearing: without it the input seek rebases timestamps
         # to zero and the absolute trim picks the wrong footage at the right length.
+        # Frame-numbered timestamps at an explicit -r: after setpts the frames carry no duration,
+        # so without -r the muxer gives the last one ~0 s and FFmpeg 7's edit list ends on it,
+        # dropping it on read. N/fps keeps the constant-rate clock from duplicating or dropping
+        # frames over a 1/600 s source's jittered timestamps.
         cmd = ["ffmpeg", "-v", "error", "-y", "-copyts", *(["-hwaccel", "videotoolbox"] if hw else []),
-               "-ss", f"{max(0.0, t0 - LEAD_S):.6f}", "-i", src, "-an",
-               "-vf", f"trim=start={t0:.6f}:end={t1:.6f},setpts=PTS-STARTPTS",
-               "-c:v", "libx264", "-crf", str(a.crf), "-preset", "veryfast",
+               "-ss", f"{max(0.0, t0 - fstart - LEAD_S):.6f}", "-i", src, "-an",
+               "-vf", f"trim=start={max(0.0, t0):.6f}:end={t1:.6f},setpts=N/({fps})/TB",
+               "-r", str(fps), "-c:v", "libx264", "-crf", str(a.crf), "-preset", "veryfast",
                "-pix_fmt", "yuv420p", "-g", "15", str(seg)]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode:
@@ -79,7 +108,9 @@ def main():
                 print(f"  video {n}/{len(frames)}", flush=True)
 
     lst = tmp / "list.txt"
-    lst.write_text("".join(f"file '{tmp / f'{i:05d}.mp4'}'\n" for i in range(len(frames))))
+    # concat quoting: a ' in the temp path (a user name like O'Brien) is closed, escaped, reopened
+    lst.write_text("".join("file '" + str(tmp / f"{i:05d}.mp4").replace("'", "'\\''") + "'\n"
+                           for i in range(len(frames))))
     allv = tmp / "all.mp4"
     if subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
                        "-c", "copy", str(allv)]).returncode:
@@ -91,7 +122,7 @@ def main():
     print("  audio, one pass", flush=True)
     parts = []
     for i, (s, e) in enumerate(frames):
-        t0, t1 = s / fps, e / fps
+        t0, t1 = off + s / fps, off + e / fps
         fo = max(0.0, t1 - t0 - FADE_S)
         parts.append(f"[0:a:0]atrim=start={t0:.6f}:end={t1:.6f},asetpts=PTS-STARTPTS,"
                      f"afade=t=in:d={FADE_S},afade=t=out:st={fo:.6f}:d={FADE_S}[a{i}]")

@@ -18,8 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_timeline import is_kept  # noqa: E402
-from textnorm import load_words  # noqa: E402
+from build_timeline import is_kept, load_fitted  # noqa: E402
 
 PARA_GAP_S = 1.2     # a pause this long starts a new paragraph in the page
 SHOW_GAP_S = 0.5     # a pause this long gets a marker showing what it became
@@ -166,7 +165,7 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     d = Path(args[0])
     rep = json.loads((d / "report.json").read_text())
-    toks = [t for t in load_words(d / "words.raw.json") if t.get("type") in ("word", "audio_event")]
+    toks = [t for t in load_fitted(d) if t.get("type") in ("word", "audio_event")]
     write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text()),
               rep["duration"], rep["final_s"])
     print(d / "paper-edit.md")

@@ -6,12 +6,24 @@ transcript.
 
 ## What you are given
 
-`words.raw.json`: every word with `start` and `end` in seconds. Fillers, false starts and
-"wait, sorry" are in it on purpose. They are the evidence.
+With a TypeSafe key, `retakes.py propose` has already decided the clear cases and written
+`spans.json`. You read `review.md` (the uncertain items) and fix entries in `spans.json`. The rules
+below are what you judge them by.
+
+Without a key, you decide everything from `transcript.txt`: one line per phrase,
+`[start-end] words`, with `(+1.4s)` marking a pause before a phrase. `candidates.md` lists the
+places code flagged as possible restarts. Never read `words.raw.json`: it is the same words at
+about 12x the size. Fillers, false starts and "wait, sorry" are in the transcript on purpose. They
+are the evidence.
 
 Whisper (the free engine) tidies speech: it drops some fillers and sometimes a false start. Scribe
-keeps them all. On a Whisper transcript, a repeated opening a second apart is often all that is
-left of a false start. Read the timings as well as the words.
+and CrisperWhisper keep them all. On a Whisper transcript, a repeated opening a second apart is
+often all that is left of a false start. Read the timings as well as the words.
+
+`[N.Ns of speech not transcribed]` after a word: Whisper folded more speech into that one label than
+the word holds, usually a repeat, and transcribing the stretch again did not recover it. No span can
+quote those words. If the label sits inside a retake, cut from the word before it to the keeper's
+first word; otherwise tell the user and let verify (step 3) say whether it survived.
 
 ## What you do not decide
 
@@ -22,24 +34,7 @@ audio. Never write a span for silence.
 
 ## spans.json
 
-```json
-[
-  {"text": "so the thing about, um,", "kind": "false_start", "note": "restarts at 5.8s"},
-  {"text": "wait, sorry", "kind": "meta"},
-  {"text": "the second thing is that you", "kind": "retake", "occurrence": 1,
-   "confidence": "medium", "note": "keeper is the take at 70.4s"}
-]
-```
-
-| field | rule |
-|---|---|
-| `text` | Words copied from the transcript. Punctuation and case do not matter. |
-| `kind` | `retake`, `false_start`, `filler`, `meta`, `audio_event`, `redundant` |
-| `occurrence` / `after` | Required when the phrase appears more than once. `occurrence` is 1-based. `after` takes the first match starting after that many seconds. |
-| `confidence` | `high` (default), `medium`, `low`. `low` cuts are highlighted for the user. |
-| `note` | Why, in a few words. For a retake, where the keeper is. |
-
-Two spans must not overlap. Merge them into one.
+The shape and field rules: `shapes.md`.
 
 ## What to cut
 
@@ -55,6 +50,34 @@ A whole line said twice, seconds to about 30 seconds apart. **The last take wins
 until they get it right. Exceptions:
 - The last attempt is itself broken or unfinished. Keep the best complete one.
 - The user supplied a script and both takes are complete: keep the one closer to it.
+
+**Alternate hooks are not retakes.** Takes of the opening line recorded after the body (usually
+after the call to action) are alternate hooks. Last take wins would move the hook to the end. Instead:
+- The hook at the start stays: the last good take of it there, by the rules above.
+- Every take after the body is cut from the main cut as `alt_hook`, whole (the main cut ends on the
+  call to action, never on a hook).
+- `retakes.py propose` finds them (more than 40 s after the opening, at the end of the recording, each
+  under 30 words) and lists them in `hooks.json`; `candidates.md` lists them without a key.
+
+After the main cut is approved, ask once in the question box:
+
+> You recorded N more takes of the opening line at the end. Render one version per hook?
+> - **Just the main cut (Recommended).** The opening you recorded first, alternates left out.
+> - **One version per hook.** Same body, each alternate hook first: a cut and a styled edit each.
+
+On "one version per hook", for each n in `hooks.json`: `python3 "$S/retakes.py" hook edits/<name> <n>`
+prints `edits/<name>-hook<n>`; run cut steps 3-5 on it (build prints `lead ... plays first`; the
+paper-edit lists words in recording order, so the hook reads last there), then style-edit on it with
+the same choices as the main edit.
+
+The variants share nothing, so build, render and verify them all at once, one shell job each, in one
+Bash call (no agents: the commands are fixed), then read each `paper-edit.md` and log tail. On
+Windows without bash, one after another:
+
+```bash
+for n in 1 2; do ( v=$(python3 "$S/retakes.py" hook edits/<name> $n) && python3 "$S/build_timeline.py" <source> "$v" \
+  && python3 "$S/render.py" <source> "$v" && $PY "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
+```
 
 Words that often come just before a retake: "wait", "sorry", "again", "let me do that again",
 "one more time", or a hard stop followed by a long pause.
@@ -82,7 +105,8 @@ when the user wants the video shorter. Every `redundant` cut is highlighted in c
 
 1. Read the whole transcript. Note gaps over 1 second: retakes cluster around them.
 2. Find repeats: near-identical phrases within about 30 seconds.
-3. For each cluster, pick the keeper (last take wins, then the exceptions).
+3. For each cluster, pick the keeper (last take wins, then the exceptions). Takes of the opening
+   after the body are alternate hooks: cut them as `alt_hook`.
 4. Mark false starts, then meta, then fillers.
 5. For every cut ask: is this a worse take of something said better elsewhere? If there is no
    better take, it is not a cut. Repetition for emphasis, delivered cleanly both times, stays.

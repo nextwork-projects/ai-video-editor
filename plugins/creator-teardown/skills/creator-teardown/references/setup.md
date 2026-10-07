@@ -15,7 +15,8 @@ python3 <skill>/scripts/fetch.py doctor
 If `python3` itself is missing, install Python first:
 - Mac: `brew install python` if Homebrew exists. If it doesn't, see step 2.
 - Windows: `winget install -e --id Python.Python.3.13`, then open a new terminal.
-- Linux: `sudo apt install -y python3`.
+- Linux: `sudo apt install -y python3` (Fedora: `sudo dnf install -y python3`; Arch:
+  `sudo pacman -S --needed python`).
 
 ## 2. Fix each line marked FIX
 
@@ -53,7 +54,31 @@ Walk them through it:
    asks for the key and hides what they type. On a Mac, after copying the key,
    this works too: `pbpaste | python3 <skill>/scripts/fetch.py setkey`.
 
-## 4. Check
+## 4. The Gemini key (optional, free)
+
+It runs the look pass: Gemini Flash-Lite watches the creator's top videos and names
+the font, graphics style and motion, so Claude never has to read frames. Without it,
+a small model reads one frame sheet per video instead. Offer it once.
+
+**Never ask for the key in the chat.**
+
+1. Open https://aistudio.google.com/apikey and sign in with any Google account.
+2. Click **Create API key**. Accept the terms if asked. If it asks for a project,
+   let it create one. No card is needed: the free tier covers a teardown.
+3. Copy the key (it starts with `AIza`).
+4. In a terminal window (not this chat), run the `setkey --gemini` line doctor
+   printed. It asks for the key and hides what they type. On a Mac, after copying:
+   `pbpaste | python3 <skill>/scripts/fetch.py setkey --gemini`.
+5. Tell them: on the free tier Google may use what is sent to improve its products.
+   Only the creator's public videos are sent, silent and at 480 px.
+
+## 5. The OCR engine (optional)
+
+Doctor's OCR line installs the text reader that measures captions: `ocrmac` (Apple
+Vision) on a Mac, `rapidocr` + `onnxruntime` on Windows and Linux. The first run of
+RapidOCR fetches its models once.
+
+## 6. Check
 
 Run `doctor` again until it prints `Ready.` Then offer a first run:
 "analyse @creatorhandle on tiktok".
