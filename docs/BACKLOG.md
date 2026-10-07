@@ -5,6 +5,8 @@ and passes after. Done items move to CHANGELOG.md.
 
 ## Now
 
+1. **No half-cut text at the frame edge.** Product films still show lines like "Streamline co..." cut by the frame edge. Framing must treat every visible text line as either fully in frame or fully out (OCR boxes from the capture), on every frame, in both product-video and style-edit overlays. Test: a synthetic page where the naive framing cuts a line fails, the fixed one passes.
+
 Nothing. Take the top of Next.
 
 ## Next
