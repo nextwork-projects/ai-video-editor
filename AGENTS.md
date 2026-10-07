@@ -1,5 +1,12 @@
 # AI Video Editor skills
 
+**Most people who open this folder want to edit a video.** When the user asks for an edit, drops a
+video, pastes a link, names a creator, or asks how to start: read
+`plugins/ai-editor/skills/start/SKILL.md` in full and follow it (paths are explained under "Paths"
+below). It asks its own questions and runs the other skills in order. If the user is changing this
+repo itself (skills, scripts, tests, docs), skip this and follow "Rules for every agent". Claude
+Code follows `CLAUDE.md` instead, which loads the same skill as a plugin.
+
 Instructions for any coding agent (Codex, Cursor, Gemini CLI, Copilot, Claude Code) using the
 skills in this repo.
 

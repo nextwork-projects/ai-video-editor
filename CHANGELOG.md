@@ -4,6 +4,20 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Start in the repo (backlog item 10). Opening a clone or the zip download in Claude Code and
+  trusting the folder now loads ai-editor and creator-teardown from that folder: a committed
+  `.claude/settings.json` registers the repo as the `nextwork` marketplace by local path (`./`) and
+  enables both plugins (checked headless in an empty `CLAUDE_CONFIG_DIR`, git clone and zip alike).
+  A root `CLAUDE.md` sends "edit my video" to `start`, and when the plugin did not load, asks to
+  install it with the two `claude plugin` commands; it tells contributors to skip all this.
+  `AGENTS.md` and `GEMINI.md` open with the same instruction for Codex, Cursor and Gemini. What users
+  make in the folder (`edits/`, `clips/`, `product/`, `creator-teardowns/`, root videos) is
+  gitignored. README rewritten for someone who has never used a terminal: three ways in with the
+  commands per computer, what happens next, what to say and paste for each skill, the cost table
+  with estimates marked, troubleshooting from the scripts' own messages, contributing. New eval
+  `repo-no-plugin` (offers to install, then hands to `start`); `tests/check_plugins.py` fails when the
+  settings entries, the three start paths in README, the AGENTS.md first lines, the GEMINI.md copy or
+  the eval's copy of CLAUDE.md drift.
 - Skill quality pass. Every first-party SKILL.md is under 250 lines (style-edit 305 -> 230, setup
   283 -> 193, product-video 263 -> 244, creator-teardown 251 -> 242), detail moved one level down
   with a pointer saying when to read it: `style-edit/references/plan.md` (what plan.py does, the

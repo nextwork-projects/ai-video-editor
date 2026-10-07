@@ -33,8 +33,7 @@ Nothing. Take the top of Next.
 7. Modal render tested live (needs a Modal login on the test machine).
 8. Export opened in DaVinci Resolve (free) to confirm FCPXML positions.
 9. Product films: sparse dark sites (fill), desktop captures at 3x, the generated score richer.
-10. README rewritten for a beginner around `start`, with the cost table and what each skill does.
-11. Smoke test stable under load (one timeout seen in edit.py stills).
+10. Smoke test stable under load (one timeout seen in edit.py stills).
 
 ## Needs a decision from the maintainer
 

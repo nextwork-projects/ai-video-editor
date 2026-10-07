@@ -28,6 +28,7 @@ EVALS = [("plugins/ai-editor/evals/setup-plan-first", "AskUserQuestion"),
          ("plugins/ai-editor/evals/improve-from-feedback", "improve"),
          ("plugins/ai-editor/evals/paste-website-link", "product-video"),
          ("plugins/ai-editor/evals/paste-tiktok-profile", "creator-teardown"),
+         ("plugins/ai-editor/evals/repo-no-plugin", "ai-editor@nextwork"),
          ("plugins/creator-teardown/evals/tear-down-handle", "AskUserQuestion")]
 
 
@@ -119,6 +120,28 @@ def main():
         for s in load(ROOT / extra).get("skills", []):
             if not (ROOT / s).is_dir():
                 errors.append(f"{extra}: skills path {s} does not exist")
+
+    # Opening the repo in Claude Code loads the editor from this folder (README "Start here", Way 1).
+    proj = load(ROOT / ".claude" / "settings.json")
+    src = proj.get("extraKnownMarketplaces", {}).get(market.get("name"), {}).get("source", {})
+    if src != {"source": "directory", "path": "./"}:
+        errors.append(".claude/settings.json: extraKnownMarketplaces must register this repo as a directory marketplace at ./")
+    for entry in market.get("plugins", []):
+        if proj.get("enabledPlugins", {}).get(f"{entry['name']}@{market.get('name')}") is not True:
+            errors.append(f".claude/settings.json: enabledPlugins does not turn on {entry['name']}@{market.get('name')}")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for path in ("Way 1: open this folder in Claude Code", "/plugin marketplace add nextwork-projects/ai-video-editor",
+                 "npx skills add nextwork-projects/ai-video-editor"):
+        if path not in readme:
+            errors.append(f"README.md: lost the start path {path!r}")
+    case = (ROOT / "plugins/ai-editor/evals/repo-no-plugin/prompt.md").read_text(encoding="utf-8")
+    if any(line.strip() not in case for line in (ROOT / "CLAUDE.md").read_text(encoding="utf-8").splitlines()):
+        errors.append("plugins/ai-editor/evals/repo-no-plugin/prompt.md: its copy of CLAUDE.md is out of date")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    if "plugins/ai-editor/skills/start/SKILL.md" not in agents[:600]:
+        errors.append("AGENTS.md: the first lines must send an agent to the start skill")
+    if agents != (ROOT / "GEMINI.md").read_text(encoding="utf-8"):
+        errors.append("GEMINI.md: differs from AGENTS.md; copy it across")
 
     # Setup links straight to each key's page (PRINCIPLES.md "Asking"), so nobody hunts for it.
     setup = (ROOT / "plugins/ai-editor/skills/setup/SKILL.md").read_text(encoding="utf-8")
