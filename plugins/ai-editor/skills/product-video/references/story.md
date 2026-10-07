@@ -1,4 +1,102 @@
-# story.json
+# Story first, then shots
+
+A product film is one story, told in order. Write `storyboard.md` from the brief before any shot is
+chosen; the story (story.json) is written from the storyboard, never the other way round.
+
+## The arc
+
+Measured from the reference films (`style.md`): Linear's launches open on the promise in a line, show the
+product, then walk one job at a time (the hand does it, the UI answers), and close on the wordmark. Apple's
+feature films do the same with a pull-back to mark each new section. Stripe's open on words and cut
+straight to the cursor doing the thing. Raycast's never leave the product. The shared order:
+
+1. **Hook**: the problem or the promise, in the site's own words (at most ~5), over the product's first
+   screen. Never an invented line.
+2. **Reveal**: the product, wide, the camera pushing in to where the first job starts.
+3. **Use cases, 2-5**, each as **cause then effect**: an `action` beat (the hand does X in the real UI) and
+   a `result` beat (the camera pushes onto Y, what changed). Order them as the user's own journey: what a
+   new user does first comes first, and each one should leave the screen where the next begins.
+4. **Payoff**: what it all adds up to (their work saved, shipped, shared), on a slow pull-out.
+5. **End**: the logo and the address (the one action), held.
+
+`storyboard.md`, one block per beat:
+
+```
+## 3. action: search other people's projects
+job: action (cause)
+words: "Search NextWork"
+capture: flow j-search, steps 0-1 (type "claude code", Enter), logged in
+hands off: the results fill the page under the search box; the next beat pushes onto them
+```
+
+## Shots follow the job
+
+What a beat must do picks the shot. Variety is never a goal; the only repeat rule is no jarring repeat (the
+same thing shown the same way twice in a row; a recording carried on from where the last shot stopped is
+continuity, not a repeat). `plan` refuses a shot whose kind cannot do its job.
+
+| job | what it must do | allowed shots |
+|---|---|---|
+| hook | the promise, over the product | the first page wide and pushing in (`page`, a `flow`'s first state), `type` over the product, `media`, `macro` |
+| reveal | the product appears | push-through from the hero (`push`), a pull-in from wide (`page`, `flow`), `stack` |
+| action | the hand does it, readable | cursor click-through at readable scale (`flow`, `keys`; a beat with `steps` in the rendered film) |
+| result | what changed | a push or rack focus onto the changed region (`flow` continuing, `macro`, `lift`, a `result` beat) |
+| comparison | two ways side by side | `split` |
+| feature-list | several things at once | `grid`, `stack` |
+| payoff | it adds up | a slow pull-out (`flow`, `page`, `media`, `orbit`, a `payoff` beat) |
+| transition | only when two places do not touch | `whip`, `push` |
+| end | the one action | `end` |
+
+## Continuity
+
+- Each shot starts where the last ended: the same page (the rendered film reuses a page when a flow starts
+  where the last one stopped), the same element in the same place on screen, or a page the last shot
+  opened (the camera travels to it on the one canvas).
+- One camera direction for the film: the pages sit left to right in story order and the camera only
+  travels right; pushes in for actions, out for the payoff.
+- One style family per film, one easing language (`journey.py` MOVE and SETTLE): every move eases the same
+  way, the next starts before the last settles, and a held framing keeps pushing gently.
+- Record chained flows: each flow's `url` is the page the last flow ended on (`end_url` in its json).
+
+## Framing guarantee
+
+`plan` computes every frame from the camera path and FAILs (after re-planning the camera, up to six
+widenings) when: the held focus leaves the safe frame (4.5% margin), the words sit over the focus, the
+cursor is partly cut by the frame (it is shown whole or hidden, faded in place), or a capture is shown past
+1:1 (3x captures, a third of the frame wide at most). `check` repeats it on the rendered frames: the focus
+found by template match where the plan put it, the product filling the frame by detected content (edges,
+not colour: an empty dark panel is empty), and no logged-in name readable (OCR).
+
+## The animatic, before any render
+
+`product.py animatic DIR --plan plan-<tag>.json`: the start, middle and end of every beat as stills on one
+sheet, each row captioned with its job, time and words. Run the `storyboard-critic` agent on it (at most two
+fix rounds), then show it in the question box: **Approve** (Recommended once the critic passes) / **Change
+the order** / **Swap a shot** / **Redo a capture**. Render only after Approve.
+
+## The rendered film (recommended)
+
+`record.mjs <dir> <flows.json> --states` (and `--mobile` for 9:16) captures each step's UI state as a 3x
+still instead of a screencast: before, after, the focused field and the typed text, a tall still for a
+scroll. A story with `beats` is then planned by `journey.py` and drawn by `Journey.tsx` at 60 fps: one
+canvas, one camera, a drawn cursor on an eased path, a ring where it clicks, changes revealed in place
+(a panel rising over a dimmed page, results arriving top to bottom, typed text revealed character by
+character up to the measured caret), new pages rising in as the camera travels to them, motion blur on
+fast moves. Screencast `flow` shots remain for a product whose own animation is the point.
+
+```json
+{"beats": [
+  {"job": "hook", "flow": "j-search", "text": "Learn anything by building", "dur": 2.8},
+  {"job": "action", "flow": "j-search", "steps": [0, 1], "text": "Search NextWork"},
+  {"job": "result", "flow": "j-search", "dur": 2.0},
+  {"job": "payoff", "flow": "j-library", "steps": [1], "dur": 3.0},
+  {"job": "end"}]}
+```
+
+A beat's `steps` index its flow's steps (`flows/<id>.states.json`, scrolls-into-view skipped). Words: as
+below.
+
+# story.json (the shot film)
 
 You write it, from `use-cases.md`, `product.py copy` and a look at the tiles and the flow strips. The plan turns it into timings and
 camera moves; you never write times.
@@ -46,10 +144,9 @@ recording) or a path.
 Every shot may carry `text` and `dur` (seconds; a flow's length is `to - from`). The plan snaps every
 cut to the beat.
 
-**The mix**: use case by use case, each as its `flow` or `keys` shot with the site's own words for it,
-other kinds between them. Never the same kind twice in a row (plan refuses; `page` runs warn, for the
-apple style's one continuous camera). A 30 s film uses at least 5 kinds. Vary the lengths: a flow runs
-5-7 s, a whip or push 2 s, a type moment 2 s.
+**The mix**: story order first (above), then each shot names its `job` and uses a shot that job allows.
+No jarring repeat. Lengths follow the job: an action as long as the hand takes, a result 2-2.5 s, a
+transition about 2 s.
 
 ## Flows
 

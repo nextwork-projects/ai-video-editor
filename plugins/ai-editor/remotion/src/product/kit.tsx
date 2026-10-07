@@ -1,6 +1,6 @@
 // Shared pieces of the product video: plan types, the style families, geometry, the page, the words.
 import React from "react";
-import { Img, OffthreadVideo, staticFile } from "remotion";
+import { AbsoluteFill, Img, OffthreadVideo, staticFile } from "remotion";
 import { ease, prog } from "../motion";
 
 export type Rect = [number, number, number, number];
@@ -160,4 +160,26 @@ export const wordsBox = (plan: ProductPlan, W: number, H: number, vertical: bool
   if (pos === "above") return { x: W * 0.08, y: H * 0.03, w: W * 0.84, h: band };
   if (pos === "centre") return { x: W * 0.1, y: H * (vertical ? 0.78 : 0.78), w: W * 0.8, h: H * 0.14 };
   return { x: W * 0.07, y: H * (vertical ? 0.7 : 0.64), w: W * 0.86, h: H * (vertical ? 0.22 : 0.28) };
+};
+
+/** The site's logo and its domain on its own ground: the end card. */
+export const Logo: React.FC<{ plan: ProductPlan; t: number; fams: Fams; W: number; H: number }> = ({ plan, t, fams, W, H }) => {
+  const S = Math.min(W, H);
+  const soft = STYLES[plan.variant]?.cut === "blur";
+  const p = prog(t, 0.2, soft ? 1.1 : 0.9, "power2.out");
+  const u = prog(t, 0.9, 0.7, "power2.out");
+  const lh = S * 0.095, aspect = plan.logo?.aspect ?? 1;
+  const square = aspect < 1.8;
+  return (
+    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column", gap: S * 0.04 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: lh * 0.35, opacity: p, transform: `scale(${0.97 + 0.03 * p})`,
+        filter: `blur(${(1 - p) * (soft ? 14 : 6)}px)` }}>
+        {plan.logo?.src ? <Img src={staticFile(plan.logo.src)} style={{ height: square ? lh : lh * 0.9, width: (square ? lh : lh * 0.9) * aspect }} /> : null}
+        {plan.logo?.word && (square || !plan.logo?.src) ? <span style={{ fontFamily: fams.display, fontWeight: plan.brand.display.weight,
+          fontSize: lh * 0.9, color: plan.brand.ink, letterSpacing: `${plan.brand.display.tracking_em}em` }}>{plan.logo.word}</span> : null}
+      </div>
+      <div style={{ fontFamily: fams.body, fontSize: S * 0.026, color: plan.brand.muted, opacity: u, letterSpacing: "0.01em",
+        transform: `translateY(${(1 - u) * 8}px)` }}>{plan.url}</div>
+    </AbsoluteFill>
+  );
 };

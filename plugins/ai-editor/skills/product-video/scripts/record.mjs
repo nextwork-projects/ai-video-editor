@@ -31,7 +31,10 @@ const spec = JSON.parse(fs.readFileSync(flowsArg || path.join(dir, "flows.json")
 // --mobile: the same flows on the site's real phone layout (430x932 @3x), for 9:16 films; files get "-m"
 const MOBILE = args.includes("--mobile");
 const [W, H] = MOBILE ? [430, 932] : spec.viewport || [1440, 900];
-const DSF = MOBILE ? 3 : 2, FPS = 30, SUFFIX = MOBILE ? "-m" : "";
+// --states: no screencast. Each step's UI state is captured as a still at 3x (before, after, the typed field,
+// the page down to where a scroll goes) and the film animates between them, so every frame is rendered.
+const STATES = args.includes("--states");
+const DSF = MOBILE || STATES ? 3 : 2, FPS = 30, SUFFIX = MOBILE ? "-m" : "";
 
 // A DevTools client over the pipe that also hands every event to listeners (screencast frames).
 // A logged-in profile (login.mjs) is used when one exists for the domain: the installed Chrome, headless,
@@ -95,14 +98,27 @@ const BLUR = (cfg) => `(() => {
   const cfg = ${JSON.stringify(cfg)};
   const email = /[\\w.+-]+@[\\w-]+\\.[\\w.]+/;
   window.__aiBlurHits = window.__aiBlurHits || [];
-  const hit = (el, why) => { if (!el || el.dataset.aiBlur) return; el.dataset.aiBlur = '1'; el.style.filter = 'blur(7px)'; window.__aiBlurHits.push(why.slice(0, 60)); };
+  // strong enough for the size: a big heading or a large avatar stays unreadable even zoomed in on a 3x capture
+  const hit = (el, why) => { if (!el || el.dataset.aiBlur) return; el.dataset.aiBlur = '1';
+    const r = el.getBoundingClientRect(), fs = parseFloat(getComputedStyle(el).fontSize) || 14;
+    el.style.filter = 'blur(' + Math.round(Math.max(8, fs * 0.55, Math.min(r.width, r.height) * 0.22)) + 'px)'; window.__aiBlurHits.push(why.slice(0, 60)); };
   const run = () => {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n; (n = w.nextNode());) { const t = n.nodeValue || '';
+    const words = cfg.text.filter(Boolean).map((x) => x.toLowerCase());
+    for (let n; (n = w.nextNode());) { const t = n.nodeValue || '', tl = t.toLowerCase();
       if (email.test(t)) hit(n.parentElement, 'email: ' + t.trim());
-      else for (const x of cfg.text) if (x && t.includes(x)) hit(n.parentElement, 'listed: ' + x); }
+      else for (const x of words) if (tl.includes(x)) { hit(n.parentElement, 'listed: ' + x); break; } }
     for (const sel of cfg.selectors) for (const el of document.querySelectorAll(sel)) hit(el, 'selector ' + sel);
     for (const el of document.querySelectorAll('input')) if (email.test(el.value || '')) hit(el, 'email field');
+    // avatars: any round picture of a person-sized box (a profile photo, a stack of completer faces)
+    for (const el of document.querySelectorAll('img, [style*=background-image]')) { const r = el.getBoundingClientRect();
+      if (r.width >= 16 && r.width <= 240 && Math.abs(r.width - r.height) < 4 && parseFloat(getComputedStyle(el).borderRadius) >= r.width * 0.4) hit(el, 'round avatar'); }
+    for (const el of document.querySelectorAll('img[alt]')) if (words.some((x) => el.alt.toLowerCase().includes(x))) hit(el, 'avatar alt');
+    // a portfolio or profile page: its owner's name heading, unless the user chose to show names
+    // (a profile root: /portfolio/<handle>, /u/<handle>/library, /@handle; not the deeper pages people publish under it)
+    if (!cfg.show_names && /^\\/((portfolio|profile|users?|u|people|members?)\\/[^/]+(\\/[a-z-]{1,20})?|@[^/]+)\\/?$/i.test(location.pathname)) {
+      const el = [...document.querySelectorAll('h1, h2')].find((e) => e.getBoundingClientRect().top < innerHeight * 0.6);
+      if (el && /^[A-Z][\\w'.-]+( [A-Z][\\w'.-]+){0,3}$/.test((el.innerText || '').trim())) hit(el, 'profile name'); }
   };
   if (!window.__aiBlurObs) { window.__aiBlurObs = new MutationObserver(() => { clearTimeout(window.__aiBlurT); window.__aiBlurT = setTimeout(run, 30); });
     const go = () => document.body ? (run(), window.__aiBlurObs.observe(document.body, { childList: true, subtree: true, characterData: true })) : requestAnimationFrame(go); go(); }
@@ -114,28 +130,278 @@ const BLUR = (cfg) => `(() => {
 const FINDEL = (target) => `(async () => {
   const want = ${JSON.stringify(target)};
   const vis = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e);
-    return r.width > 2 && r.height > 2 && r.right > 0 && r.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
+    return r.width > 2 && r.height > 2 && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
+  // off to the side counts only inside a strip that scrolls sideways (a row of tabs on a phone)
+  const side = (e) => { const r = e.getBoundingClientRect(); return r.right <= 0 || r.left >= innerWidth; };
+  const strip = (e) => { for (let p = e.parentElement; p; p = p.parentElement) if (p.scrollWidth > p.clientWidth + 8 && /auto|scroll/.test(getComputedStyle(p).overflowX)) return true; return false; };
   let el = null;
   if (want.startsWith('text=')) {
     const t = want.slice(5).replace(/\\s+/g, ' ').trim().toLowerCase();
     const all = [...document.querySelectorAll('a, button, [role], input, textarea, summary, label, h1, h2, h3, h4, li, p, span, div')]
-      .filter((e) => vis(e) && (e.innerText || e.placeholder || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(t));
+      .filter((e) => vis(e) && (!side(e) || strip(e)) && (e.innerText || e.placeholder || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(t));
     const rank = (e) => (/^(A|BUTTON|INPUT|TEXTAREA|SUMMARY)$/.test(e.tagName) || e.getAttribute('role') ? 0 : 1);
     const said = (e) => (e.innerText || e.placeholder || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase();
     // the exact words first (a "Create" button before "Create a Docker Container"), then controls, then the shortest
-    all.sort((a, b) => (said(a) !== t) - (said(b) !== t) || rank(a) - rank(b) || (a.innerText || '').length - (b.innerText || '').length);
+    all.sort((a, b) => side(a) - side(b) || (said(a) !== t) - (said(b) !== t) || rank(a) - rank(b) || (a.innerText || '').length - (b.innerText || '').length);
     el = all[0] || null;
-  } else el = [...document.querySelectorAll(want)].find(vis) || null;
+  } else el = [...document.querySelectorAll(want)].find((e) => vis(e) && !side(e)) || [...document.querySelectorAll(want)].find((e) => vis(e) && strip(e)) || null;
   if (!el) return null;
   let r = el.getBoundingClientRect();
-  if (r.top < 70 || r.bottom > innerHeight - 40) {
-    // the page's own scroller, whichever element it is, scrolled smoothly
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (r.top < 70 || r.bottom > innerHeight - 40 || r.left < 0 || r.right > innerWidth) {
+    // the page's own scroller, whichever element it is, scrolled smoothly (sideways too: a strip of tabs)
+    const r0 = r;
+    el.scrollIntoView({ behavior: 'smooth', block: r.top < 70 || r.bottom > innerHeight - 40 ? 'center' : 'nearest', inline: 'center' });
     await new Promise((d) => setTimeout(d, 1100));
     r = el.getBoundingClientRect();
+    window.__aiMoved = Math.abs(r.left - r0.left) + Math.abs(r.top - r0.top) > 2;
   }
   return [r.left, r.top, r.width, r.height].map(Math.round);
 })()`;
+
+// Who is logged in: the profile link (labelled "your library / profile / account", or wrapping an avatar), its
+// URL's own segment as the handle, and that page's name heading or the avatar's alt text as the name.
+const WHO = `(() => {
+  const lab = /\\b(your|my)\\s+(library|profile|account|portfolio|page)\\b|^(profile|account|me)$/i;
+  // the account's own control: one labelled as yours first, else a link wrapping an avatar; names come only from it
+  const all = [...document.querySelectorAll('a[href], button, [role=button]')];
+  const label = (a) => (a.getAttribute('aria-label') || a.title || a.innerText || '').trim();
+  const me = all.find((a) => lab.test(label(a))) || all.find((a) => { const img = a.querySelector('img');
+    return img && /avatar|profile|user/i.test(img.className + ' ' + a.className); });
+  let profile = null, button = false; const names = [];
+  if (me) {
+    if (me.href) profile = me.href; else { button = true; me.dataset.aiMe = '1'; }
+    const img = me.querySelector('img');
+    if (img && img.alt && !/avatar|profile|user|logo|picture|photo/i.test(img.alt)) names.push(img.alt.trim());
+  }
+  for (const el of document.querySelectorAll('[class*=username i], [class*=user-name i], [class*=display-name i], [class*=displayname i], [class*=profile-name i]')) {
+    if (el.closest('header, nav, [role=banner]')) { const t = (el.innerText || '').trim(); if (t && t.length < 40) names.push(t); } }
+  return { profile, button, names };
+})()`;
+const HEADNAME = `(() => [...document.querySelectorAll('h1, h2')].map((e) => (e.innerText || '').trim())
+  .find((t) => /^[A-Z][\\w'.-]+( [A-Z][\\w'.-]+){0,3}$/.test(t)) || null)()`;
+const STOP = new Set(["portfolio", "profile", "user", "users", "u", "library", "account", "settings", "me", "people", "members", "member", "home", "dashboard", "app"]);
+export async function whoami(cdp, url) {
+  const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  const ev = async (expression) => (await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId)).result.value;
+  const go = async (u) => { await cdp.send("Page.navigate", { url: u }, sessionId); await sleep(5000); };
+  try {
+    await cdp.send("Page.enable", {}, sessionId);
+    await go(url);
+    const w = (await ev(WHO)) || { names: [] };
+    let handle = null, head = null;
+    if (!w.profile && w.button) {   // a profile button with no link (a menu or a client-side route): press it, read where it went
+      await ev("document.querySelector('[data-ai-me]').click(), true"); await sleep(4000);
+      const at = await ev("location.href");
+      if (at && at !== url && new URL(at).pathname !== new URL(url).pathname) w.profile = at;
+    }
+    if (w.profile) {
+      handle = new URL(w.profile).pathname.split("/").map((x) => decodeURIComponent(x).replace(/^@/, "")).find((x) => x && !STOP.has(x.toLowerCase()) && !/^[0-9a-f-]{16,}$/i.test(x)) || null;
+      await go(w.profile);
+      head = await ev(HEADNAME);
+    }
+    const names = [...new Set([...w.names, head].filter(Boolean))];
+    const tokens = [...new Set([...names, ...names.flatMap((n) => n.split(/\s+/).filter((x) => x.length >= 3)), ...(handle ? [handle] : [])])];
+    return { names, handle, tokens };
+  } finally { await cdp.send("Target.closeTarget", { targetId }).catch(() => {}); }
+}
+
+// A key or a chord: "Enter", "Escape", "ArrowDown", "Meta+k", "Control+Shift+p" (modifiers held, as a hand does).
+async function pressKey(s, chord) {
+  const parts = chord.split("+"), key = parts.pop();
+  const MOD = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
+  const mods = parts.reduce((m, k) => m | (MOD[k] || 0), 0);
+  const VK = { Enter: 13, Escape: 27, Tab: 9, ArrowDown: 40, ArrowUp: 38, Backspace: 8 };
+  const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+  const vk = VK[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+  for (const k of parts) await s("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k + "Left", modifiers: mods, windowsVirtualKeyCode: { Alt: 18, Control: 17, Meta: 91, Shift: 16 }[k] });
+  await sleep(parts.length ? 120 : 0);
+  await s("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code, modifiers: mods, windowsVirtualKeyCode: vk });
+  if (!mods && (key === "Enter" || key.length === 1)) await s("Input.dispatchKeyEvent", { type: "char", key, text: key === "Enter" ? "\r" : key, modifiers: 0 });
+  await s("Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers: mods, windowsVirtualKeyCode: vk });
+  for (const k of parts.reverse()) await s("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k + "Left", modifiers: 0 });
+}
+
+// Where each typed character leaves the caret in the focused field (wrapping like a textarea), measured
+// with the field's own font: the film reveals the real typed text up to it, frame by frame.
+const CARET = (text) => `(() => {
+  const e = document.activeElement; if (!e) return null;
+  const cs = getComputedStyle(e), r = e.getBoundingClientRect(), n = (v) => parseFloat(v) || 0;
+  const c = document.createElement('canvas').getContext('2d');
+  c.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+  const text = ${JSON.stringify(text)};
+  const left = r.left + n(cs.paddingLeft) + n(cs.borderLeftWidth), top = r.top + n(cs.paddingTop) + n(cs.borderTopWidth);
+  const width = r.width - n(cs.paddingLeft) - n(cs.paddingRight) - n(cs.borderLeftWidth) - n(cs.borderRightWidth);
+  const lh = n(cs.lineHeight) || n(cs.fontSize) * 1.25;
+  const multi = e.tagName === 'TEXTAREA' || e.isContentEditable;
+  const pos = [[0, 0]]; let ls = 0, line = 0;
+  for (let i = 1; i <= text.length; i++) {
+    let w = c.measureText(text.slice(ls, i)).width;
+    if (multi && w > width) { const sp = text.lastIndexOf(' ', i - 1); if (sp > ls) { ls = sp + 1; line++; w = c.measureText(text.slice(ls, i)).width; } }
+    pos.push([Math.round(w * 10) / 10, line]);
+  }
+  // a single-line field centres its text vertically
+  const y = multi ? top : r.top + (r.height - lh) / 2;
+  return { left, top: y, width, lh, pos, color: cs.color, size: n(cs.fontSize) };
+})()`;
+
+// The element that really scrolls: the document, or an app shell's inner scroller.
+const SCROLLER = `([...document.querySelectorAll('main, div, section, article')].find((e) => e.scrollHeight > e.clientHeight + 40
+  && /auto|scroll/.test(getComputedStyle(e).overflowY) && e.clientHeight > innerHeight * 0.5) || document.scrollingElement)`;
+const EXPAND = `(() => {
+  const el = ${SCROLLER};
+  if (el === document.scrollingElement) return null;
+  const s0 = el.scrollTop, kid = el.firstElementChild; window.__aiExp = [];
+  for (let e = el; e; e = e.parentElement) { window.__aiExp.push([e, e.getAttribute('style')]);
+    e.style.overflow = 'visible'; e.style.height = 'auto'; e.style.maxHeight = 'none'; }
+  if (kid) { window.__aiExp.push([kid, kid.getAttribute('style')]); kid.style.marginTop = (-s0) + 'px'; }
+  return s0;
+})()`;
+const RESTORE = `(() => { for (const [e, st] of (window.__aiExp || []).reverse()) { if (st == null) e.removeAttribute('style'); else e.setAttribute('style', st); }
+  window.__aiExp = null; return true; })()`;
+
+// Is the view finished loading? Pictures in view decoded, no skeleton placeholders, the text no longer changing.
+const READY = `(() => {
+  const inView = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; };
+  const pending = [...document.images].filter((i) => inView(i) && (!i.complete || i.naturalWidth === 0) && i.loading !== 'lazy-hidden').length;
+  const skel = [...document.querySelectorAll('[class*=skeleton i], [class*=animate-pulse], [class*=shimmer i], [aria-busy=true]')].some(inView);
+  return { pending, skel, text: (document.body.innerText || '').length };
+})()`;
+
+// The flow as UI states, for the rendered (not recorded) film. Writes flows/<id>.states.json:
+//   plates: one per page the flow visits (its URL); states: stills at 3x placed on a plate at a scroll
+//   offset y; steps: what the hand did, the rect it acted on (plate px), and the state before and after.
+async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
+  const sdir = path.join(out, "states");
+  fs.mkdirSync(sdir, { recursive: true });
+  const id = flow.id + SUFFIX;
+  for (const f of fs.readdirSync(sdir)) if (f.startsWith(id + "-")) fs.rmSync(path.join(sdir, f));
+  const st = { id, url: flow.url, viewport: [W, H], dsf: DSF, mobile: MOBILE, plates: [], states: [], steps: [] };
+  let plate = 0, off = 0, n = 0, cur;
+  const sy = () => ev("Math.round(document.scrollingElement ? document.scrollingElement.scrollTop : scrollY)");
+  const shoot = async (file, clip) => {
+    const { data } = await s("Page.captureScreenshot", { format: "jpeg", quality: 92, ...(clip ? { clip: { ...clip, scale: 1 }, captureBeyondViewport: true } : {}) });
+    fs.writeFileSync(path.join(sdir, file), Buffer.from(data, "base64"));
+  };
+  const snap = async (tag, size = [W, H], clip) => {
+    await ready();
+    const f = `${id}-${String(n++).padStart(2, "0")}-${tag}.jpg`;
+    if (bcfg) await ev(BLUR(bcfg));
+    await shoot(f, clip);
+    st.states.push({ src: `flows/states/${f}`, plate, y: off, size, tag });
+    return st.states.length - 1;
+  };
+  // a state is taken only once the view has finished loading (at most 8 s)
+  const ready = async () => {
+    let last = -1, same = 0;
+    for (let i = 0; i < 32; i++) {
+      const r = await ev(READY);
+      same = r.text === last ? same + 1 : 0; last = r.text;
+      if (!r.pending && !r.skel && same >= 2) return;
+      await sleep(250);
+    }
+    console.error(`  WARN ${flow.id}: the view was still loading after 8 s; captured as it was`);
+  };
+  const newPlate = async () => { st.plates.push({ url: await ev("location.href") }); plate = st.plates.length - 1; off = 0; };
+  const rectOf = async (t) => {
+    const y0 = await sy();
+    await ev("window.__aiMoved = false");
+    const r = await ev(FINDEL(t));
+    if (!r) throw new Error(`flow ${flow.id}: nothing on the page matches ${JSON.stringify(t)}`);
+    const dy = (await sy()) - y0;
+    if (dy || await ev("window.__aiMoved")) {
+      const from = cur; off += dy; cur = await snap("into-view");
+      st.steps.push({ kind: "scroll", dy, from, to: cur, auto: true });
+    }
+    return [r[0], r[1] + off, r[2], r[3]];
+  };
+  await newPlate();
+  cur = await snap("start");
+  for (const step of flow.steps) {
+    if (step.wait != null) continue;
+    if (step.goto) {
+      const l = waitFor("Page.loadEventFired", 30000); await s("Page.navigate", { url: step.goto }); await l; await settle();
+      await newPlate(); const to = await snap("goto"); st.steps.push({ kind: "goto", from: cur, to, navigates: true }); cur = to; continue;
+    }
+    if (step.scroll) {
+      // one tall still from here down by the scroll; the camera travels down it. A page that scrolls an inner
+      // element (an app shell) is laid out tall for the shot, its content lifted to where it was, then restored.
+      const y0 = await sy(), h = H + Math.abs(step.scroll);
+      const inner = await ev(EXPAND);
+      const tall = await snap("tall", [W, h], { x: 0, y: inner == null ? y0 : 0, width: W, height: h });
+      if (inner != null) await ev(RESTORE);
+      await sleep(300);
+      await ev(`(() => { const el = ${SCROLLER}; el.scrollBy(0, ${step.scroll}); return true; })()`);
+      await sleep(900);
+      const dy = Math.round(step.scroll);
+      st.states[tall].y = off;
+      off += dy;
+      st.steps.push({ kind: "scroll", dy, from: cur, to: tall }); cur = tall; continue;
+    }
+    if (step.key) {
+      const u0 = await ev("location.pathname");
+      await pressKey(s, step.key);
+      await sleep((step.hold ?? 1.8) * 1000);
+      const nav = (await ev("location.pathname")) !== u0;   // a new query on the same page is a state of it
+      if (nav) { await settle(); await newPlate(); }
+      const to = await snap("key");
+      st.steps.push({ kind: "key", label: step.key, from: cur, to, navigates: nav }); cur = to; continue;
+    }
+    if (step.write) throw new Error(`flow ${flow.id}: "write" is not supported with --states; use "type" on the field`);
+    const t = step.click || step.move || step.hover || step.type;
+    const r = await rectOf(t);
+    const cx = r[0] + Math.min(r[2] / 2, 60 + r[2] * 0.2), cy = r[1] - off + r[3] / 2;
+    await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy });
+    if (step.move || step.hover) {
+      await sleep((step.hold ?? 0.8) * 1000);
+      const to = await snap("hover");
+      st.steps.push({ kind: "hover", rect: r, label: t, at: [cx, cy + off], from: cur, to }); cur = to; continue;
+    }
+    const label = await ev(`(document.elementFromPoint(${cx}, ${cy})?.closest('a, button, [role=button], input') || {}).innerText || ''`);
+    if (!step.allow && !step.type && (DENY.test(t) || DENY.test(label || ""))) throw new Error(`flow ${flow.id}: refused to press ${JSON.stringify(label || t)} (deletes, pays, publishes or invites). Ask the user; then "allow": true on the step.`);
+    const u0 = await ev("location.pathname");
+    await s("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
+    await sleep(90);
+    await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1 });
+    if (step.type) {
+      await sleep(400);
+      // the focused field with no placeholder and no caret: the film draws the caret and reveals the text
+      await ev(`(() => { const e = document.activeElement; if (!e) return false; e.setAttribute('placeholder', ''); e.style.caretColor = 'transparent';
+        const st = document.createElement('style');   // editors draw their placeholder with ::before
+        st.textContent = ':focus::placeholder, :focus *::placeholder { color: transparent !important } :focus::before, :focus *::before, :focus::after, :focus *::after { opacity: 0 !important }';
+        document.head.appendChild(st); return true; })()`);
+      await sleep(250);
+      const empty = await snap("focused");
+      for (const ch of step.text) { await s("Input.insertText", { text: ch }); await sleep(25); }
+      await sleep(500);
+      const caret = await ev(CARET(step.text));
+      const typed = await snap("typed");
+      if (caret) caret.top += off;
+      st.steps.push({ kind: "type", rect: r, text: step.text, at: [cx, cy + off], from: cur, empty, to: typed, caret });
+      cur = typed; continue;
+    }
+    if (step.navigates) {
+      await Promise.race([waitFor("Page.loadEventFired", 6000), waitFor("Page.navigatedWithinDocument", 6000)]);
+      await sleep(600); await settle();
+    } else await sleep((step.hold ?? 1.2) * 1000);
+    const nav = !!step.navigates || (await ev("location.pathname")) !== u0;
+    if (nav) await newPlate();
+    const to = await snap(nav ? "page" : "click");
+    st.steps.push({ kind: "click", rect: r, label: t, at: [cx, cy + off], from: cur, to, navigates: nav }); cur = to;
+  }
+  if (bcfg) {
+    st.blurred = [...new Set((await ev("window.__aiBlurHits || []")) || [])];
+    await ev(`for (const e of document.querySelectorAll('[data-ai-blur]')) e.style.outline = '3px solid #E5484D'; true`);
+    const { data } = await s("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(out, `${id}-blurred.png`), Buffer.from(data, "base64"));
+  }
+  st.end_url = await ev("location.href");
+  st.copy = await ev(`[...new Set([...document.querySelectorAll('h1, h2, h3, h4, button, [role=tab], label, a, textarea, input')]
+    .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight && !e.closest('[data-ai-blur]'); })
+    .map((e) => (e.innerText || e.placeholder || '').replace(/\\s+/g, ' ').trim()).filter((t) => t && t.length < 120))].slice(0, 80)`);
+  fs.writeFileSync(path.join(out, `${id}.states.json`), JSON.stringify(st));
+  console.log(`flows/${id}.states.json: ${st.plates.length} pages, ${st.states.length} states, ${st.steps.length} steps`);
+}
 
 async function main() {
   const bin = findBinary(SHELLS);
@@ -148,6 +414,18 @@ async function main() {
   if (logged) console.error(`  logged in: using the profile ${logged} (login.mjs logout <domain> deletes it)`);
   const cdp = chrome(bin, logged);
   try {
+    // the logged-in account's own name and handle, read from the session (its profile link and page), blurred
+    // in every frame unless the flow file says "blur": {"show_names": true}. Kept in flows/whoami.json, local only.
+    if (logged && spec.blur !== false && !spec.blur?.show_names) {
+      const cached = path.join(out, "whoami.json");
+      const me = fs.existsSync(cached) && Date.now() - fs.statSync(cached).mtimeMs < 6 * 3600e3 ? JSON.parse(fs.readFileSync(cached, "utf8"))
+        : await whoami(cdp, new URL(first.url).origin + "/");
+      if (me.tokens.length) {
+        fs.writeFileSync(path.join(out, "whoami.json"), JSON.stringify(me));
+        spec.blur = { ...(spec.blur || {}), text: [...new Set([...(spec.blur?.text || []), ...me.tokens])] };
+        console.error(`  blurring the logged-in account's name and handle (${me.tokens.length} words, flows/whoami.json)`);
+      } else console.error("  WARN: could not read the logged-in account's name; add it to flows.json blur.text");
+    }
     for (const flow of spec.flows.filter((f) => !only || f.id === only)) {
       const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -162,16 +440,21 @@ async function main() {
         : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36" });
       const cookies = flag("--cookies");
       if (cookies) { await s("Network.enable"); await s("Network.setCookies", { cookies: JSON.parse(fs.readFileSync(cookies, "utf8")) }); }
-      await s("Page.addScriptToEvaluateOnNewDocument", { source: CURSOR });
+      if (!STATES) await s("Page.addScriptToEvaluateOnNewDocument", { source: CURSOR });
       // blur: on for a logged-in profile unless the flow file says "blur": false; extra words and selectors from it
-      const bcfg = spec.blur === false ? null : (logged || spec.blur) ? { text: spec.blur?.text || [], selectors: spec.blur?.selectors
+      const bcfg = spec.blur === false ? null : (logged || spec.blur) ? { text: spec.blur?.text || [], show_names: !!spec.blur?.show_names, selectors: spec.blur?.selectors
         || ["[class*=avatar i]", "[class*=billing i]", "[data-private]", "input[type=email]"] } : null;
       if (bcfg) await s("Page.addScriptToEvaluateOnNewDocument", { source: BLUR(bcfg) });
       const settle = async () => { await sleep(1800); for (let i = 0; i < 2; i++) { await ev(DISMISS); await sleep(400); }
-        await ev("document.fonts.ready.then(() => true)"); await ev(CURSOR); if (bcfg) await ev(BLUR(bcfg)); };
+        await ev("document.fonts.ready.then(() => true)"); if (!STATES) await ev(CURSOR); if (bcfg) await ev(BLUR(bcfg)); };
       const loaded = waitFor("Page.loadEventFired", 30000);
       await s("Page.navigate", { url: flow.url });
       await loaded; await settle();
+      if (STATES) {
+        await captureStates(flow, s, ev, waitFor, settle, bcfg, out);
+        await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
+        continue;
+      }
 
       // ---- the cursor starts low right, off the action, as a person's hand would be
       let mx = W * 0.82, my = H * 0.78;
@@ -231,20 +514,8 @@ async function main() {
           await sleep(500); continue;
         }
         if (st.key) {
-          // "Enter", "Escape", "ArrowDown", or a chord: "Meta+k", "Control+Shift+p" (modifiers held, as a hand does)
-          const parts = st.key.split("+"), key = parts.pop();
-          const MOD = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
-          const mods = parts.reduce((m, k) => m | (MOD[k] || 0), 0);
-          const VK = { Enter: 13, Escape: 27, Tab: 9, ArrowDown: 40, ArrowUp: 38, Backspace: 8 };
-          const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
-          const vk = VK[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
           mark("key", null, st.key);
-          for (const k of parts) await s("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k + "Left", modifiers: mods, windowsVirtualKeyCode: { Alt: 18, Control: 17, Meta: 91, Shift: 16 }[k] });
-          await sleep(parts.length ? 120 : 0);
-          await s("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code, modifiers: mods, windowsVirtualKeyCode: vk });
-          if (!mods && (key === "Enter" || key.length === 1)) await s("Input.dispatchKeyEvent", { type: "char", key, text: key === "Enter" ? "\r" : key, modifiers: 0 });
-          await s("Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers: mods, windowsVirtualKeyCode: vk });
-          for (const k of parts.reverse()) await s("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k + "Left", modifiers: 0 });
+          await pressKey(s, st.key);
           await sleep((st.hold ?? 0.9) * 1000); continue;
         }
         if (st.write) {

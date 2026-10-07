@@ -16,6 +16,7 @@
     "@remotion/lambda": "4.0.530",
     "@remotion/layout-utils": "4.0.530",
     "@remotion/lottie": "4.0.530",
+    "@remotion/motion-blur": "4.0.530",
     "@remotion/player": "4.0.530",
     "@remotion/renderer": "4.0.530",
     "@remotion/shapes": "4.0.530",

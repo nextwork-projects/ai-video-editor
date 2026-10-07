@@ -105,7 +105,7 @@ Measured from "New Raycast. Coming 2026" (39 s, pure UI): 4-7 cuts per 30 s, med
 - No half words at the frame edge on the shot's own subject (page content cut at the edge elsewhere is
   fine; it is a crop).
 - Nothing holds still for more than about 2 s.
-- No shot type twice in a row; at least 5 types in 30 s.
+- Each shot starts where the last ended; nothing important cut off in a settled frame.
 - Words never sit over UI, never repeat a headline in frame, never more than 5.
 - The lifted element is sharp (crops are 2x) and clearly in front: shadow on light sites, a hairline on
   dark ones.
@@ -113,3 +113,22 @@ Measured from "New Raycast. Coming 2026" (39 s, pure UI): 4-7 cuts per 30 s, med
 - Against the owner's bans: no centred heading + subline + rule, no flat saturated ground the site
   does not use, no purple-blue the site does not use, no emoji, no icon tiles, no text-only slides, no
   stat the site does not state.
+
+## Smoothness, measured
+
+`meter.py` (optical flow, Farneback, fitted to one camera move a frame) on the reference films and ours,
+2026-10-06. Speed in % of the frame width a second; jerk in %/s^3 on the velocity smoothed over 0.05 s;
+judder and dead stops per 10 s; carry = how much of the motion before a cut continues after it (1 = all).
+
+| film | fps | speed median | jerk p95 | judder /10 s | stops /10 s | cuts /10 s | carry |
+|---|---|---|---|---|---|---|---|
+| Linear, Introducing Linear Agent | 60 | 1.92 | 880 | 0 | 0.18 | 0.18 | n/a |
+| Linear, Releases trailer | 60 | 3.58 | 2910 | 0 | 2.0 | 0 | n/a |
+| Linear, Initiatives demo | 25 | 0.16 | 121 | 0.07 | 0.33 | 0.13 | 0 |
+| Linear, Releases demo | 30 | 0.06 | 151 | 1.66 | 0.41 | 0.08 | n/a |
+| Apple, Child safety | 30 | 11.83 | 13382 | 0.44 | 0.29 | 3.85 | 0.32 |
+| Apple, Creator Studio | 24 | 10.88 | 30294 | 0.57 | 1.43 | 7.14 | 0.22 |
+| Apple, Siri next step | 30 | 3.34 | 8415 | 0.42 | 0.52 | 8.24 | 0.24 |
+
+The bar for the rendered film: Linear's launch pieces. No judder, under 0.5 dead stops in 10 s, jerk p95
+under 3000, few cuts and those carried. `check` prints the meter line and WARNs outside it.

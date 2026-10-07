@@ -8,11 +8,13 @@
     python3 product.py copy   DIR                                     the site's phrases to pick beats from (Jev ranks them with a key)
     python3 product.py plan   DIR --style linear|apple|stripe|arc|raycast --aspect 16:9|9:16|1:1 [--length 30]
                               [--music generated|eleven|none|audio/F] [--sfx subtle|none] [--vo F] [--story F --tag T]
+    python3 product.py animatic DIR --plan plan-linear-16x9.json      start/middle/end of every beat, captioned: approve before rendering
     python3 product.py stills DIR --plan plan-apple-16x9.json         settled frames + stills-<tag>/sheet.png
     python3 product.py render DIR --plan plan-apple-16x9.json [--draft | --modal | --lambda]
     python3 product.py check  DIR --plan plan-apple-16x9.json         check-<tag>.json; exit 1 on a FAIL
     python3 product.py share  DIR                                     share.txt: caption + alt text
     python3 product.py tts    DIR --text "..." [--voice ID]           audio/vo.mp3 (ElevenLabs key only)
+    python3 product.py meter  VIDEO                                   smoothness: speed, jerk, judder, stops, carry across cuts
     python3 product.py demo                                           self-check, no network
 
 DIR holds site.json (crawl) and story.json (the beats, written from `copy`; references/story.md).
@@ -74,6 +76,8 @@ def flow_text(d):
     """Words the recordings saw on the live site: each step's target text and what was on screen at the end."""
     out = []
     for f in sorted((Path(d) / "flows").glob("*.json")) if d else []:
+        if f.name == "whoami.json":
+            continue
         m = json.loads(f.read_text())
         out += [x["label"][5:] for x in m.get("steps", []) if (x.get("label") or "").startswith("text=")] + m.get("copy", [])
     return out
@@ -417,6 +421,8 @@ def build_plan(d, variant, aspect, length=30, music="generated", vo=None, sfx="s
     d = Path(d)
     site, story = load(d, "site.json"), load(d, story_name)
     tag = tag or tag_of(variant, aspect)
+    if "beats" in story:
+        return build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, max(fps, 60))
     if aspect == "9:16":
         story = {**story, "shots": [v for v in (vertical_shot(s, d) for s in story["shots"]) if not v.get("skip")]}
     W, H = SIZES[aspect]
@@ -564,27 +570,102 @@ def build_plan(d, variant, aspect, length=30, music="generated", vo=None, sfx="s
     return plan
 
 
+def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, fps):
+    """The rendered film (journey.py): beats over UI states, one camera, 60 fps. The framing is checked on
+    every frame from the camera path and re-planned until it holds; what still fails stops the plan."""
+    import journey
+    problems = check_story(story, site, None, d)
+    if any(p.startswith("FAIL") for p in problems):
+        sys.exit("\n".join(problems))
+    for p in problems:
+        print(p)
+    j = journey.build(d, story, aspect, fps, variant)
+    left = journey.replan(j)
+    j.pop("cursor_raw", None)
+    total = j["durationInFrames"] / fps
+    plan = {"composition": "ProductVideo", **{k: v for k, v in j.items() if k != "cues"}, "variant": variant, "story": story_name,
+            "brand": brand_of(site), "url": site["domain"], "logo": logo_of(site, d), "shots": [],
+            "page": {"vw": site["viewport"][0], "vh": site["viewport"][1], "tiles": [], "height": site["viewport"][1], "domain": site["domain"]},
+            "audio": {}}
+    if music != "none" or sfx != "none" or vo:
+        import sound
+        mood = variant if variant in sound.MOODS else "linear"
+        (d / "audio").mkdir(exist_ok=True)
+        rel = f"audio/mix-{tag}.wav"
+        rep = sound.score(d / rel, total, mood, music, sfx, cues=j["cues"], cuts=[b["start"] for b in j["beats"][1:]], end_at=j["end"],
+                          vo=d / vo if vo else None, own=d / own if own else None, eleven_key=keys_get("elevenlabs"))
+        if rep:
+            plan["audio"] = {"mix": rel}
+            plan["sound"] = rep
+            print(f"sound: {rep['music']} ({rep['mood']}, {rep['bpm']} BPM), {rep['cues']} cues, {rep['lufs']} LUFS, true peak {rep['true_peak']} dBTP")
+    if left:
+        plan["framing"] = [{"t": round(t, 2), "what": w} for t, w, _ in left[:40]]
+        print(f"FAIL framing: {len(left)} frames still fail after re-planning the camera; first: " +
+              "; ".join(f"{t:.2f} s {w}" for t, w, _ in left[:5]))
+    else:
+        print(f"framing: every frame holds (focus in the safe frame, cursor whole or hidden, nothing past 1:1), {j['durationInFrames']} frames")
+    return plan
+
+
+
 def keys_get(name):
     from ai_editor import keys
     return keys.get(name)[0]
 
 
+# The job a shot does decides the shot (references/story.md "Shots follow the job"): never variety for its own sake.
+SHOT_JOBS = {
+    "hook": {"page", "type", "flow", "media", "macro"},
+    "reveal": {"push", "page", "flow", "media", "stack"},
+    "action": {"flow", "keys"},
+    "result": {"flow", "macro", "lift", "page"},
+    "comparison": {"split"},
+    "feature-list": {"grid", "stack"},
+    "payoff": {"flow", "page", "orbit", "media"},
+    "transition": {"whip", "push"},
+    "end": {"end"},
+}
+
+
+def jarring(a, b):
+    """Two shots in a row that show the same thing the same way: the same recording over the same stretch, the
+    same component, or the same screen. A recording carried on from where the last shot stopped is not."""
+    if a.get("kind") != b.get("kind") or a.get("kind") == "end":
+        return False
+    if a.get("flow") and a.get("flow") == b.get("flow"):
+        return not (b.get("from", 0) >= a.get("to", 1e9) - 0.05)
+    for k in ("el", "focus", "els", "screens", "text"):
+        if a.get(k) is not None and a.get(k) == b.get(k):
+            return True
+    return False
+
+
 def check_story(story, site, length=None, d=None):
-    """Words on screen: the site's own, at most MAX_WORDS, no emoji, no slop. The mix: no shot type twice
-    in a row, at least 5 types in a 30 s film (Linear's own films never hold one device)."""
+    """Words on screen: the site's own, at most MAX_WORDS, no emoji, no slop. Shots: the kind the beat's job
+    allows (SHOT_JOBS), and no jarring repeat. A story of "beats" (the rendered film) is checked the same way."""
     try:
         from ai_tells import check_copy
     except ImportError:
         check_copy = lambda text, where: []
     out = []
-    for i, s in enumerate(story.get("shots", [])):
-        if s.get("kind") not in WEIGHT and s.get("kind") != "end":
-            out.append(f"FAIL shot {i}: kind {s.get('kind')!r} is not one of {', '.join(WEIGHT)}, end")
-        prev = story["shots"][i - 1]["kind"] if i else None
-        if prev == s.get("kind") and s.get("kind") not in ("end", "page"):
-            out.append(f"FAIL shot {i}: {s['kind']} twice in a row; vary the shot (references/story.md)")
-        elif prev == s.get("kind") == "page" and not story.get("allow_page_runs"):
-            out.append(f"WARN shot {i}: page twice in a row (fine for the apple variant's one continuous camera)")
+    items = story.get("beats") or story.get("shots", [])
+    import journey
+    for i, s in enumerate(items):
+        if "beats" in story:
+            if s.get("job") not in journey.JOBS:
+                out.append(f"FAIL beat {i}: job {s.get('job')!r} is not one of {', '.join(journey.JOBS)}")
+            if i and s.get("flow") and s.get("flow") == items[i - 1].get("flow") and s.get("steps") and s.get("steps") == items[i - 1].get("steps"):
+                out.append(f"FAIL beat {i}: repeats beat {i - 1} (the same steps of the same flow)")
+        else:
+            if s.get("kind") not in WEIGHT and s.get("kind") != "end":
+                out.append(f"FAIL shot {i}: kind {s.get('kind')!r} is not one of {', '.join(WEIGHT)}, end")
+            job = s.get("job")
+            if job and job not in SHOT_JOBS:
+                out.append(f"FAIL shot {i}: job {job!r} is not one of {', '.join(SHOT_JOBS)}")
+            elif job and s.get("kind") not in SHOT_JOBS[job]:
+                out.append(f"FAIL shot {i}: a {s.get('kind')} shot cannot do the {job} job; use {' or '.join(sorted(SHOT_JOBS[job]))}")
+            if i and jarring(items[i - 1], s):
+                out.append(f"FAIL shot {i}: shows what shot {i - 1} just showed, the same way; carry on from where it stopped or show the next thing")
         t = s.get("text")
         if not t:
             continue
@@ -598,11 +679,10 @@ def check_story(story, site, length=None, d=None):
         if EMOJI.search(t):
             out.append(f"FAIL shot {i}: emoji in {t!r}")
         out += [f"WARN shot {i}: {f['tell']} {f['where']} (the site's own words, kept)" for f in check_copy(t, f"shot {i}")]
-    kinds = {s["kind"] for s in story.get("shots", []) if s.get("kind") != "end"}
-    if length and length >= 25 and len(kinds) < 5:
-        out.append(f"WARN {len(kinds)} shot types ({', '.join(sorted(kinds))}); a 30 s film wants 5 or more")
-    texts = sum(1 for s in story.get("shots", []) if s.get("text"))
-    if story.get("shots") and texts == len([s for s in story["shots"] if s["kind"] != "end"]):
+    if "shots" in story and not any(s.get("job") for s in story["shots"]):
+        out.append("WARN no shot names its job: write storyboard.md first and give each shot the job it does (references/story.md)")
+    texts = sum(1 for s in items if s.get("text"))
+    if items and texts == len([s for s in items if s.get("kind", s.get("job")) != "end"]):
         out.append("WARN every shot has words: leave one or two to the UI alone")
     return out
 
@@ -624,6 +704,9 @@ def public(d, plan, tag):
 
 
 def still_frames(plan):
+    if plan.get("journey"):
+        import journey
+        return journey.stills_at(plan)
     out = {}
     for i, s in enumerate(plan["shots"]):
         a, b = s["start"], s["end"]
@@ -665,6 +748,52 @@ def sheet(stills, out):
 def venv_py():
     from edit import venv_python
     return venv_python()
+
+
+def cmd_animatic(d, plan_name):
+    """The storyboard before the render: start, middle and end of every beat, rendered at full quality as
+    stills (seconds, not minutes), on one sheet with each beat's job and words under it. The user approves
+    it in the question box; the storyboard-critic agent reviews it first."""
+    import edit
+    from PIL import Image, ImageDraw, ImageFont
+    d = Path(d).resolve()
+    plan_path = d / plan_name
+    plan = json.loads(plan_path.read_text())
+    tag = plan_path.stem[len("plan-"):]
+    edit.sync_renderer()
+    pub = public(d, plan, tag)
+    outdir = d / f"animatic-{tag}"
+    shutil.rmtree(outdir, ignore_errors=True)
+    edit.node("stills", pub, plan_path, outdir, *[f"{k}={v}" for k, v in still_frames(plan).items()])
+    beats = plan.get("beats") or [{"job": s.get("job") or s["kind"], "text": s.get("text"), "start": s["start"], "end": s["end"]} for s in plan["shots"]]
+    files = sorted(p for p in outdir.glob("*.png") if p.name != "sheet.png")
+    with Image.open(files[0]) as im:
+        tw, th = im.size
+    w = 360 if th > tw else 480
+    h = int(th * w / tw)
+    gap, cap = 10, 58
+    rows = [[f for f in files if f.name.startswith(f"{i + 1:02d}-")] for i in range(len(beats))]
+    page = Image.new("RGB", (gap + 3 * (w + gap) + 300, gap + len(rows) * (h + cap + gap)), "#161616")
+    dr = ImageDraw.Draw(page)
+    try:
+        big, small = ImageFont.load_default(size=22), ImageFont.load_default(size=16)
+    except TypeError:
+        big = small = ImageFont.load_default()
+    for r, (b, fs) in enumerate(zip(beats, rows)):
+        y = gap + r * (h + cap + gap)
+        for c, f in enumerate(fs[:3]):
+            with Image.open(f) as im:
+                page.paste(im.convert("RGB").resize((w, h), Image.LANCZOS), (gap + c * (w + gap), y))
+        x = gap + 3 * (w + gap)
+        dr.text((x, y + 4), f"{r + 1}. {b['job']}", fill="#FFFFFF", font=big)
+        dr.text((x, y + 34), f"{b['start']:.1f}-{b['end']:.1f} s", fill="#9A9A9A", font=small)
+        if b.get("text"):
+            dr.text((x, y + 58), f"\"{b['text']}\"", fill="#E8C872", font=small)
+        dr.text((gap, y + h + 6), "start  /  middle  /  end", fill="#7A7A7A", font=small)
+    out = outdir / "sheet.png"
+    page.save(out, optimize=True)
+    print(f"REVIEW THIS: {out}")
+    return out
 
 
 def cmd_stills(d, plan_name):
@@ -725,6 +854,15 @@ def cmd_check(d, plan_name):
         add("FAIL", f"{name} changed {secs} s after the render", "render again")
     for s in check_story(load(d, plan.get("story", "story.json")), site, None, d):
         add(s.split()[0], s.split(" ", 1)[1])
+    if plan.get("journey"):
+        import journey
+        for lvl, what, fix in journey.check_render(d, plan, video):
+            add(lvl, what, fix)
+        (d / f"check-{tag}.json").write_text(json.dumps(found, indent=1))
+        for f in found:
+            print(f"{f['level']:4}  {f['what']}" + (f"\n      fix: {f['fix']}" if f["fix"] else ""))
+        print(f"{sum(f['level'] == 'FAIL' for f in found)} FAIL, {sum(f['level'] == 'WARN' for f in found)} WARN -> check-{tag}.json")
+        return 1 if any(f["level"] == "FAIL" for f in found) else 0
     # the site's own brand may carry what is banned elsewhere: its font, its cream ground, its colours
     b = plan["brand"]
     hexrgb = lambda c: tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
@@ -959,8 +1097,12 @@ def demo():
     assert not [p for p in check_story(story, site) if p.startswith("FAIL")], check_story(story, site)
     bad = check_story({"shots": [{"kind": "page", "text": "Unlock seamless growth today"}]}, site)
     assert any("not on the site" in p for p in bad), bad
-    twice = check_story({"shots": [{"kind": "grid", "els": []}, {"kind": "grid", "els": []}]}, site)
-    assert any("twice in a row" in p for p in twice), twice
+    twice = check_story({"shots": [{"kind": "grid", "els": ["el-0"]}, {"kind": "grid", "els": ["el-0"]}]}, site)
+    assert any("just showed" in p for p in twice), twice
+    carried = check_story({"shots": [{"kind": "flow", "flow": "a", "from": 0, "to": 3}, {"kind": "flow", "flow": "a", "from": 3, "to": 6}]}, site)
+    assert not any("just showed" in p for p in carried), carried
+    wrong = check_story({"shots": [{"kind": "grid", "els": ["el-0"], "job": "action"}]}, site)
+    assert any("cannot do the action job" in p for p in wrong), wrong
     import tempfile as _t
     with _t.TemporaryDirectory() as td:
         (Path(td) / "flows").mkdir()
@@ -997,7 +1139,7 @@ def main():
         out = sheet(sys.argv[2], Path(sys.argv[2]) / "sheet.png")
         return print(f"REVIEW THIS: {out}")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["crawl", "pages", "record", "music", "copy", "plan", "stills", "render", "check", "share", "tts"])
+    ap.add_argument("cmd", choices=["crawl", "pages", "record", "music", "copy", "plan", "animatic", "stills", "render", "check", "share", "tts", "meter"])
     ap.add_argument("--url", help="music: a YouTube or other yt-dlp link")
     ap.add_argument("--start"), ap.add_argument("--end")
     ap.add_argument("--rights", choices=list(RIGHTS), help="music: the user's answer to who holds the rights")
@@ -1018,7 +1160,7 @@ def main():
     ap.add_argument("--sfx", choices=["subtle", "none"], default="subtle")
     ap.add_argument("--no-sfx", action="store_true", help="same as --sfx none")
     ap.add_argument("--story", default="story.json")
-    ap.add_argument("--fps", type=int, choices=[30, 60], default=FPS, help="60 doubles render time; camera moves read smoother")
+    ap.add_argument("--fps", type=int, choices=[30, 60], default=FPS, help="60 doubles render time; camera moves read smoother (a story of beats always renders at 60)")
     ap.add_argument("--tag", help="names plan-<tag>.json and its renders (default <style>-<aspect>)")
     ap.add_argument("--plan")
     ap.add_argument("--draft", action="store_true")
@@ -1051,11 +1193,19 @@ def main():
         out.write_text(json.dumps(plan, indent=1))
         for lvl, msg in smoothness(plan):
             print(f"{lvl} {msg}")
+        if plan.get("journey"):
+            print(f"{out}: {len(plan['beats'])} beats, {plan['durationInFrames'] / plan['fps']:.1f} s at {plan['fps']} fps, "
+                  + " | ".join(f"{b['job']} {b['end'] - b['start']:.1f}s" + (f" '{b['text']}'" if b.get("text") else "") for b in plan["beats"]))
+            sys.exit(1 if plan.get("framing") else 0)
         print(f"{out}: {len(plan['shots'])} shots, {plan['durationInFrames'] / plan['fps']:.1f} s, "
               + " | ".join(f"{s['kind']} {s['end'] - s['start']:.1f}s" + (f" '{s['text']}'" if s.get("text") else "") for s in plan["shots"]))
         return
-    if a.cmd in ("stills", "render", "check") and not a.plan:
+    if a.cmd == "meter":
+        sys.exit(subprocess.run([sys.executable, str(HERE / "meter.py"), a.a, *([a.b] if a.b else [])]).returncode)
+    if a.cmd in ("animatic", "stills", "render", "check") and not a.plan:
         sys.exit("--plan plan-<variant>-<aspect>.json is required")
+    if a.cmd == "animatic":
+        return cmd_animatic(a.a, a.plan)
     if a.cmd == "stills":
         return cmd_stills(a.a, a.plan)
     if a.cmd == "render":

@@ -14,7 +14,8 @@ import { AbsoluteFill, Audio, CalculateMetadataFunction, Img, OffthreadVideo, Se
   staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { ease, prog } from "../motion";
 import { loadFamily } from "../look";
-import { camAt, clamp01, Fams, FlowVideo, frameOn, Key, lerp, lerpR, Page, ProductPlan, Rect, Shot, Stage, STYLES, Words, wordsBox } from "./kit";
+import { camAt, clamp01, Fams, FlowVideo, frameOn, Key, lerp, lerpR, Logo, Page, ProductPlan, Rect, Shot, Stage, STYLES, Words, wordsBox } from "./kit";
+import { Journey, JourneyPlan } from "./Journey";
 import { Grid, Keycaps, Macro, Orbit, Push, Split, Stack, Type, Whip } from "./Shots";
 
 export type { ProductPlan, Shot } from "./kit";
@@ -57,27 +58,6 @@ const Cursor: React.FC<{ x: number; y: number; s: number; press: number }> = ({ 
     <path d="M3 2 L3 31 L10 24.5 L14.6 35.2 L19.4 33.2 L14.8 22.6 L24 22.6 Z" fill="#111" stroke="#fff" strokeWidth={2.2} strokeLinejoin="round" />
   </svg>
 );
-
-const Logo: React.FC<{ plan: ProductPlan; t: number; fams: Fams; W: number; H: number }> = ({ plan, t, fams, W, H }) => {
-  const S = Math.min(W, H);
-  const soft = STYLES[plan.variant]?.cut === "blur";
-  const p = prog(t, 0.2, soft ? 1.1 : 0.9, "power2.out");
-  const u = prog(t, 0.9, 0.7, "power2.out");
-  const lh = S * 0.095, aspect = plan.logo?.aspect ?? 1;
-  const square = aspect < 1.8;
-  return (
-    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column", gap: S * 0.04 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: lh * 0.35, opacity: p, transform: `scale(${0.97 + 0.03 * p})`,
-        filter: `blur(${(1 - p) * (soft ? 14 : 6)}px)` }}>
-        {plan.logo?.src ? <Img src={staticFile(plan.logo.src)} style={{ height: square ? lh : lh * 0.9, width: (square ? lh : lh * 0.9) * aspect }} /> : null}
-        {plan.logo?.word && (square || !plan.logo?.src) ? <span style={{ fontFamily: fams.display, fontWeight: plan.brand.display.weight,
-          fontSize: lh * 0.9, color: plan.brand.ink, letterSpacing: `${plan.brand.display.tracking_em}em` }}>{plan.logo.word}</span> : null}
-      </div>
-      <div style={{ fontFamily: fams.body, fontSize: S * 0.026, color: plan.brand.muted, opacity: u, letterSpacing: "0.01em",
-        transform: `translateY(${(1 - u) * 8}px)` }}>{plan.url}</div>
-    </AbsoluteFill>
-  );
-};
 
 // ---------- one shot ----------
 const ShotView: React.FC<{ plan: ProductPlan; shot: Shot; t: number; fams: Fams }> = ({ plan, shot, t, fams }) => {
@@ -213,6 +193,13 @@ export const ProductVideo: React.FC<ProductPlan> = (plan) => {
   const intro = i === 0 ? prog(t, 0, 0.8, "power2.out") : 1;
   const a = plan.audio ?? {};
   const total = plan.durationInFrames / fps;
+  if ((plan as JourneyPlan).journey) {
+    // the rendered film: states on one canvas, one camera (Journey.tsx)
+    return <AbsoluteFill style={{ overflow: "hidden" }}>
+      {fams.ready ? <Journey plan={plan as JourneyPlan} fams={fams} /> : null}
+      {a.mix ? <Audio src={staticFile(a.mix)} /> : null}
+    </AbsoluteFill>;
+  }
   return (
     <AbsoluteFill style={{ background: plan.brand.ground, overflow: "hidden" }}>
       {fams.ready && shot ? (

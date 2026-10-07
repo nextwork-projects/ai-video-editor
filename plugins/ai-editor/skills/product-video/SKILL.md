@@ -16,13 +16,15 @@ Work in `product/<name>/` under the folder Claude Code was started in.
 
 ```
 URL -> brief (questions) -> crawl.mjs -> site.json + pages/ (features, pricing, docs, changelog, customers...)
-    -> pages.md -> use-cases.md (ranked, quoted, sourced) -> the user picks 2-3
-    -> flows.json -> record.mjs (+ --mobile) -> flows/*.mp4 (real clicks, typing, scrolling, a real cursor)
-    -> story.json (shots from the library, the site's phrases) -> plan (beats + score + mix) -> stills -> render -> check
+    -> pages.md -> use-cases.md (ranked, quoted, sourced) -> the user picks 2-5, ordered as a journey
+    -> storyboard.md (the story first: hook, reveal, each use case as cause then effect, payoff, end)
+    -> flows.json (chained) -> record.mjs --states (+ --mobile) -> flows/*.states.json (3x stills of every UI state)
+    -> story.json beats -> plan (one camera, every frame checked, score + mix) -> animatic -> critic -> user approves
+    -> render (60 fps) -> check (framing, fill, names, smoothness meter)
 ```
 
-Read `references/story.md` before writing story.json, `references/style.md` before judging stills and
-`references/sound.md` before changing the sound.
+Read `references/story.md` before writing storyboard.md or story.json, `references/style.md` before judging
+stills and `references/sound.md` before changing the sound.
 
 ## 0. Setup
 
@@ -132,54 +134,55 @@ ranks the headings that read as jobs (about $0.0001). Read it and write `use-cas
 3-4 jobs ranked, each with the site's own words quoted, the source URL, and the flow that would show it.
 Brief items first, marked **[brief]**. Ask in the question box which 2-3 to feature (recommended first).
 
-## 4. Record the click-throughs
+## 4. Storyboard, then record the states
 
-Write `flows.json` (one flow per use case; `scripts/record.mjs` header and `references/story.md`
-"Flows"): the real interactions a visitor makes, on public pages, in the site's own labels: open a menu,
-switch a tab, type in a search box, press ⌘K, expand an item, scroll to the result.
+Write `storyboard.md` first (`references/story.md` "Story first"): the beats in story order, each with its
+job, its words (the site's, at most ~5), the capture it uses and how it hands off to the next. Order the use
+cases as the user's journey, so each one leaves the screen where the next begins.
+
+Then `flows.json`, one flow per use case in that order, **chained**: each flow's `url` is the page the last
+one ended on. Steps as in `record.mjs`'s header (`text=<the site's words>` or a CSS selector).
 
 ```bash
-node "$S/record.mjs" product/<name>             # desktop, 1440x900 @2x
-node "$S/record.mjs" product/<name> --mobile    # the phone layout, 430x932 @3x, for 9:16
+node "$S/record.mjs" product/<name> flows.json --states            # every UI state as a 3x still
+node "$S/record.mjs" product/<name> flows.json --states --mobile   # the phone layout, for 9:16
 ```
 
-Each flow becomes `flows/<id>.mp4` (30 fps, the page as it really animates, a real cursor that turns into
-a hand over links; a fingertip on mobile) and `<id>.json` (the cursor path and every step's time and
-rect, which the camera follows). Make a 1 fps strip of each and look: a click that opened a sign-up
-modal, a page that did not scroll, a search with no results. Cut around them with `from`/`to` in the
-story, or change the flow and record again (`--only <id>`).
+Each flow writes `flows/<id>.states.json` and `flows/states/*.jpg`: the start, each step's after-state, the
+focused field and the typed text with the caret measured per character, a tall still for each scroll. It
+waits for each view to finish loading (pictures, skeletons) before taking it. Look at the stills: a loading
+page, a click that opened the wrong thing, a modal you did not want. Fix the flow and capture again
+(`--only <id>`). Without `--states` it records screencasts (`flows/*.mp4`) for the shot film below.
 
 ## 5. Story and plan
 
-Write `story.json` by `references/story.md`: use case by use case, each shown as its recorded flow with
-the site's own words for it, other shots from the library between them; at least 5 shot types in 30 s,
-never the same type twice in a row (plan refuses). For 9:16 give shots a `"vertical"` override where the
-desktop frame would leave ground: recordings swap to their `-m` phone take automatically.
+Write `story.json` as `beats` from the storyboard (`references/story.md`): hook, action and result per use
+case, payoff, end. Each beat's `steps` are its flow's step numbers.
 
 ```bash
-$PY "$S/product.py" plan product/<name> --style linear --aspect 16:9 --length 30 [--music generated|eleven|none|audio/<track>] [--sfx subtle|none] [--vo audio/vo.wav]
+$PY "$S/product.py" plan product/<name> --story story.json --style linear --aspect 16:9 [--music generated|eleven|none|audio/<track>] [--sfx subtle|none] [--vo audio/vo.wav]
 ```
 
-The plan snaps every cut to the score's beat grid, writes `audio/mix-<tag>.wav` (music, a click on every
-recorded click, a tick per typed character, whooshes on whips and push-throughs, a swell and hit into the
-logo; ducked under any voice; -14 LUFS, -1 dBTP) and prints the loudness. TTS: `product.py tts
-product/<name> --text "<site phrases>"` writes `audio/vo.mp3`.
+A story of beats plans the rendered film (`journey.py`): the pages on one canvas left to right, one camera
+on one easing, a drawn cursor, every change revealed in place, 60 fps. The plan checks every frame from the
+camera path (the held focus in the safe frame and clear of the words, the cursor whole or hidden, no
+capture past 1:1), re-plans the camera when a frame fails, and exits 1 on what is left. The score snaps to
+the beats, effects land on the clicks, keys and new pages; -14 LUFS, -1 dBTP. A story of `shots` plans the
+older shot film (screencasts and the shot library, each shot naming its `job`).
 
-## 6. Stills, look, fix
+## 6. The animatic, the critic, approval
 
 ```bash
-$PY "$S/product.py" stills product/<name> --plan plan-linear-16x9.json
+$PY "$S/product.py" animatic product/<name> --plan plan-linear-16x9.json
 ```
 
-Writes `stills-<tag>/sheet.png`: every shot entering, mid, late, at the lift and at the click. Review
-the sheet against `references/style.md` "Look for". Typical fixes are in story.json: a focus rect
-that cuts a headline in half, a shot on a blank part of the page, words that repeat the headline
-already in frame, too many shots with words. Then plan and stills again.
+Writes `animatic-<tag>/sheet.png`: the start, middle and end of every beat, captioned with its job, time
+and words, in seconds. Run the `storyboard-critic` agent on the sheet; apply its fixes to the story (order,
+steps, words, a capture) and plan again; two rounds at most. Then show the sheet and ask in the question
+box: **Approve** (Recommended) / **Change the order** / **Swap a shot** / **Redo a capture**. Do not render
+before Approve.
 
-`check` runs `style-edit/scripts/ai_tells.py` on every shot; the site's own font, ground and
-colours are never flagged as tells (they are the brand), everything else is.
-
-Show the user the sheet and ask before rendering. Do not render before that.
+`stills` still makes the denser per-shot sheet for the shot film.
 
 ## 7. Render
 
@@ -207,7 +210,10 @@ the site's brand does not own (purple-blue, neon on black, a flat saturated grou
 + rule), clipping audio, a shot where the product fills under 75% of a 9:16 frame (60% of 16:9; type and
 the end card exempt; plain ground of the site's colour does not count). WARN: over 2.5 s with nothing moving, words under 4.5:1 contrast on the
 ground, loudness outside -23 to -9 LUFS (the mix is mastered to -14), a centred block (expected on the end card). Fix FAILs, then
-render again; at most two rounds. Also make a 2 fps strip and look at it:
+render again; at most two rounds. For the rendered film `check` also runs the framing on every frame, the
+focus found by template match where the plan put it, the product filling the frame by detected content
+(edges, not colour), OCR for the logged-in name, and the smoothness meter (`meter.py`: judder, dead stops,
+jerk, carry across cuts) against the Linear bar in `references/style.md`. Also make a 2 fps strip and look at it:
 `ffmpeg -i render-<tag>.mp4 -vf "fps=2,scale=300:-1,tile=12x5" -frames:v 1 strip-<tag>.png`.
 
 ## 9. Share copy, hand over
@@ -223,13 +229,16 @@ the video, sheet and share.txt, and ask for notes. Notes about taste go to the t
 ## Files
 
 - `scripts/crawl.mjs`: the crawl, home page and inner pages. Reuses `style-edit/scripts/capture.mjs` (Chrome binary, cookie banners).
-- `scripts/record.mjs`: real click-throughs as screencasts, desktop and `--mobile`; logged in via a profile, read-only deny-list, auto-blur.
+- `scripts/record.mjs`: UI states as 3x stills (`--states`) or screencasts, desktop and `--mobile`; logged in via a profile, read-only deny-list, auto-blur (the logged-in account's own name and handle read from the session into `flows/whoami.json`, avatars, profile names, emails).
+- `scripts/journey.py`: the rendered film's plan (canvas, camera, cursor per frame), the framing guarantee, the render checks. `journey.py demo` self-checks.
+- `scripts/meter.py`: the smoothness meter. `meter.py demo` self-checks.
 - `scripts/login.mjs`: login (a visible window on a dedicated profile), check, logout, where.
-- `scripts/product.py`: pages, record, copy, plan, stills, render, check, share, tts. `product.py demo` self-checks.
+- `scripts/product.py`: pages, record, copy, plan, animatic, stills, render, check, meter, share, tts. `product.py demo` self-checks.
 - `scripts/sound.py`: the score, the effects, the mix and the master. `sound.py demo` self-checks.
 - `audio/LICENSES.md`: every sound's licence and evidence (all synthesised; what was evaluated and why not).
 - `references/story.md`: story.json, the shot library, flows, the words rules, purposes, 9:16.
 - `references/style.md`: what Apple, Linear, Stripe, Arc and Raycast films do, measured; how the styles borrow it; what to look for.
 - `references/sound.md`: their sound, measured; what sound.py does with it.
 - `references/brag.md`: what this takes from latent-spaces/brag (MIT) and what it does differently.
-- `../../remotion/src/product/`: `ProductVideo.tsx` (the composition, page/lift/media/flow shots), `Shots.tsx` (the shot library), `kit.tsx` (styles, geometry, words).
+- `../../remotion/src/product/`: `ProductVideo.tsx` (the composition, page/lift/media/flow shots), `Journey.tsx` (the rendered film), `Shots.tsx` (the shot library), `kit.tsx` (styles, geometry, words, the logo).
+- `../../agents/storyboard-critic.md`: reviews the animatic against the checklist.
