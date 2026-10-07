@@ -227,28 +227,7 @@ picks from the same file. Then only the template props are left: the `template-f
 
 ## Template-filler contract
 
-`route.py beats` picks one route per sentence; the `template-filler` agent (or Claude) turns each pick
-into one visuals.json beat. Every beat: `word` (as captions.json spells it), `nth`, `hold_s` so the card
-is still up on its last word, and a `word` on each part that lands on its own word.
-
-| pick | beat |
-|---|---|
-| `capture:shot` | `{"kind": "capture", "url", "format": "shot", "clip"?, "marks": [{"kind": "highlight" or "ring", "find": "exact page text", "at_word"}], "props": {"label"?}}` |
-| `capture:browser` | the same with `"format": "browser"` (`props.url` defaults to the beat's) |
-| `capture:sticker` | `{"kind": "capture", "url", "format": "sticker", "marks": [{"kind": "highlight", "find": "the said words as the page writes them", "at_word"}]}`. No `crop`: capture.mjs cuts the sentence holding the first mark and sets it at a phone-readable size |
-| `post` | `{"kind": "post", "url", "highlight": "the phrase said, as the post writes it"}` |
-| `logo` | `{"kind": "logo", "brand", "domain"?}` |
-| `logo_cluster` | `{"kind": "anim", "type": "logo_cluster", "props": {"logos": [{"logo", "domain"?, "word"?}]}}` |
-| `chat` | `{"kind": "anim", "type": "chat", "props": {"app", "logo": {"logo"}, "model"?, "messages": [{"from": "user" or "app", "text", "word"}]}}` |
-| `terminal` | `{"kind": "anim", "type": "terminal", "props": {"title"?, "lines": [{"text", "kind": "cmd" or "out", "word"?}]}}` |
-| `toasts` | `{"kind": "anim", "type": "toasts", "props": {"items": [{"app", "logo": {"logo"}, "title", "body"?, "word"}]}}` |
-| `side_by_side` | `{"kind": "anim", "type": "side_by_side", "props": {"a": {"src", "size", "crop"?, "label"?}, "b": {...}}}` (`src`: a capture's file) |
-| `video_card` | `{"kind": "anim", "type": "video_card", "props": {"src", "start_s"?, "label"?}}` |
-| `flow` | `{"kind": "anim", "type": "flow", "props": {"nodes": [{"logo", "label", "word"}], "split"?: [{"logo", "label" or "lines": [{"text", "word"}], "word"}], "tasks"?: [{"text", "word", "heavy"?}], "accent"?}}`: one beat for the whole explanation, `hold_s` to its last word |
-
-Rules for every one: only the speaker's words and the product's real names, `{"logo": ...}` or a file
-in `images/` for pictures (never `{"icon": ...}`, never emoji), labels of a few words, `find` text copied
-exactly as the page writes it. It never writes a type card: there are none.
+The pick-to-beat table and its rules: `shapes.md`.
 
 ## Safe areas
 

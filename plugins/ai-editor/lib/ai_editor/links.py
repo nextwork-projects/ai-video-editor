@@ -4,7 +4,7 @@
     python3 links.py route "<the user's message>" [--own]   classify every link, probe video
                                                             lengths with yt-dlp, print the plan
     python3 links.py classify <url>... [--own]              offline: kind, normalised url, action
-    python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4]
+    python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4] [--max-height 2160]
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
@@ -427,7 +427,13 @@ def route(text, own=False):
 LOGIN = re.compile(r"sign in|log ?in|login|private|cookies|not a bot|registered users|members-only|age", re.I)
 
 
-def fetch(url, edit_dir, cookies=None, max_gb=4.0):
+def video_format(max_height=2160):
+    """yt-dlp -f: H.264 mp4 first, no taller than max_height (clips pass 1080: a 1080x1920 clip needs no 4K)."""
+    h = int(max_height)
+    return f"bv*[vcodec^=avc1][height<={h}]+ba[ext=m4a]/b[ext=mp4][height<={h}]/bv*[height<={h}]+ba/b[height<={h}]/b"
+
+
+def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160):
     """Download one own-footage link into edit_dir. Returns (code, message)."""
     it = classify(url, own=True)
     if it["kind"] == "video":
@@ -446,7 +452,7 @@ def fetch(url, edit_dir, cookies=None, max_gb=4.0):
         y = ytdlp()
         if not y:
             return 1, "yt-dlp is not installed. Run the setup skill, then try again."
-        cmd = y + ["-f", "bv*[vcodec^=avc1][height<=2160]+ba[ext=m4a]/b[ext=mp4]/bv*[height<=2160]+ba/b", "--merge-output-format", "mp4",
+        cmd = y + ["-f", video_format(max_height), "--merge-output-format", "mp4",
                    "--no-playlist", "--no-warnings", "--max-filesize", f"{int(max_gb * 1024)}M",
                    "-o", str(edit / "source.%(ext)s"), "--print", "after_move:filepath", it["url"]]
         if cookies:
@@ -572,6 +578,8 @@ CASES = [  # (pasted, own, kind, expected normalised url or None)
 
 
 def demo():
+    assert "[height<=1080]" in video_format(1080) and "2160" not in video_format(1080)
+    assert video_format(1080).count("[height<=1080]") == 4, video_format(1080)   # every fallback that knows its height
     for raw, own, kind, url in CASES:
         it = classify(raw, own)
         assert it["kind"] == kind, (raw, it)
@@ -683,7 +691,8 @@ def main():
     if a[:1] == ["fetch"] and len(a) >= 3:
         cookies = a[a.index("--cookies-from-browser") + 1] if "--cookies-from-browser" in a else None
         max_gb = float(a[a.index("--max-gb") + 1]) if "--max-gb" in a else 4.0
-        code, msg = fetch(a[1], a[2], cookies, max_gb)
+        height = int(a[a.index("--max-height") + 1]) if "--max-height" in a else 2160
+        code, msg = fetch(a[1], a[2], cookies, max_gb, height)
         print(msg, file=sys.stdout if code == 0 else sys.stderr)
         return code
     print(__doc__, file=sys.stderr)

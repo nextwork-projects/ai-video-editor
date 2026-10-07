@@ -46,9 +46,11 @@ from pathlib import Path
 API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 MODEL = "scribe_v2"
 # One key for every folder. Outside the skill folder, so git pull and plugin
-# updates never touch it.
-KEY_FILE = Path.home() / ".config" / "creator-teardown" / ".env"
+# updates never touch it. With AI_EDITOR_HOME set (an isolated run) the key file is
+# $AI_EDITOR_HOME/.env and the shared one is never read, as in ai_editor/keys.py.
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
+KEY_FILE = (HOME / ".env" if os.environ.get("AI_EDITOR_HOME", "").strip()
+            else Path.home() / ".config" / "creator-teardown" / ".env")
 VENV_PY = HOME / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 FILLER_PROMPT = "Umm, uh, so, like, you know, I mean... uh, okay, um, right."
 
@@ -64,7 +66,7 @@ def find_key(var="ELEVENLABS_API_KEY"):
     ELEVENLABS_API_KEY (transcripts) or GEMINI_API_KEY (the look pass)."""
     if os.environ.get(var):
         return os.environ[var].strip(), f"the {var} variable"
-    for p in (Path.cwd() / ".env", KEY_FILE):
+    for p in (KEY_FILE, Path.cwd() / ".env"):
         if p.exists():
             for line in p.read_text().splitlines():
                 if line.startswith(f"{var}="):

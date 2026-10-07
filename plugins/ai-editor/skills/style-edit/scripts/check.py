@@ -529,7 +529,18 @@ def report(found, mode):
     return n
 
 
+def style_note(path, style):
+    """The line printed when the render's rhythm is not compared with a creator (None when it is)."""
+    if not path:
+        return "note: no --style, so the rhythm is measured but not compared with the creator"
+    if not style:
+        return f"note: {Path(path).name} is the default style (no creator), so the rhythm is measured, not compared"
+    return None
+
+
 def demo():
+    assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
+    assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}
     words = [{"text": "a", "start": 0.0, "end": 0.3, "type": "word"}]
     plan = {"width": 1080, "height": 1920, "fps": 30, "durationInFrames": 600, "zooms": [],
@@ -668,8 +679,8 @@ def main():
         found, extra["cards"] = check_render(edit, plan, video)
         import quality   # every frame, the settled cards, the audio, the files: quality.py
         style = json.loads(Path(a.style).read_text()) if a.style else None
-        if not style:
-            print("note: no --style, so the rhythm is measured but not compared with the creator")
+        if style_note(a.style, style):
+            print(style_note(a.style, style))
         more, q = quality.run(edit, plan, video, plan_path, style, cut_points(edit), brand())
         found += more
         for k, v in q.pop("cards", {}).items():

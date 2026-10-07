@@ -4,6 +4,69 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Fewer bytes before the first step (backlog Next, cost). Each skill's required reads (SKILL.md plus every
+  file it says to "Read ... first") now fit a budget that `tests/check_plugins.py` enforces: start 12 KB,
+  cut 15 KB, style-edit 25 KB, product-video 30 KB. Before and after: start 15.6 to 12.0 KB (the intake
+  tables moved to `start/references/intake.md`, read only when `profile.py missing` prints an id), cut 17.7
+  to 15.0 KB, style-edit 39.5 to 23.1 KB, product-video 21.9 to 22.0 KB. The shapes Claude writes live in
+  one short file per skill: `style-edit/references/shapes.md` (images.json, visuals.json for every pick,
+  the rules plan.py enforces; 4.1 KB, read first instead of the 20.5 KB `visuals.md`, and step 3 points
+  there instead of the 23.1 KB `contracts.md`, now marked for people), `cut/references/shapes.md`
+  (spans.json, out of `retake-detection.md`), `product-video/references/shapes.md` (brief.json,
+  story.json beats). The `template-filler` agent reads shapes.md too. Test: the new check fails on the
+  old files (start 15,565, cut 17,651, style-edit 39,524 bytes) and passes on the new.
+- product-video's brief names `product.py copy` (backlog Next): step 1 runs it after the home-page crawl,
+  and it now prints a `tagline:` line (the site's description, else its h1) and a `nav:` line before the
+  headings, so the options come from it and Claude never reads `site.json` (about 20 KB). crawl.mjs says
+  `logo text "Acme"` for a wordmark logo instead of `logo undefined`. Tests: `product.py demo`
+  (`brief_lines`), `tests/test_record.mjs` (`logoNote`).
+- Captions join Whisper's hyphen tokens: "one", "-for", "-one" is one word, "one-for-one", in one caption
+  (it showed as "one -for -one"). plan.py joins any token starting with "-" to the word before it before
+  chunking. Test: `plan.py demo`.
+- The stills sheet runs in time order with no gaps in its numbers: each tile is "N  what it shows  time
+  kind" (card N is `plan.cards[N-1]`). It showed "1-opening 0.50s" before "2-caption 0.23s" and skipped 3
+  when there was no zoom. Test: `sheet.py demo`.
+- `check.py render` with an empty style file (the no-creator default) says it is the default style instead
+  of "no --style". Test: `check.py demo`.
+- clips fetches a link with `links.py fetch` (the venv's yt-dlp; setup does not put yt-dlp on the PATH)
+  capped at 1080p (`--max-height 1080`): step 1 ran bare yt-dlp at up to 2160p, several GB for a
+  20-minute talk cut to 1080x1920. Every yt-dlp fallback format now carries the height cap. Test:
+  `links.py demo`.
+- clips shortlist "names:" lists real names: the profile's names and capitalised words that do not start
+  a sentence (a sentence that ends on a pause with no full stop counts), are not single letters and are not
+  also said in lower case. It listed "And", "So", "What", "T". Test: `clips.py demo`.
+- Teardown measures print one line, not their JSON. `graphics.py measure` (246 lines of JSON on the audit
+  run), `visual.py measure` (40) and `sound.py measure` (29) each print one summary line ending in the
+  style.json path and the block's name; `--json` prints the full block. `graphics.py merge` does the same,
+  and `gemini.py kinds` prints its kinds on one line. Test: each script's `demo` asserts the summary is one
+  line with no JSON.
+- Teardown look.md reads right without a Gemini key. The font line says "not named (no look pass ...)"
+  instead of the "[from the look pass]" placeholder. Graphics numbers come from one source: graphics.py's
+  per-card measure (new `graphics.share_pct_measured`, the hold over runtime report.py shows per video)
+  when it has run, else look.py's frame estimate labelled as such (the audit's "on screen 55%" next to
+  "winners 2, control 0" came from the two sources). look.md names each AI tell with its level and where it
+  fired. `report.py build` rewrites look.md from the final style.json (it stopped before graphics, sound and
+  the tells). The palette tells read `graphics.palette`, the palette look.md prints and ai-editor copies,
+  not `crop_palette` (the colours inside captured pages): a black and brown palette no longer gets
+  "purple-blue" or "cream-paper-ground". Tests: `look.py demo`, `report.py demo`.
+- Teardown says what `--top N` downloads: SKILL.md says N plus 2 control videos (`--top 5` is 7, the
+  default 10), and `visual.py download` and `fetch.py transcribe` print the count first ("5 most-viewed +
+  2 control (closest to the median) = 7 videos"). Test: `fetch.py demo`.
+- `profile.py set` takes several answers in one call: `set platform=youtube sound.music=false
+  'names=["X"]'` writes them all and prints one line (an intake took 12 calls, each printing the full
+  path). The old `set key value` form still works, and a value may hold `=`. start's `intake.md` shows it.
+  Test: `profile.py demo` sets four pairs, one a URL with `=` (the old code stored `"sound.music=false"`
+  under the key `platform=youtube`).
+- doctor checks free disk: under 3 GB it FIXes with the reason (setup installs about 1.5 GB, the cutout
+  writes about 0.5 MB a frame, about 0.9 GB a minute at 30 fps) and what to delete, and ends "Not ready".
+  Test: `setup.py demo` feeds `disk_row` 5 GB (ok) and 2.9 GB (FIX with the reason).
+- Isolated runs never touch real keys: with `AI_EDITOR_HOME` set, both plugins read and save keys in
+  `$AI_EDITOR_HOME/.env` first and never open `~/.config/creator-teardown/.env` (`keys.py`, and
+  creator-teardown's `transcribe.py` key lookup that `fetch.py` and `gemini.py` share). Test: the
+  `keys.py` self-check finds a key in a temp `AI_EDITOR_HOME`, saves there, and finds none once that file
+  is gone.
+- README: the laptop render is no longer "the slowest option". On the 46.8 s sample `edit.py estimate`
+  gave laptop 63 s, Modal 2.0 min and GitHub Actions 7.7 min, and the laptop render took 42 s.
 - Product film: no blank frame, no headline cut by the edge, a wrong step number explained (backlog Now 1).
   The framing check now reads every frame of the plan for content (`journey.blank_frames`: the same edge
   cells as the fill guard, over every page the frame touches, moves and state changes included; under 4% is

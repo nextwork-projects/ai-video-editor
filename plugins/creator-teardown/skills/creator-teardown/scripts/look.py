@@ -693,6 +693,13 @@ def merge(rows, visuals, style):
 def summary(style, rows_n=None):
     """The <48-line text Claude reads instead of frames."""
     c, f, g, m = (style.get(k) or {} for k in ("captions", "face", "graphics", "motion"))
+    # One source for the graphics numbers: graphics.py's per-card measure when it has run (report.py
+    # shows the same), else look.py's frame estimate, labelled as such.
+    if "share_pct_measured" in g:
+        gsrc, gshare, gpm, ghold = (f"{g.get('measured')} cards measured", g["share_pct_measured"],
+                                    g.get("per_min_measured"), g.get("hold_s_measured"))
+    else:
+        gsrc, gshare, gpm, ghold = "frame estimate", g.get("share_pct"), g.get("per_min"), g.get("hold_s")
     p, z, lk = style.get("pace") or {}, style.get("zoom") or {}, style.get("look") or {}
     L = [f"# Look: @{style.get('handle')} ({style.get('videos', rows_n)} videos, measured)", ""]
     if p:
@@ -701,8 +708,8 @@ def summary(style, rows_n=None):
     if z:
         L.append(f"Zoom: {z.get('kind')} x{z.get('scale')}, {z.get('per_min')} a minute, on {z.get('on')}.")
     if m:
-        L.append(f"Motion: {m.get('personality')}. Graphics land in {m.get('ease_in_s')} s, "
-                 f"hold {m.get('hold_s')} s. Captions settle in {m.get('caption_ease_s')} s.")
+        L.append(f"Motion: {m.get('personality')}. Graphics land in {m.get('ease_in_s')} s. "
+                 f"Captions settle in {m.get('caption_ease_s')} s.")
     L.append("")
     if c.get("present") is False:
         L.append("Captions: none burned in.")
@@ -710,7 +717,7 @@ def summary(style, rows_n=None):
         L += [f"Captions: {c.get('words_per_caption')} word(s), {c.get('lines')} line(s), {c.get('case')} case, "
               f"centre at {c.get('y_pct')}% down, {c.get('x_pct')}% across.",
               f"  size {c.get('size_pct')}% of the long side, weight {c.get('weight')}, "
-              f"font {c.get('font_match') or '[from the look pass]'}",
+              f"font {c.get('font_match') or 'not named (no look pass: gemini.py look or the sheet fallback names it)'}",
               f"  fill {c.get('color')}, stroke {c.get('stroke_color') if c.get('stroke') else 'none'}, "
               f"box {c.get('box_color') if c.get('box') else 'none'}, highlight {c.get('highlight_color')}",
               f"  enters: {c.get('entrance')}, animation: {c.get('animation')}"]
@@ -722,9 +729,8 @@ def summary(style, rows_n=None):
                  f"(face {f.get('height_pct')}% of the height), centred {f.get('x_pct')}% across, "
                  f"{f.get('y_pct')}% down.")
     if g:
-        L.append(f"Graphics: on screen {g.get('share_pct')}% of the runtime, {g.get('per_min')} a minute, "
-                 f"hold {g.get('hold_s')} s.")
-        L.append("  palette: " + ", ".join(f"{x['hex']} {x['pct']}%" for x in g.get("palette", [])))
+        L.append(f"Graphics ({gsrc}): on screen {gshare}% of the runtime, {gpm} a minute, hold {ghold} s.")
+        L.append("  palette (frames with graphics; the AI-tell scan reads this one): " + ", ".join(f"{x['hex']} {x['pct']}%" for x in g.get("palette", [])))
         if g.get("kinds"):
             L.append("  kinds: " + ", ".join(f"{k} {v}%" for k, v in list(g["kinds"].items())[:5]))
         if g.get("entrances"):
@@ -747,7 +753,8 @@ def summary(style, rows_n=None):
         L.append("Winners: " + line)
     tells = style.get("ai_tells") or {}
     if tells.get("ran"):
-        L.append(f"AI tells in their look: {tells.get('bans')} BAN, {tells.get('warns')} WARN (teardown.html lists them).")
+        named = "; ".join(f"{t['level']} {t['tell']} ({t['where']})" for t in (tells.get("found") or [])[:6])
+        L.append(f"AI tells in their look: {tells.get('bans')} BAN, {tells.get('warns')} WARN" + (f": {named}" if named else "") + ".")
     cards = style.get("cats")
     if cards:
         L.append(f"Cards (events.json): {style.get('per_min')} a minute, kinds: " + ", ".join(cards))
@@ -882,6 +889,14 @@ def demo():
         assert personality(4, 0.05, 4, 0) == "calm" and personality(20, 0.4, 1, 0) == "smooth"
         assert weight_of(0.15) == 700 and weight_of(0.09) == 400 and weight_of(0.5) == 900
         assert len(summary({"handle": "x", **m}).splitlines()) <= 48
+        # No Gemini key: no placeholder, one graphics source (graphics.py's), the AI tells named.
+        txt = summary({"handle": "x", **m, "captions": {"present": True},
+                       "graphics": {"share_pct": 55, "per_min": 5.7, "hold_s": 9.0, "palette": [],
+                                    "measured": 6, "share_pct_measured": 3, "per_min_measured": 1.7, "hold_s_measured": 1.2},
+                       "ai_tells": {"ran": True, "bans": 1, "warns": 0,
+                                    "found": [{"level": "BAN", "tell": "glass-panel", "where": "look 'creator'"}]}})
+        assert "[" not in txt and "55%" not in txt and "9.0 s" not in txt, txt
+        assert "on screen 3%" in txt and "1.7 a minute" in txt and "BAN glass-panel" in txt, txt
     print("ok")
 
 

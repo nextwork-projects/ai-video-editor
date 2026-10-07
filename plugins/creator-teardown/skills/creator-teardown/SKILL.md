@@ -42,7 +42,8 @@ Gemini keys are optional. Never ask for either in the chat: the user saves them 
 
 ### Quick mode (called by ai-editor's start, setup or style-edit)
 
-When another skill needs only the style.json: Steps 1, 2 and 3b-3c with `--top 5`, the Step 3c
+When another skill needs only the style.json: Steps 1, 2 and 3b-3c with `--top 5` (5 plus 2 control
+videos: 7 downloaded and transcribed), the Step 3c
 parts question only if the caller has not asked it, then stop. Skip the Step 3 written passes and
 Steps 4-6. About a minute per creator plus transcription.
 
@@ -76,9 +77,10 @@ $VPY "${CLAUDE_SKILL_DIR}/scripts/visual.py" download <handle>
 python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" transcribe <handle>
 ```
 
-The default takes the 8 most-viewed videos plus the 2 closest to the median: 10
-videos. For a fast run, pass `--top 5` to both commands. `--ids <id>,<id>` picks
-exact videos. The median ones are the control: a move that appears in the 500K
+`--top N` downloads and transcribes N plus 2 control videos (the 2 closest to the
+median; `--control` changes the 2). The default `--top 8` is 10 videos; `--top 5`, the
+fast run, is 7; pass it to both commands. Both print the count first. `--ids <id>,<id>`
+picks exact videos. The median ones are the control: a move that appears in the 500K
 video *and* the 3K video is that creator's habit, not the reason the 500K one
 worked. Keep at least 2.
 
@@ -157,7 +159,8 @@ $VPY "${CLAUDE_SKILL_DIR}/scripts/sound.py" measure <handle>
 $VPY "${CLAUDE_SKILL_DIR}/scripts/report.py" build <handle>
 ```
 
-Run them after Step 3b (graphics.py masks the speaker with look.py's faces). They add every
+Each measure prints one summary line and the file it wrote (`--json` prints the full block; not
+needed: look.md has the numbers). Run them after Step 3b (graphics.py masks the speaker with look.py's faces). They add every
 graphic (cropped, its kind, where it sits, how it enters and exits as a fitted GSAP ease),
 cut kinds and camera moves (visual.py), sound effects and music, the first 3 seconds of each
 video, winners against the control group, and an AI-tell scan of the creator's own look.

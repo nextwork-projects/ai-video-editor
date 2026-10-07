@@ -39,15 +39,16 @@ It installs the Chrome Headless Shell the crawl and the recordings drive. Read t
 
 ## 1. The brief, in the question box, before crawling deeply
 
-Load the home page first (`node "$S/crawl.mjs" <url> product/<name> --pages 0`, about 40 s) so the
-options are the site's own. Then three AskUserQuestion calls (at most four questions each), the
+Load the home page first (`node "$S/crawl.mjs" <url> product/<name> --pages 0`, about 40 s), then
+`python3 "$S/product.py" copy product/<name>`: its `tagline:` and `nav:` lines and the headings under them
+are the options, in the site's own words. Never read `site.json` (about 20 KB). Then three AskUserQuestion calls (at most four questions each), the
 recommended option first and marked "(Recommended)", "Other" always open for their own words.
 
 **Call 1, the video's job:**
 
-1. **What it does, in one line**: the site's own tagline (`site.json` description or h1) / Other.
-2. **The 2-3 things the video must show** (multi-select): the jobs you can already see on the home page
-   and nav (its h2s, nav items), each in the site's words.
+1. **What it does, in one line**: the `tagline:` line of `product.py copy` / Other.
+2. **The 2-3 things the video must show** (multi-select): the jobs in `product.py copy`'s headings
+   and `nav:` line, each in the site's words.
 3. **Who will watch**: new users (Recommended) / existing users / investors / developers.
 4. **The one action at the end**: visit the URL (Recommended) / sign up / try a feature.
 
@@ -71,8 +72,7 @@ recommended option first and marked "(Recommended)", "Other" always open for the
 11. **Voice**: none, on-screen words only (Recommended) / their own recording / text to speech (only with
     an ElevenLabs key).
 
-Write the answers to `product/<name>/brief.json` (`{"tagline", "must_show": [...], "audience", "action",
-"must_include": [urls]}`). `plan` refuses without it. Example brief for nextwork.ai: must_show = the Create button (prompt your
+Write the answers to `product/<name>/brief.json` (shape: `references/shapes.md`). `plan` refuses without it. Example brief for nextwork.ai: must_show = the Create button (prompt your
 own project), search other people's projects, roadmaps, step-by-step guides, the portfolio in Your Library.
 
 **Logging in** (on "Yes"): follow `references/brief.md` "Logging in": say where the login is kept
@@ -130,7 +130,7 @@ also records the page's headline, so the opening never crops it.
 
 ## 5. Story and plan
 
-Write `story.json` as `beats` from the storyboard (`references/story.md`): hook, action and result per use
+Write `story.json` as `beats` from the storyboard (shape: `references/shapes.md`; rules: `references/story.md`): hook, action and result per use
 case, payoff, end. Each beat's `steps` are its flow's step numbers.
 
 ```bash

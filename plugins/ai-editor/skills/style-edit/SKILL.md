@@ -29,10 +29,10 @@ edits/<name>/style.json                                       (start: the profil
 captions.json -> beats.json -> visuals.json -> images/ + images.json -> plan.json -> stills/sheet.png -> render.mp4
 ```
 
-References, read when a step says: `references/visuals.md` (what goes on screen), `references/plan.md`
-(what plan.py does, the cutout, sound, music, the check lists), `references/motion.md` (templates,
-look, transitions, marks), `references/render.md` (render targets, live preview, export),
-`references/contracts.md` (every file's shape), `references/ai-tells.md` (the banned AI looks).
+References, read only when a step says: `references/visuals.md` (each format in detail),
+`references/plan.md` (plan.py, cutout, sound, music, checks), `references/motion.md` (templates,
+transitions, marks), `references/render.md` (targets, live preview, export), `references/ai-tells.md`
+(the banned AI looks). `references/contracts.md` is every file's full shape, for people: never read it to run the skill.
 
 ## 0. Read the taste and profile
 
@@ -78,19 +78,18 @@ Use captions.json from here on.
 
 ## 3. Visuals
 
-**Read `references/visuals.md` first.** The anti-generic rules and the order of what goes on screen
-are there; plan.py enforces them.
+**Read `references/shapes.md` first**: the visuals.json shape for every pick, the order of what goes
+on screen and the rules plan.py enforces.
 
 1. **Propose:** `python3 "$S/route.py" beats edits/<name>` splits captions.json into sentences,
    marks the profile's named things, and with a TypeSafe key Jev picks one route per sentence
    (`none`, `capture:shot|browser|sticker`, `post`, `logo`, `logo_cluster`, `chat`, `terminal`,
    `toasts`, `side_by_side`, `video_card`) into beats.json. Without a key the picks are null: decide
    them yourself from the same file. Most sentences get nothing.
-2. **Real things first:** write `visuals.json` (shape in `references/contracts.md`): a named product
+2. **Real things first:** write `visuals.json` (`references/shapes.md`): a named product
    or doc becomes a `capture` (with `marks` found by text), a quoted post a `post`, an app an `app`,
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`.
-3. **Fill the overlays:** for the overlay picks, write only the props (visuals.md "Template-filler
-   contract"). Hand it to the `template-filler` agent (haiku) when available, else write them. Only
+3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
 4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube
    and GitHub images into `images/`, hides cookie banners, measures marks. Do not open the images one

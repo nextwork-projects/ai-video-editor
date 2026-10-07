@@ -270,7 +270,7 @@ def cmd_kinds(a):
           file=sys.stderr)
     from graphics import merge as gmerge
     g = gmerge(outdir)
-    print(json.dumps(g.get("kinds"), indent=1))
+    print("kinds: " + (", ".join(f"{k} {v}%" for k, v in (g.get("kinds") or {}).items()) or "none") + f" -> {outdir / 'style.json'}")
 
 
 def cmd_merge(a):

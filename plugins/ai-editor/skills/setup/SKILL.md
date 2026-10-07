@@ -137,7 +137,7 @@ and never prints the key:
   key`: they copied it wrong or only part of it; ask them to copy it again.
 
 Keys live in `~/.config/creator-teardown/.env`, readable by the user only and shared with
-creator-teardown. Check them all at the end:
+creator-teardown (`$AI_EDITOR_HOME/.env` instead when `AI_EDITOR_HOME` is set). Check them all at the end:
 
 ```bash
 python3 "$U" keys
@@ -166,8 +166,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" missing --style
 ```
 
 Ask those ids in the question box, at most four per call, using the wording, options and `set`
-commands in `${CLAUDE_PLUGIN_ROOT}/skills/start/SKILL.md` step 2 (the rows that are not per
-video). Two calls usually cover it: first platform, creators, what to take from each, and the
+commands in `${CLAUDE_PLUGIN_ROOT}/skills/start/references/intake.md` (the rows that are not
+per video). Two calls usually cover it: first platform, creators, what to take from each, and the
 specific videos they love (links); then brand, own photos folder, what to avoid, captions, sound
 and "Let graphics sit behind you?". Every question has a recommended first option.
 

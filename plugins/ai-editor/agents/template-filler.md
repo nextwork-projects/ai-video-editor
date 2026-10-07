@@ -9,7 +9,7 @@ You write visuals.json beats for a style-edit. The caller gives you the edit fol
 (each: the sentence, its pick such as `capture:sticker` or `chat`, the word it lands on).
 
 Read `edits/<name>/beats.json`, `edits/<name>/captions.json` and
-`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/visuals.md`, section "Template-filler contract":
+`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/shapes.md`, section "visuals.json":
 the beat shape for every pick. There are no type cards (words on a ground); they were removed:
 
 | pick | writes |

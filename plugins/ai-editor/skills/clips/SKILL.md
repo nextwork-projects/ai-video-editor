@@ -2,7 +2,7 @@
 name: clips
 description: Turns one long video or podcast (a local file or a YouTube link) into the best 3-5 short vertical clips, each cut and styled in the user's profile style. Transcribes once, splits the talk into candidate clips at sentence boundaries inside the chosen length, scores every candidate in code (speech rate, loudness, laughter, numbers and names said) and with TypeSafe's Jev (hook alone, self-contained, pays off, concrete, the creator's measured moves), shows the shortlist on one page with a preview of each, then trims, cuts and style-edits each pick as its own edit. Use when the user says "clip this video", "make shorts from my podcast", "find the best clips", "cut this into TikToks", "turn this YouTube video into reels", "repurpose this long video", or drops a long video (over about 3 minutes) or a YouTube link and wants short clips. Not for editing one short take (that is start or cut), and not for measuring someone else's style (that is creator-teardown).
 license: MIT
-compatibility: Python 3.9+, ffmpeg, yt-dlp for links, and the venv, Node and renderer the setup skill installs. Recommended TypeSafe key (Jev scores every candidate for about 2 cents a video; without it Claude judges an 8-clip shortlist). Runs from the full ai-editor plugin folder (uses its lib/ and the cut and style-edit skills).
+compatibility: Python 3.9+, ffmpeg, and the venv (its yt-dlp fetches links), Node and renderer the setup skill installs. Recommended TypeSafe key (Jev scores every candidate for about 2 cents a video; without it Claude judges an 8-clip shortlist). Runs from the full ai-editor plugin folder (uses its lib/ and the cut and style-edit skills).
 ---
 
 # Clips
@@ -54,11 +54,14 @@ A local file: `mkdir -p clips/<name> && ln -s "<absolute path>" clips/<name>/sou
 copy it). A link:
 
 ```bash
-yt-dlp -f "bv*[height<=2160][ext=mp4]+ba[ext=m4a]/b" --merge-output-format mp4 -o clips/<name>/source.mp4 "<url>"
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/links.py" fetch "<url>" clips/<name> --max-height 1080
 ```
 
-If YouTube asks to sign in ("confirm you're not a bot"), add `--cookies-from-browser chrome` (or
-the user's browser). Only download what the user has the right to reuse: their own video, or one
+It uses the venv's yt-dlp (setup installs it there, not on the PATH), caps the download at 1080p (a
+1080x1920 clip needs no 4K; a 20-minute talk at 4K is several GB) and prints the file path:
+`clips/<name>/source.mp4`. Exit 3: the site wants a login (YouTube's "confirm you're not a bot").
+Ask in the question box before re-running with `--cookies-from-browser chrome` (or their browser).
+Only download what the user has the right to reuse: their own video, or one
 they have permission for. Say so once if the link is someone else's.
 
 ## 2. Transcribe once
@@ -136,7 +139,7 @@ of them, and render. Open every render and give the full paths.
 |---|---|
 | `no run of whole sentences lasts <lo>-<hi> s` | ask in the question box for a wider length, run `candidates` again |
 | `no candidate <id>` | use an id from `shortlist.md` |
-| yt-dlp "confirm you're not a bot" | ask before adding `--cookies-from-browser <browser>` |
+| `links.py fetch` exit 3 (a login or "confirm you're not a bot") | ask before re-running with `--cookies-from-browser <browser>` |
 | any cut or style-edit message | that skill's "If a script stops" table |
 
 ## Rules

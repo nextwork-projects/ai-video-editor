@@ -41,7 +41,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fetch import OUT_ROOT, pick, slug, ytdlp  # noqa: E402
+from fetch import OUT_ROOT, count_line, pick, slug, ytdlp  # noqa: E402
 
 SMALL = 108          # short side of the analysis frames, px
 BLOCK = 8            # block size for the median block difference
@@ -395,6 +395,7 @@ def cmd_download(a):
     else:
         top, control = pick(meta["videos"], meta.get("median_views") or 0, a.top, a.control)
         todo = top + control
+        print(count_line(top, control))
     yt = ytdlp()
     if not yt:
         sys.exit("yt-dlp not found. Run fetch.py doctor.")
@@ -457,11 +458,19 @@ def cmd_measure(a):
     eases = Counter(z.get("ease") for r in rows for z in r["zooms"] if z["kind"] == style["zoom"].get("kind"))
     style["zoom"]["ease"] = eases.most_common(1)[0][0] if eases else None
     style_path.write_text(json.dumps(style, indent=2))
-    print(json.dumps({k: style[k] for k in ("pace", "zoom", "camera")}, indent=2))
+    if a.json:
+        print(json.dumps({k: style[k] for k in ("pace", "zoom", "camera")}, indent=2))
+    print(summary_line(style, style_path))
     if not sp:
         print("no transcripts yet: wpm and max_pause_s are empty. Transcribe, then rerun.",
               file=sys.stderr)
-    print(f"-> {style_path}\n-> {outdir / 'sheets'}")
+
+
+def summary_line(style, path):
+    """One line for Claude's context: the full blocks are in style.json, --json prints them."""
+    p, z, c = style["pace"], style["zoom"], style["camera"]
+    return (f"visual: {p['wpm']} wpm, {p['cuts_per_10s']} cuts/10s, shot {p['median_shot_s']} s, "
+            f"zoom {z.get('kind')} {z.get('per_min')}/min, pans {c['pan_per_min']}/min -> {path} (\"pace\", \"zoom\", \"camera\")")
 
 
 def demo():
@@ -526,6 +535,9 @@ def demo():
     cam = camera(small, FPS, [20 / FPS, 40 / FPS, 61 / FPS, 87 / FPS, 108 / FPS, 153 / FPS], [])
     assert len(cam["pans"]) == 1 and cam["pans"][0]["dir"] in ("left", "right"), cam
     assert cam["shake_pct"] >= 10, cam
+    line = summary_line({"pace": {"wpm": 180, "cuts_per_10s": 2.1, "median_shot_s": 3.4},
+                         "zoom": {"kind": "punch", "per_min": 6.0}, "camera": {"pan_per_min": 0.5}}, "style.json")
+    assert "\n" not in line and "{" not in line and "punch 6.0/min" in line, line   # measure prints one line
     print("ok")
 
 
@@ -535,12 +547,13 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("download")
     p.add_argument("handle")
-    p.add_argument("--top", type=int, default=8)
+    p.add_argument("--top", type=int, default=8, help="most-viewed videos; --control more are added (default 2)")
     p.add_argument("--control", type=int, default=2)
     p.add_argument("--ids", default=None)
     p.set_defaults(fn=cmd_download)
     p = sub.add_parser("measure")
     p.add_argument("handle")
+    p.add_argument("--json", action="store_true", help="print pace, zoom and camera in full")
     p.set_defaults(fn=cmd_measure)
     sub.add_parser("demo").set_defaults(fn=lambda a: demo())
     a = ap.parse_args()

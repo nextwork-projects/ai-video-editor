@@ -219,12 +219,35 @@ def checks():
     return rows
 
 
+DISK_MIN_GB = 3   # setup installs about 1.5 GB; the cutout writes about 0.5 MB a frame
+
+
+def disk_row(free_bytes):
+    """(ok, detail) for the free space where the tools and edits go. Pure, so the demo can feed it."""
+    gb = free_bytes / 1e9
+    if gb >= DISK_MIN_GB:
+        return True, f"{gb:.1f} GB free"
+    return False, (f"{gb:.1f} GB free, need {DISK_MIN_GB} GB: setup installs about 1.5 GB and the cutout "
+                   "writes about 0.5 MB a frame (about 0.9 GB a minute at 30 fps)")
+
+
+def free_bytes():
+    p = HOME
+    while not p.exists():
+        p = p.parent
+    return shutil.disk_usage(p).free
+
+
 def doctor():
     rows = checks()
     for name, ok, detail, cmd in rows:
         print(f"{'ok ' if ok else 'FIX'}  {name:<20} {detail}")
         if not ok:
             print(f"     run: {cmd}")
+    disk_ok, detail = disk_row(free_bytes())
+    print(f"{'ok ' if disk_ok else 'FIX'}  {'free disk':<20} {detail}")
+    if not disk_ok:
+        print("     empty the Trash, delete old renders or move large files, then run doctor again")
     here = Path(__file__).resolve()
     py_self = "py" if OS == "Windows" else "python3"
     for name, have, without in KEY_ROWS:
@@ -245,7 +268,7 @@ def doctor():
         "ready": "logged in: cloud renders on Modal",
         "no token": f"installed, not logged in. In your own terminal: {modal_exe()} token new",
         "missing": f"optional, cloud renders on Modal ($30 free credit a month): {py_self} \"{here}\" modal"}[mo])
-    ready = all(r[1] for r in rows)
+    ready = all(r[1] for r in rows) and disk_ok
     if ENV.exists():
         print(f"     installed versions: {ENV}")
     print("Ready." if ready else "Not ready. Fix the lines above, top to bottom.")
@@ -583,6 +606,11 @@ def demo():
     assert modal_status() in ("ready", "no token", "missing")
     assert major("v22.3.0") == 22 and major(None) == 0
     assert fix("ffmpeg").split()[0] in ("brew", "winget", "sudo")
+    # Free disk: FIX under 3 GB, with the reason
+    assert disk_row(5e9) == (True, "5.0 GB free")
+    ok, why = disk_row(2.9e9)
+    assert not ok and "need 3 GB" in why and "1.5 GB" in why and "0.5 MB a frame" in why, why
+    assert free_bytes() > 0
     names = [r[0] for r in checks()]
     assert names[:3] == ["python", "ffmpeg", "node"], names
     global HOME, LATER

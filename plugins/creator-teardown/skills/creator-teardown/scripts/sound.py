@@ -275,8 +275,17 @@ def cmd_measure(a):
     style = json.loads(sp.read_text()) if sp.exists() else {"handle": slug(a.handle)}
     style["sound"] = summarise(rows)
     sp.write_text(json.dumps(style, indent=2))
-    print(json.dumps(style["sound"], indent=1))
-    print(f"-> {sp}")
+    if a.json:
+        print(json.dumps(style["sound"], indent=1))
+    print(summary_line(style["sound"], sp))
+
+
+def summary_line(s, path):
+    """One line for Claude's context: the full block is style.json "sound", --json prints it."""
+    kinds = ", ".join(f"{k} {v}%" for k, v in list(s["kinds"].items())[:4]) or "none"
+    m = s["music"]
+    music = "no music" if not m["present_pct"] else f"music in {m['present_pct']}% at {m['level_db']} dB"
+    return f"sound: {s['sfx_per_min']} effects/min ({kinds}), {music}, {s['measured']} videos -> {path} (\"sound\")"
 
 
 # ---------- self-check ----------
@@ -342,6 +351,8 @@ def demo():
     assert not quiet["music"]["present"] and not quiet["sfx"], (quiet["music"], quiet["sfx"])
     s = summarise([r])
     assert s["kinds"] and s["music"]["present_pct"] == 100, s
+    line = summary_line(s, "style.json")   # measure prints one line, not the JSON block
+    assert "\n" not in line and "{" not in line and "effects/min" in line, line
     print("ok")
 
 
@@ -351,6 +362,7 @@ def main():
     p = sub.add_parser("measure")
     p.add_argument("handle")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--json", action="store_true", help="print the measured block in full")
     p.set_defaults(fn=cmd_measure)
     sub.add_parser("demo").set_defaults(fn=lambda a: demo())
     a = ap.parse_args()

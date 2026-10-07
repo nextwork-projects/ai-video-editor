@@ -155,6 +155,32 @@ def name_list(profile_names):
     return [n["name"] if isinstance(n, dict) else str(n) for n in profile_names or []]
 
 
+def names_said(words, starts, names):
+    """The profile's names said, plus runs of capitalised words ("Claude Code") that do not start a
+    sentence (ids in `starts`, or after . ? !), are not single letters, and are never said in lower
+    case in the same words ("And" next to "and"). Whisper's "-for" tokens join the word before."""
+    joined = []
+    for t in words:
+        x = t["text"].strip()
+        if x.startswith("-") and joined:
+            joined[-1] = (joined[-1][0] + x, joined[-1][1])
+        else:
+            joined.append((x, id(t) in starts))
+    lower = {x.lower().strip(".,?!") for x, _ in joined if x[:1].islower()}
+    text = " ".join(x for x, _ in joined)
+    caps, run = set(), []
+    for k, (x, start) in enumerate(joined + [(".", True)]):
+        w = re.sub(r"[^\w.'-]", "", x).strip(".")
+        if (k and not start and len(w) > 1 and w[:1].isupper() and w not in SKIP_CAPS
+                and w.lower() not in lower and joined[k - 1][0][-1:].isalnum()):
+            run.append(w)
+            continue
+        if run:
+            caps.add(" ".join(run))
+        run = []
+    return sorted({n for n in names if re.search(rf"\b{re.escape(n)}\b", text, re.I)} | caps)
+
+
 def features(toks, sents, i, j, track, names):
     s0, s1 = sents[i], sents[j]
     seg = toks[s0["a"]:s1["b"] + 1]
@@ -162,17 +188,8 @@ def features(toks, sents, i, j, track, names):
     dur = s1["end"] - s0["start"]
     text = " ".join(t["text"].strip() for t in words)
     events = [t["text"].strip("()[] ").lower() for t in seg if t["type"] == "audio_event"]
-    # Names: the profile's names, plus capitalised words that are not a sentence's first word.
-    caps, run = set(), []
-    for k, t in enumerate(words + [{"text": "."}]):   # runs of capitalised words: "Claude Code"
-        w = re.sub(r"[^\w.'-]", "", t["text"]).strip(".")
-        if k and w[:1].isupper() and w not in SKIP_CAPS and words[k - 1]["text"].strip()[-1:].isalnum():
-            run.append(w)
-            continue
-        if run:
-            caps.add(" ".join(run))
-        run = []
-    named = sorted({n for n in names if re.search(rf"\b{re.escape(n)}\b", text, re.I)} | caps)
+    firsts = {id(next(t for t in toks[s["a"]:s["b"] + 1] if t["type"] == "word")) for s in sents[i:j + 1]}
+    named = names_said(words, firsts, names)
     return {
         "start": s0["start"], "end": s1["end"], "dur": round(dur, 1),
         "wpm": round(len(words) / dur * 60) if dur else 0,
@@ -547,6 +564,11 @@ def demo():
     style = {"what_works": {"levers": ["opens with a question the viewer has", "names a real company"]}}
     assert what_works(style) == style["what_works"]["levers"]
     assert what_works({"what_works": ["x"]}) == [] and what_works({}) == []
+    # names: no sentence starts (a gap ends a sentence with no full stop), no single letters, real names kept
+    ws_ = [{"text": x} for x in "we tried it at Acme and it worked So we told Claude Code about T".split()]
+    got = names_said(ws_, {id(ws_[0]), id(ws_[8])}, ["Jev"])
+    assert got == ["Acme", "Claude Code"], got
+    assert names_said([{"text": "Ask"}, {"text": "Jev"}], set(), ["Jev"]) == ["Jev"]
     assert PROMO.search("Today's video is sponsored by Acme") and not PROMO.search("the subscription price")
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -32,6 +32,23 @@ EVALS = [("plugins/ai-editor/evals/setup-plan-first", "AskUserQuestion"),
          ("plugins/creator-teardown/evals/tear-down-handle", "AskUserQuestion")]
 
 
+# What Claude must read before a skill's first step: SKILL.md plus every file it says to "Read `X` first".
+# Each byte is a token cost on every run, so the talking-head path has a ceiling (bytes).
+READ_BUDGET = {"start": 12000, "cut": 15000, "style-edit": 25000, "product-video": 30000}
+READ_FIRST = re.compile(r"[Rr]ead \**`([^`]+)`\**:?\s+first")
+
+
+def required_reads(skill_md):
+    """SKILL.md and the files it marks "read first", resolved against the skill and plugin folders."""
+    text = skill_md.read_text(encoding="utf-8")
+    plugin = skill_md.parents[2]
+    files = [skill_md]
+    for ref in READ_FIRST.findall(text):
+        ref = ref.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin)).replace("${CLAUDE_SKILL_DIR}", str(skill_md.parent))
+        files.append(Path(ref) if Path(ref).is_absolute() else skill_md.parent / ref)
+    return files
+
+
 def frontmatter(path):
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n") or "\n---\n" not in text[4:]:
@@ -192,6 +209,14 @@ def main():
             if hashlib.sha256(w.encode()).hexdigest()[:16] in PRIVATE:
                 errors.append(f"{p}: contains a private name; keep public files generic")
                 break
+
+    for name, budget in READ_BUDGET.items():
+        files = required_reads(ROOT / "plugins/ai-editor/skills" / name / "SKILL.md")
+        missing = [str(f) for f in files if not f.exists()]
+        total = sum(f.stat().st_size for f in files if f.exists())
+        if missing or total > budget:
+            errors.append(f"{name}: required reads {total} bytes (budget {budget}): "
+                          + ", ".join(f"{f.name} {f.stat().st_size}" if f.exists() else f"{f} missing" for f in files))
 
     for e in errors:
         print("FAIL", e)

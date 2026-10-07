@@ -17,6 +17,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// What the crawl line says about the logo: its file, else the wordmark it is drawn as (a text logo has no file).
+const logoNote = (l) => (!l ? "none" : l.src || (l.word ? `text "${l.word}"` : "none"));
 const { launch, findBinary, SHELLS, DISMISS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 
 const W = 1440, H = 900, DSF = 2;
@@ -471,7 +473,7 @@ async function main() {
     };
     fs.writeFileSync(path.join(outDir, "site.json"), JSON.stringify(site, null, 1));
     console.log(`${path.join(outDir, "site.json")}: ${tiles.length} tiles, ${elements.length} element crops, ${media.length} videos, `
-      + `${fontFiles.length} font files (${site.brand.display.family} / ${site.brand.body.family}), logo ${logoOut ? logoOut.src : "none"}, `
+      + `${fontFiles.length} font files (${site.brand.display.family} / ${site.brand.body.family}), logo ${logoNote(logoOut)}, `
       + `ground ${ground} ink ${site.brand.ink} accent ${accent}`);
   } finally {
     await cdp.send("Target.closeTarget", { targetId }).catch(() => {});

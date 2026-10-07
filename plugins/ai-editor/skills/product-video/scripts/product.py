@@ -110,8 +110,16 @@ def inside(r, box, slack=8):
         r[1] + r[3] <= box[1] + box[3] + slack
 
 
+def brief_lines(site):
+    """The brief's first answers, so Claude never reads site.json: the tagline and the nav's own words."""
+    h1 = next((c["text"] for c in site["copy"] if c["tag"] == "h1"), "")
+    nav = list(dict.fromkeys(c["text"] for c in site["copy"] if c["rect"][1] < 90 and 0 < len(c["text"].split()) <= 4))
+    return [f"tagline: {site.get('description') or h1 or site.get('title', '')}", f"nav: {' | '.join(nav[:12]) or '(none)'}"]
+
+
 def cmd_copy(d):
     site = load(d, "site.json")
+    print("\n".join(brief_lines(site)))
     cands = candidates(site)
     from ai_editor import jev, keys
     key, _ = keys.get("typesafe")
@@ -1114,12 +1122,14 @@ def demo():
     site = {"domain": "example.com", "viewport": [1440, 900], "title": "Example", "description": "",
             "tiles": [{"src": "images/tile-0.jpg", "y": 0, "size": [2880, 1800]}, {"src": "images/tile-1.jpg", "y": 900, "size": [2880, 1800]}],
             "copy": [{"text": "Ship faster with fewer meetings", "tag": "h1", "rect": [80, 300, 900, 80]},
-                     {"text": "Start free", "tag": "a", "rect": [80, 420, 120, 40]}],
+                     {"text": "Start free", "tag": "a", "rect": [80, 420, 120, 40]},
+                     {"text": "Pricing", "tag": "a", "rect": [600, 20, 60, 20]}, {"text": "Docs", "tag": "a", "rect": [680, 20, 50, 20]}],
             "elements": [{"id": "el-0", "kind": "heading", "rect": [80, 300, 900, 80], "crop": [68, 288, 924, 104], "src": "images/el-0.png", "size": [1848, 208]},
                          {"id": "el-1", "kind": "button", "rect": [80, 420, 120, 40], "crop": [76, 416, 128, 48], "src": "images/el-1.png", "size": [512, 192]}],
             "brand": {"ground": "#FFFFFF", "ink": "#111111", "body_ink": "#555555", "accent": "#0055FF", "dark": False, "radius_px": 8,
                       "display": {"family": "Inter", "weight": 600, "letter_spacing": "-1.2px", "size_px": 60}, "body": {"family": "Inter", "weight": 400}, "fonts": []},
             "logo": {"word": "Example"}, "media": [], "url": "https://example.com"}
+    assert brief_lines(site) == ["tagline: Ship faster with fewer meetings", "nav: Pricing | Docs"], brief_lines(site)
     assert is_site_phrase("ship faster", site) and is_site_phrase("Ship  faster with fewer meetings.", site)
     assert not is_site_phrase("ship 10x faster", site)
     story = {"shots": [{"kind": "page", "text": "Ship faster", "click": "el-1"}, {"kind": "lift", "el": "el-0"},

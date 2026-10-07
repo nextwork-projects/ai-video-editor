@@ -17,6 +17,14 @@ const src = fs.readFileSync(path.join(SCRIPTS, "product-video/scripts/record.mjs
 const deny = src.match(/^const DENY = (\/.*\/[a-z]*);$/m);
 assert.ok(deny, "record.mjs has no `const DENY = /.../;` line");
 const DENY = eval(deny[1]);
+// crawl.mjs's summary line names a text logo by its word, never "logo undefined".
+const crawlSrc = fs.readFileSync(path.join(SCRIPTS, "product-video/scripts/crawl.mjs"), "utf8");
+const note = crawlSrc.match(/^const logoNote = (.*);$/m);
+assert.ok(note, "crawl.mjs has no `const logoNote = ...;` line");
+const logoNote = eval(note[1]);
+assert.equal(logoNote({ word: "Acme", rect: [0, 0, 10, 10] }), 'text "Acme"');
+assert.equal(logoNote({ src: "images/logo.svg" }), "images/logo.svg");
+assert.equal(logoNote(null), "none");
 const blurAt = src.indexOf("const BLUR = (cfg) => `");
 const blurEnd = src.indexOf("})()`;", blurAt);
 assert.ok(blurAt >= 0 && blurEnd > blurAt, "record.mjs has no `const BLUR = (cfg) => \\`...\\`` block");

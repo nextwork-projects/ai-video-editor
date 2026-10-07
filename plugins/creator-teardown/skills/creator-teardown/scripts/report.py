@@ -181,7 +181,10 @@ def scan_tells(style, outdir, gfx_rows, at=None):
     if not at:
         return {"ran": False, "why": "ai-editor's ai_tells.py not found (install the ai-editor plugin)"}
     cap = style.get("captions") or {}
-    pal = (style.get("graphics") or {}).get("crop_palette") or []
+    # The palette look.md prints and ai-editor copies (profile.creator_look): the frames with graphics.
+    # crop_palette is the colours inside the cards (captured pages, logos), real content, not their look.
+    g = style.get("graphics") or {}
+    pal = sorted(g.get("palette") or g.get("crop_palette") or [], key=lambda p: -p.get("pct", 0))
     sat = [p for p in pal if (at.hsv(p["hex"]) or (0, 0, 0))[1] >= 0.4]
     look = {"preset": "creator", "font": cap.get("font_match"), "font_display": cap.get("font_match"),
             "ground": pal[0]["hex"] if pal else None, "accent": sat[0]["hex"] if sat else None}
@@ -506,6 +509,11 @@ def build(outdir, at=None):
     style["ai_tells"] = {k: v for k, v in tells.items() if k != "look_checked"}
     (outdir / "style.json").write_text(json.dumps(style, indent=2))
     (outdir / "report.json").write_text(json.dumps({"hooks": hooks, "compare": comp, "ai_tells": tells}, indent=1))
+    try:   # look.md was written before graphics, sound and the tells: rewrite it from the final style.json
+        from look import write_summary
+        write_summary(outdir)
+    except Exception as e:
+        print(f"  look.md not rewritten: {e}", file=sys.stderr)
     out = outdir / "teardown.html"
     out.write_text(page(style.get("handle") or outdir.name, outdir, style, videos, hooks, comp, tells, gfx_rows))
     return out, style, comp
@@ -572,15 +580,22 @@ def demo():
         @staticmethod
         def check_still(img, where):
             return []
-    t = scan_tells({"captions": {"font_match": "Inter"}, "graphics": {"crop_palette": [{"hex": "#6A4CF0", "pct": 20}]}},
+    t = scan_tells({"captions": {"font_match": "Inter"}, "graphics": {"palette": [{"hex": "#6A4CF0", "pct": 20}]}},
                    Path("."), [], FakeTells)
     assert t["ran"] and {f["tell"] for f in t["found"]} == {"default-grotesk-body", "purple-blue"}, t
+    # A black and brown look whose cards hold a lavender page: no palette tell (the measured audit case).
+    dark = {"graphics": {"palette": [{"hex": "#000000", "pct": 30}, {"hex": "#231914", "pct": 10},
+                                     {"hex": "#D9C5B0", "pct": 8}, {"hex": "#422720", "pct": 4}],
+                         "crop_palette": [{"hex": "#DCCAB8", "pct": 48}, {"hex": "#817EEB", "pct": 9}]}}
+    assert not scan_tells(dark, Path("."), [], FakeTells)["found"]
     at = ai_tells_module()
     if at:   # the real checks, when the ai-editor plugin sits next to this one
         real = scan_tells({"captions": {"font_match": "Montserrat", "case": "upper", "highlight_color": "#FFD400", "stroke": True},
-                           "graphics": {"crop_palette": [{"hex": "#F2EEE6", "pct": 40}]}}, Path("."), [], at)
+                           "graphics": {"palette": [{"hex": "#F2EEE6", "pct": 40}]}}, Path("."), [], at)
         got = {f["tell"] for f in real["found"]}
         assert {"preset-captions", "cream-paper-ground"} <= got, got
+        got = {f["tell"] for f in scan_tells(dark, Path("."), [], at)["found"]}
+        assert not got & {"purple-blue", "cream-paper-ground"}, got
 
     # The page, end to end, on a 2 s synthetic clip.
     with tempfile.TemporaryDirectory() as d:

@@ -132,6 +132,12 @@ def platform_of(urls):
     return hosts.pop() if len(hosts) == 1 else "mixed"
 
 
+def count_line(top, control):
+    """The first line download and transcribe print: --top N takes N plus the control group."""
+    return (f"{len(top)} most-viewed + {len(control)} control (closest to the median) = "
+            f"{len(top) + len(control)} videos")
+
+
 def pick(videos, median, top, control):
     """The `top` most-viewed, plus the `control` videos closest to the median.
 
@@ -387,8 +393,7 @@ def cmd_transcribe(args):
     else:
         top, control = pick(meta["videos"], median, args.top, args.control)
         todo = [(v, "top") for v in top] + [(v, "control") for v in control]
-        print(f"{len(top)} most-viewed + {len(control)} control "
-              f"(closest to the median of {median:,.0f} views)", file=sys.stderr)
+        print(count_line(top, control) + f", median {median:,.0f} views")
     if not todo:
         sys.exit("nothing to transcribe")
 
@@ -479,6 +484,7 @@ def demo():
     top, control = pick(vids, 4750, 1, 2)
     assert [v["id"] for v in top] == ["0"], top
     assert [v["id"] for v in control] == ["2", "3"], control
+    assert count_line(top, control).startswith("1 most-viewed + 2 control") and "= 3 videos" in count_line(top, control)
 
     assert slug("@Some.Creator") == "some.creator"
 
@@ -533,7 +539,7 @@ def main():
 
     p = sub.add_parser("transcribe")
     p.add_argument("handle")
-    p.add_argument("--top", type=int, default=8, help="most-viewed videos to take")
+    p.add_argument("--top", type=int, default=8, help="most-viewed videos to take; --control more are added (default 2)")
     p.add_argument("--control", type=int, default=2,
                    help="videos closest to the median, as a control group")
     p.add_argument("--ids", default=None,

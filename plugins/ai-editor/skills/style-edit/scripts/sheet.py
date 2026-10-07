@@ -4,7 +4,8 @@
     python sheet.py edits/NAME [--plan plan.json]   stills/ -> stills/sheet.png (stills-XYZ/ for plan-XYZ.json)
     python sheet.py demo                            self-check
 
-Each tile is labelled with the still's name (its beat number), its time in the edit and the card's
+Tiles run in time order, numbered 1..n. Each is labelled with its number, what it shows (opening,
+caption, zoom, card N = plan.cards[N-1], early / late / swap), its time in the edit and the card's
 kind (capture, image, logo, or the anim type). The sheet's long edge is LONG_EDGE px, so it is read
 at full size and costs about the same as ONE full still. The full-size stills stay on disk beside it
 for a zoom-in on any tile that needs a closer look. Needs Pillow (the venv has it).
@@ -52,20 +53,24 @@ def kind(card):
 
 
 def labels(plan):
-    """still name -> 'name  12.34s  kind'."""
+    """still name -> 'role  12.34s  kind' ("card 2 early" is plan.cards[1]), in time order."""
     out = {}
-    for name, frame in still_frames(plan).items():
-        m = re.match(r"(\d+)-(card|swap)", name)
-        k = kind(plan["cards"][int(m.group(1)) - 4]) if m else ""
-        out[name] = f"{name}  {frame / plan['fps']:.2f}s  {k}".rstrip()
+    frames = still_frames(plan)
+    for name in sorted(frames, key=lambda n: (frames[n], n)):
+        m = re.match(r"(\d+)-(card|swap)(.*)", name)
+        if m:
+            role = f"{m.group(2)} {int(m.group(1)) - 3}{m.group(3).replace('-', ' ')}"
+            k = kind(plan["cards"][int(m.group(1)) - 4])
+        else:
+            role, k = name.split("-", 1)[1], ""
+        out[name] = f"{role}  {frames[name] / plan['fps']:.2f}s  {k}".rstrip()
     return out
 
 
 def build(stills, plan, out):
     from PIL import Image, ImageDraw, ImageFont
     names = labels(plan)
-    order = sorted(names, key=lambda n: (int(n.split("-")[0]), float(names[n].split()[1].rstrip("s"))))
-    files = [(n, stills / f"{n}.png") for n in order if (stills / f"{n}.png").exists()]
+    files = [(n, stills / f"{n}.png") for n in names if (stills / f"{n}.png").exists()]
     if not files:
         sys.exit(f"ERROR: no stills in {stills}")
     def load(f):                       # closed straight away: Windows cannot delete an open file
@@ -84,16 +89,17 @@ def build(stills, plan, out):
         font = ImageFont.load_default(size=max(10, int(lh * 0.7)))
     except TypeError:            # Pillow < 10.1 has one fixed-size bitmap font
         font = ImageFont.load_default()
-    before = 0
+    before, tiles = 0, []
     for i, (name, f) in enumerate(files):
         x = GAP + (i % cols) * (w + GAP)
         y = GAP + (i // cols) * (h + lh + GAP)
-        draw.text((x + 3, y + 1), names[name], fill="#FFFFFF", font=font)
+        tiles.append(f"{i + 1}  {names[name]}")
+        draw.text((x + 3, y + 1), tiles[-1], fill="#FFFFFF", font=font)
         im = load(f)
         before += tokens(*im.size)
         sheet.paste(im.resize((w, h), Image.LANCZOS), (x, y + lh))
     sheet.save(out, optimize=True)
-    return {"sheet": str(out), "stills": len(files), "size": sheet.size,
+    return {"sheet": str(out), "stills": len(files), "size": sheet.size, "tiles": tiles,
             "tokens_sheet": tokens(*sheet.size), "tokens_stills": before}
 
 
@@ -105,18 +111,23 @@ def demo():
     rows = math.ceil(27 / cols)
     assert 1500 < max(cols * 1080 * s + (cols + 1) * GAP, rows * (1920 + LABEL * 1080) * s + (rows + 1) * GAP) <= 1568
     assert grid(1, 1080, 1920)[0] == 1
-    plan = {"fps": 30, "durationInFrames": 300, "zooms": [], "captions": {"chunks": [{"start": 0, "end": 1}]},
+    plan = {"fps": 30, "durationInFrames": 300, "zooms": [], "captions": {"chunks": [{"start": 0, "end": 0.4}]},
             "cards": [{"start": 2, "end": 5, "src": "images/capture-1-x.png"},
                       {"start": 6, "end": 8, "anim": {"type": "race"}}]}
     lab = labels(plan)
-    assert lab["4-card"].endswith("capture") and lab["5-card-late"].endswith("race"), lab
-    assert lab["1-opening"] == "1-opening  0.50s", lab
+    assert lab["4-card"].endswith("capture") and lab["5-card-late"] == "card 2 late  7.70s  race", lab
+    assert lab["1-opening"] == "opening  0.50s", lab
+    # time order (the caption at 0.50 s sorts with the opening, not after it by name); no zoom, no gap
+    times = [float(v.split("  ")[1].rstrip("s")) for v in lab.values()]
+    assert times == sorted(times), lab
     with tempfile.TemporaryDirectory() as t:
         d = Path(t)
         for n in lab:
             Image.new("RGB", (540, 960), (200, 30, 30)).save(d / f"{n}.png")
         r = build(d, plan, d / "sheet.png")
         assert max(r["size"]) <= LONG_EDGE + 1 and r["stills"] == len(lab), r
+        assert [int(t.split()[0]) for t in r["tiles"]] == list(range(1, len(lab) + 1)), r["tiles"]
+        assert r["tiles"][0] == "1  caption  0.20s", r["tiles"]
         assert r["tokens_sheet"] < r["tokens_stills"], r
         with Image.open(d / "sheet.png") as im:
             assert im.getpixel((GAP + 5, GAP + 40))[0] == 200            # a tile, under its label

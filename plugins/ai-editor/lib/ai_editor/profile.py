@@ -3,7 +3,9 @@
 
     python3 profile.py show                       the profile as JSON
     python3 profile.py missing                    the intake questions still unanswered, one id per line
-    python3 profile.py set <key.path> <value>     value parsed as JSON if it can be
+    python3 profile.py set <key.path>=<value> ...  several answers in one call, one line out;
+                                                  each value parsed as JSON if it can be
+    python3 profile.py set <key.path> <value>     one answer (the older form)
     python3 profile.py style <edits/NAME> [--out]  blend the profile's creators into edits/NAME/style.json
                                                   (no creators: the default style, DEFAULT_STYLE)
     python3 profile.py demo                       self-check
@@ -28,6 +30,7 @@ import colorsys
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -276,6 +279,21 @@ def write_style(edit_dir, root=Path("."), out=None):
     return out, style
 
 
+def set_pairs(prof, pairs):
+    """Each (dotted key, text) into prof; the text is parsed as JSON if it can be."""
+    for key, text in pairs:
+        try:
+            val = json.loads(text)
+        except json.JSONDecodeError:
+            val = text
+        *head, last = key.split(".")
+        cur = prof
+        for k in head:
+            cur = cur.setdefault(k, {})
+        cur[last] = val
+    return prof
+
+
 def demo():
     global HOME
     with tempfile.TemporaryDirectory() as d:
@@ -306,6 +324,18 @@ def demo():
     assert "accent" not in lk
     lk = resolve_look({"look": {"preset": "poster-green", "font_display": "Archivo"}}, {}, warn=w.append)
     assert lk["preset"] == "neutral" and "font_display" not in lk, lk     # flat ground and a default grotesk refused
+    # several answers in one call: one line out, every value in place
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ, AI_EDITOR_HOME=d)
+        r = subprocess.run([sys.executable, __file__, "set", "platform=youtube", "sound.music=false",
+                            'names=["Jev"]', "brand.url=https://x.io/?a=b"], capture_output=True, text=True, env=env)
+        assert r.returncode == 0 and r.stdout.count("\n") == 1, (r.stdout, r.stderr)
+        got = json.loads((Path(d) / "profile.json").read_text())
+        assert got["platform"] == "youtube" and got["sound"] == {"music": False} and got["names"] == ["Jev"], got
+        assert got["brand"]["url"] == "https://x.io/?a=b", got
+        r = subprocess.run([sys.executable, __file__, "set", "audience", "builders"], capture_output=True,
+                           text=True, env=env)
+        assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text())["audience"] == "builders"
     print("profile ok")
 
 
@@ -318,18 +348,12 @@ def main():
     elif a and a[0] == "missing":
         group = {"--style": STYLE_QUESTIONS, "--video": VIDEO_QUESTIONS}.get(a[1] if len(a) > 1 else "", QUESTIONS)
         print("\n".join(missing(group)) or "(all answered)")
-    elif len(a) == 3 and a[0] == "set":
-        prof = json.loads(path().read_text()) if path().exists() else {}
-        try:
-            val = json.loads(a[2])
-        except json.JSONDecodeError:
-            val = a[2]
-        *head, last = a[1].split(".")
-        cur = prof
-        for k in head:
-            cur = cur.setdefault(k, {})
-        cur[last] = val
-        print(f"set {a[1]} -> {save(prof)}")
+    elif len(a) >= 2 and a[0] == "set":
+        pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
+        if any(len(p) != 2 or not p[0] for p in pairs):
+            sys.exit("usage: profile.py set key=value [key=value ...]  (or: set key value)")
+        prof = set_pairs(json.loads(path().read_text()) if path().exists() else {}, pairs)
+        print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
         print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else

@@ -709,7 +709,8 @@ def summarise(rows, face=None):
     gs = [g for r in rows for g in kept(r)]
     mins = sum(r["duration_s"] for r in rows) / 60 or 1
     if not gs:
-        return {"kinds": {}, "layout": None, "entrances": [], "exits": [], "secondary_motion": {}, "measured": 0}
+        return {"kinds": {}, "layout": None, "entrances": [], "exits": [], "secondary_motion": {}, "measured": 0,
+                "share_pct_measured": 0}
     tot = sum(g["hold_s"] for g in gs)
     kinds = Counter()
     for g in gs:
@@ -756,6 +757,9 @@ def summarise(rows, face=None):
         "kinds_source": Counter(g.get("kind_source", "code") for g in gs).most_common(1)[0][0],
         "measured": len(gs),
         "per_min_measured": round(len(gs) / mins, 1),
+        # the same sum report.py shows per video: graphic hold over runtime, one source for look.md
+        "share_pct_measured": round(100 * sum(min(r["duration_s"], sum(g["hold_s"] for g in kept(r))) for r in rows)
+                                    / (mins * 60)),
         "hold_s_measured": round(statistics.median(g["hold_s"] for g in gs), 2),
         "layout": layout,
         "entrances": group("entrance"),
@@ -852,8 +856,18 @@ def cmd_measure(a):
             f"{g['t_in']}s {g['kind']} {(g['entrance'] or {}).get('kind')}/{(g['entrance'] or {}).get('ease')}"
             for g in r["graphics"][:6]), file=sys.stderr)
     g = merge(outdir)
-    print(json.dumps({k: g.get(k) for k in ("kinds", "layout", "entrances", "secondary_motion")}, indent=1)[:2500])
-    print(f"-> {outdir / 'style.json'}\n-> {outdir / 'graphics'}")
+    if a.json:
+        print(json.dumps({k: g.get(k) for k in ("kinds", "layout", "entrances", "secondary_motion")}, indent=1))
+    print(summary_line(g, outdir / "style.json"))
+
+
+def summary_line(g, path):
+    """One line for Claude's context: the full measure is in style.json ("graphics"), --json prints it."""
+    top = lambda d, n=3: ", ".join(f"{k} {v}%" for k, v in list((d or {}).items())[:n]) or "none"
+    e = (g.get("entrances") or [{}])[0]
+    ent = f"{e['kind']}/{e['ease']} {e['share_pct']}%" if e else "none"
+    return (f"graphics: {g.get('measured', 0)} measured, {g.get('per_min_measured', 0)}/min, kinds {top(g.get('kinds'))}; "
+            f"entrance {ent}; zones {top(((g.get('layout') or {}).get('zones_pct')), 4)} -> {path} (\"graphics\")")
 
 
 # ---------- self-check ----------
@@ -930,6 +944,8 @@ def demo():
         assert ease_value("power3.in", 0.5) < 0.5 < float(EASES["power3.out"](0.5))
         grid = heatmap([r])
         assert max(map(max, grid)) == 100 and len(grid) == GRID[0]
+        line = summary_line(s, "style.json")   # measure prints one line, not the JSON block
+        assert "\n" not in line and "{" not in line and len(line) < 300 and "slide/" in line, line
     print("ok")
 
 
@@ -940,10 +956,14 @@ def main():
     p.add_argument("handle")
     p.add_argument("--force", action="store_true")
     p.add_argument("--ids", default=None, help="only these video ids")
+    p.add_argument("--json", action="store_true", help="print the measured block in full")
     p.set_defaults(fn=cmd_measure)
     p = sub.add_parser("merge")
     p.add_argument("handle")
-    p.set_defaults(fn=lambda a: print(json.dumps(merge(OUT_ROOT / slug(a.handle)), indent=1)[:2000]))
+    p.add_argument("--json", action="store_true", help="print the merged block in full")
+    p.set_defaults(fn=lambda a: (lambda g: print(json.dumps(g, indent=1) if a.json else
+                                                 summary_line(g, OUT_ROOT / slug(a.handle) / "style.json")))(
+        merge(OUT_ROOT / slug(a.handle))))
     sub.add_parser("demo").set_defaults(fn=lambda a: demo())
     a = ap.parse_args()
     a.fn(a)

@@ -119,8 +119,20 @@ def ends_clause(text):
     return text.rstrip().endswith((".", "?", "!", ",", ";", ":"))
 
 
+def join_hyphens(words):
+    """Whisper splits "one-for-one" into "one", "-for", "-one": a token starting with "-" joins the word before."""
+    out = []
+    for w in words:
+        if out and w["text"].strip().startswith("-") and len(w["text"].strip()) > 1:
+            out[-1] = {**out[-1], "text": out[-1]["text"].rstrip() + w["text"].strip(), "end": w["end"]}
+        else:
+            out.append(w)
+    return out
+
+
 def chunk_captions(words, n, mode):
     chunks, cur = [], []
+    words = join_hyphens(words)
     for i, w in enumerate(words):
         cur.append(w)
         nxt = words[i + 1] if i + 1 < len(words) else None
@@ -1533,6 +1545,9 @@ def cut_points(edit_dir):
 
 
 def demo():
+    hy = [{"text": t, "start": i * 0.3, "end": i * 0.3 + 0.25} for i, t in enumerate(["one", "-for", "-one", "deal"])]
+    got = [c["text"] for c in chunk_captions(hy, 3, "sentence")]
+    assert got == ["one-for-one deal"], got
     face = {"step_s": 0.5, "heads": [{"t": 0.0, "box": [30, 30, 40, 30]}, {"t": 0.5, "box": [30, 31, 40, 30]}]}
     top = {"start": 0.0, "end": 1.0, "box": [10, 15, 74, 22], "trigger_word": "a"}
     logo = {"start": 0.0, "end": 1.0, "box": [42, 50, 16, 9], "trigger_word": "b", "anim": {"type": "logo"}}
