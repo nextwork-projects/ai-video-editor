@@ -26,7 +26,6 @@ Every run also proves the threshold still bites on the real stills: the fresh st
 (a card moved) and with its middle third blanked (a card gone) must both fail against the reference.
 """
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -146,6 +145,18 @@ def main():
     ap.add_argument("--out", help="keep the fresh stills and the diff images here")
     a = ap.parse_args()
     work = Path(tempfile.mkdtemp(prefix="ave-golden-"))
+    try:
+        compare(a, work)
+    except BaseException:
+        print(f"GOLDEN: kept the work folder for a look: {work}", file=sys.stderr)
+        raise
+    shutil.rmtree(work, ignore_errors=True)
+    print("GOLDEN OK" if not a.update else "golden stills updated")
+
+
+def compare(a, work):
+    import cv2
+    import numpy as np
     stills = render(work)
     ban = banned(stills.parent, stills)
     if ban:
@@ -185,12 +196,9 @@ def main():
             bad.append(n)
             if out:
                 cv2.imwrite(str(out / f"{n}-diff.png"), cv2.absdiff(cv2.imread(str(ref)), small) * 4)
-    if os.environ.get("CI"):
-        shutil.rmtree(work, ignore_errors=True)
     if bad:
         sys.exit(f"GOLDEN FAIL on {platform.system()}: {', '.join(bad)} differ. Look at them"
                  + (f" in {out}" if out else " (--out DIR keeps them)") + "; if the change is intended, run --update.")
-    print("GOLDEN OK" if not a.update else "golden stills updated")
 
 
 if __name__ == "__main__":
