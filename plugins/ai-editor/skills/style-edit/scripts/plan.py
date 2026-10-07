@@ -696,6 +696,111 @@ def sticker_xh(c, aspect):
     return c["xh"] * min((w * 0.9 - 2 * e) / iw, (h * 0.86 - 2 * e) / ih)
 
 
+XH_PER_LINE = 0.42     # a DOM line box is about 1.2 em tall and a Latin x-height about 0.5 em
+# ponytail: a crop cut to the evidence may show the capture up to 2 frame px per PNG px (a 2x capture's body text
+# needs about 1.8 to read); soft but legible. Upgrade: re-shoot the crop at a higher deviceScaleFactor instead.
+MAX_UP = 2.0
+
+
+def evidence_lines(c):
+    """The text lines (image px) a capture is shown for: those under its marks or highlight, else its largest
+    type (the headline). Inside a sticker's crop only."""
+    lines = [ln[:4] for ln in c.get("lines") or []]
+    if c.get("format") == "sticker":
+        x, y, w, h = sticker_crop(c)
+        lines = [ln for ln in lines if ln[0] >= x - 1 and ln[1] >= y - 1 and ln[0] + ln[2] <= x + w + 1 and ln[1] + ln[3] <= y + h + 1]
+    if not lines:
+        return []
+    iw, ih = c["size"]
+    rects = [r for mk in c.get("marks") or [] for r in (mk.get("rects") or ([mk["rect"]] if mk.get("rect") else []))]
+    rects += [[a * iw, b * ih, cw * iw, ch * ih] for a, b, cw, ch in (c.get("highlight") or {}).get("rects") or []]
+    hit = [ln for ln in lines if any(r[0] - 4 <= ln[0] + ln[2] / 2 <= r[0] + r[2] + 4 and r[1] - 4 <= ln[1] + ln[3] / 2 <= r[1] + r[3] + 4
+                                     for r in rects)]
+    top = max(ln[3] for ln in lines)
+    return hit or [ln for ln in lines if ln[3] >= 0.85 * top]
+
+
+def capture_scale(c, aspect):
+    """Frame px per image px of a capture card as Overlays.tsx draws it in its box (no push-in counted)."""
+    W, H = SIZES[aspect]
+    w, h = c["box"][2] / 100 * W, c["box"][3] / 100 * H
+    iw, ih = c["size"]
+    f = c.get("format") or "shot"
+    if f == "sticker":
+        e = max(8, min(w, h) / 100 * 1.6)
+        cw, ch = sticker_crop(c)[2:]
+        return min((w * 0.9 - 2 * e) / cw, (h * 0.86 - 2 * e) / ch)
+    if f == "browser":
+        bar = max(28, h * 0.09)
+        bw, vh = min(w * 0.96, (h * 0.94 - bar) * 1.7), h * 0.94 - bar
+        follows = c.get("marks") or c.get("highlight") or ih / iw > vh / bw * 1.6
+        return bw / iw if follows else min(bw / iw, vh / ih)
+    return min(w * 0.96 / iw, h * 0.92 / ih)
+
+
+def capture_xh(c, aspect):
+    """The rendered x-height (px on a 1080-wide frame) of a capture card's evidence text, from its DOM line
+    boxes; None when it has none. A capture.mjs sticker's own measured "xh" wins."""
+    if c.get("format") == "sticker" and c.get("xh") and c.get("size"):
+        return sticker_xh(c, aspect) * 1080 / min(SIZES[aspect])
+    if not c.get("size") or c.get("format") == "plain":
+        return None
+    ev = evidence_lines(c)
+    if not ev:
+        return None
+    hl = sorted(ln[3] for ln in ev)[len(ev) // 2]
+    return XH_PER_LINE * hl * capture_scale(c, aspect) * 1080 / min(SIZES[aspect])
+
+
+def readable_captures(cards, aspect):
+    """On vertical a capture whose evidence would render under READ_XH becomes a sticker cropped to that
+    evidence: the crop takes the band's shape around the evidence's first lines (as many as still read) at the
+    largest size that holds them (at most MAX_UP frame px per picture px), every line whole. One that still reads small is left for check.py to FAIL."""
+    if aspect != "9:16":
+        return cards
+    W, H = SIZES[aspect]
+    for c in cards:
+        if c.get("layout") == "scene" or not c.get("src") or c.get("format") in ("sticker", "plain") or not c.get("lines"):
+            continue
+        xh = capture_xh(c, aspect)
+        if xh is None or xh >= READ_XH:
+            continue
+        w, h = c["box"][2] / 100 * W, c["box"][3] / 100 * H
+        e = max(8, min(w, h) / 100 * 1.6)
+        aw, ah = w * 0.9 - 2 * e, h * 0.86 - 2 * e
+        unit = 1080 / min(W, H)
+
+        def fit(group):
+            gx0, gy0 = min(ln[0] for ln in group), min(ln[1] for ln in group)
+            gx1, gy1 = max(ln[0] + ln[2] for ln in group), max(ln[1] + ln[3] for ln in group)
+            pad = 0.25 * min(ln[3] for ln in group)
+            f = min(MAX_UP, aw / (gx1 - gx0 + 2 * pad), ah / (gy1 - gy0 + 2 * pad))
+            return f, (gx0, gy0, gx1, gy1), XH_PER_LINE * sorted(ln[3] for ln in group)[len(group) // 2] * f * unit
+
+        # the evidence from its first line on, as many lines as still read at READ_XH
+        ev = sorted(evidence_lines(c), key=lambda ln: (ln[1], ln[0]))
+        group = ev[:1]
+        for ln in ev[1:]:
+            if fit(group + [ln])[2] < READ_XH:
+                break
+            group.append(ln)
+        f, (x0, y0, x1, y1), _ = fit(group)
+        iw, ih = c["size"]
+        cw, ch = min(iw, aw / f), min(ih, ah / f)
+        cx = min(max((x0 + x1) / 2, cw / 2), iw - cw / 2)
+        cy = min(max((y0 + y1) / 2, ch / 2), ih - ch / 2)
+        crop = whole_lines([cx - cw / 2, cy - ch / 2, cw, ch], c["lines"], c["size"])
+        new = {**c, "format": "sticker", "props": {k: v for k, v in (c.get("props") or {}).items() if k != "url"}}
+        new["props"]["crop"] = crop
+        got = capture_xh(new, aspect)
+        if got and got > xh:
+            print(f"'{c['trigger_word']}' {c['src']}: {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height; "
+                  f"cut to the evidence as a sticker, {got:.0f} px", file=sys.stderr)
+            c.clear()
+            c.update(new)
+    return cards
+
+
 def heat(gl, bx):
     """How much the creator's graphics sat in box bx (% of the frame), 0-1: the mean of her layout grid over
     it (graphics.layout.grid, seconds of cover per cell, 0-100), else her zone share (zones_pct)."""
@@ -732,6 +837,8 @@ def place_overlays(cards, face, cap_y, aspect, prefer=None):
             out.append(c)
             continue
         if c.get("lane") == "logo" or t in FIXED_BOX or c.get("_own_box") or not hd:
+            if not hd and aspect == "9:16" and c.get("src") and not c.get("_own_box") and c.get("lane") != "logo":
+                c["box"] = [4, OVERLAY_TOP, 92, c["box"][3]]   # no head found: a capture takes the band above where it would be
             out.append(c)
             continue
         ar = content_aspect(c)
@@ -1194,7 +1301,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         cap["y_pct"] = split_y
         # a logo is dropped while a scene or a panel card is up (the frame is already showing the visual)
         rest = split_cards(rest + [{**c, "lane": None} for c in scenes], art)
-        rest = [c for c in rest if c.get("_f") != "scene"]
+        rest = readable_captures([c for c in rest if c.get("_f") != "scene"], aspect)
         out = {**head, "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
                                   "speaker": speaker_frame(face, seam), "caption_full_y": full_y}}
     else:
@@ -1207,16 +1314,17 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
                                            for h in face["heads"]]}
         rest = place_overlays(rest, seen, cap["y_pct"], aspect, graphics(style, "layout").get("layout"))
         rest = avoid_heads(rest, seen, cap["y_pct"], aspect)
+        rest = readable_captures(rest, aspect)
         if behind:
             rest = tuck_behind(rest, face, aspect)
         out = dict(head)
     cards = creator_motion(sorted(rest + scenes, key=lambda c: c["start"]), style, aspect)
     for c in cards:
-        if c.get("format") == "sticker" and c.get("xh") and c.get("size"):
-            px = sticker_xh(c, aspect) * 1080 / min(width, height)
-            if px < READ_XH:
-                print(f"warning: '{c['trigger_word']}' sticker text renders at {px:.0f} px x-height (under {READ_XH}: "
-                      "too small on a phone). Cut it to a shorter sentence, or a smaller \"fit\" in visuals.json", file=sys.stderr)
+        px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
+        if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker"):
+            print(f"warning: '{c['trigger_word']}' capture text renders at {px:.0f} px x-height (under {READ_XH}: "
+                  "too small on a phone; check.py plan FAILs it on vertical). Cut it to a shorter sentence, a smaller \"fit\", "
+                  "or a \"crop\" round the evidence in visuals.json", file=sys.stderr)
         c.pop("_f", None)
         c.pop("_own_box", None)
     for c in cards:   # logos sit round the head as drawn: grown by a zoom up while they are

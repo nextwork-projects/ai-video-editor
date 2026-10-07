@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, SAFE, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
+from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -179,6 +179,11 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             if cut:
                 out.append(finding("FAIL", c["start"], f"{name} sticker's crop cuts {len(cut)} line(s) of text at its edge",
                                    "plan again (plan.py whole_lines grows the crop to whole lines), or drop props.crop"))
+        xh = aspect == "9:16" and c.get("src") and c.get("layout") != "scene" and capture_xh(c, aspect)
+        if xh and xh < READ_XH:
+            out.append(finding("FAIL", c["start"], f"{name} capture text renders at {xh:.0f} px x-height, under {READ_XH}: "
+                               "unreadable on a phone", "plan again (plan.py cuts it to the evidence as a sticker), or give "
+                               "the beat a \"crop\" round the evidence lines, or \"layout\": \"scene\""))
         if c.get("layer") == "behind":
             # behind the speaker: the cutout covers the card where it meets him, so it may reach the head,
             # but only once matte.py has cut him out for this card's time
@@ -603,6 +608,23 @@ def demo():
     fixed = pl.with_formats([{k: v for k, v in stk["cards"][0].items()}], [])[0]
     stk["cards"][0]["props"] = fixed["props"]
     assert not any("cuts" in f["what"] for f in check_plan(stk, face)), (fixed["props"], check_plan(stk, face))
+    # a capture on vertical reads on a phone: the audit's two browser captures, planned as boxes about a fifth
+    # of the frame tall, render their text at 27 and 19 px x-height and FAIL; plan.py cuts each to its evidence
+    cap1 = {"src": "images/capture-1-jev.png", "size": [2000, 1434], "format": "browser", "props": {"url": "https://a.b"},
+            "lines": [[12, 14, 194, 42], [766, 14, 159, 42], [704, 118, 369, 28], [884, 172, 233, 32], [767, 212, 465, 32],
+                      [704, 402, 422, 32], [762, 460, 491, 32], [823, 664, 300, 58], [786, 705, 372, 58], [310, 763, 1360, 212],
+                      [206, 914, 1568, 212], [310, 1064, 1360, 212], [196, 1215, 1553, 212]],
+            "start": 0.5, "end": 2.5, "trigger_word": "jev", "box": [4, 10, 92, 21.5], "layout": "box"}
+    cap2 = {"src": "images/capture-2-claude.png", "size": [2000, 1400], "format": "browser", "props": {"url": "https://c.d"},
+            "lines": [[1332, 53, 196, 38], [1617, 53, 153, 38], [711, 232, 578, 152], [694, 364, 612, 152], [645, 543, 709, 56],
+                      [846, 749, 356, 42], [614, 1030, 772, 30], [695, 1066, 610, 30], [848, 1229, 377, 42]],
+            "start": 3.0, "end": 5.0, "trigger_word": "claude", "box": [4, 10, 92, 21.7], "layout": "box"}
+    small = {**band, "cards": [json.loads(json.dumps(cap1)), json.loads(json.dumps(cap2))]}
+    assert sum("x-height" in f["what"] for f in check_plan(small, face) if f["level"] == "FAIL") == 2, check_plan(small, face)
+    small["cards"] = pl.readable_captures(small["cards"], "9:16")
+    assert [c["format"] for c in small["cards"]] == ["sticker", "sticker"] and "url" not in small["cards"][0]["props"], small["cards"]
+    assert all(pl.capture_xh(c, "9:16") >= READ_XH for c in small["cards"]), [pl.capture_xh(c, "9:16") for c in small["cards"]]
+    assert not [f for f in check_plan(small, face) if "x-height" in f["what"] or "cuts" in f["what"]], check_plan(small, face)
     print("demo ok")
 
 

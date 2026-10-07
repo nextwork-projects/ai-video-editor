@@ -91,7 +91,14 @@ first grows to the whole of a line it holds part of, then the camera shifts (up 
 frame) or widens (up to the key's limit, never past 1:1, never onto emptier ground) to the nearest
 framing that cuts no line (`journey.text_guard`). A line it cannot clear that is not part of the focus
 fades out at that edge over about a word of its type (`journey.edge_fades`, Journey.tsx masks the
-canvas); a cut line on the focus FAILs the plan. `check` reads the render with OCR at 2 fps on held
+canvas); a cut line on the focus FAILs the plan, and so does any held line cut where no fade covers it
+(a big headline cut by the top or bottom edge deeper than the fade's 12% of the short side).
+
+No blank frame. Every frame of the plan, moves and state changes included, must show product: the estimated
+fill of the frame (the same edge cells as above, over every page it touches) under 4% is a blank frame
+(the camera crossing page whitespace or the ground between pages). The plan re-frames a held one; a move that
+crosses one lifts higher (`replan`'s "lift" on the key it moves to) until the frame keeps product in view.
+What is still blank after re-planning FAILs the plan with its times. `check` reads the render with OCR at 2 fps on held
 frames: a word box running into the frame edge with ink on the edge is a WARN, on the focus a FAIL.
 
 ## The animatic, before any render
@@ -120,8 +127,10 @@ fast moves. Screencast `flow` shots remain for a product whose own animation is 
   {"job": "end"}]}
 ```
 
-A beat's `steps` index its flow's steps (`flows/<id>.states.json`, scrolls-into-view skipped). Words: as
-below.
+A beat's `steps` index its flow's steps as `flows/<id>.states.json` lists them, counting from 0: the
+`wait`s in flows.json are not steps, and the scrolls that bring a target into view are skipped. So
+`[{"wait": 0.8}, {"click": "text=Search"}, {"write": "github"}]` has steps 0 (the click) and 1 (the
+write). A wrong number stops `product.py plan` with the valid ones listed. Words: as below.
 
 # story.json (the shot film)
 

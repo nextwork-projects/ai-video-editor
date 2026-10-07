@@ -98,7 +98,9 @@ are there; plan.py enforces them.
 
 Pacing: about one card every 4-6 s, never two at once, and leave the speaker alone between runs of
 cards. On vertical every explaining card is a full-frame scene (or sits in the split panel), never a
-small box over the face.
+small box over the face. A capture on vertical must read on a phone: plan.py cuts a shot or browser
+capture whose evidence text (the marked lines, else the headline) would render under 28 px x-height to
+a sticker of those lines that fills the band, and `check.py plan` FAILs one still under it.
 
 ## 4. Plan
 

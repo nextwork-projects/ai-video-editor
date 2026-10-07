@@ -10,27 +10,7 @@ public website (product-video, brief to animatic).
 
 ## Now
 
-1. **Product film: blank frames and a half-cut headline pass the plan's framing check.** On a public
-   site with a 4-beat story, `product.py plan` printed "framing: every frame holds", but the
-   animatic shows the hook's end and the action's start as blank white (the camera crossing page
-   whitespace), and the second line of the stat headline cut by the bottom edge at the action's end
-   and through the result beat. A story `steps` index past the flow's real steps is a raw
-   `IndexError` from `journey.py` line 317; the index counts the auto scroll-into-view step and drops
-   `wait`, which `story.md` does not say.
-   Fix: the framing check FAILs a frame with no detected content and a text line crossing the frame
-   edge outside an edge fade; `plan` validates `steps` and lists the valid indices with what each is.
-   Test: the same site and story -> plan exits 1 naming the blank frames and the cut line, or
-   re-plans the camera; a story with `"steps": [5]` exits with a one-line message, no traceback.
-
-2. **Captures on vertical are small boxes nobody can read on a phone.** Two `format: "browser"`
-   captures on the 9:16 sample planned as `layout: box` at about 20% of the frame height above the
-   head; the site text inside is a few pixels high. style-edit says "On vertical every explaining
-   card is a full-frame scene (or sits in the split panel), never a small box", and
-   `check.py plan` passed with 0 FAIL, 0 WARN.
-   Fix: on 9:16 a capture is a scene or split card by default; check.py FAILs a capture whose
-   largest text line renders under a phone-readable height.
-   Test: the sample plan with one browser capture -> its layout is `scene` or `split`, or
-   `check.py plan` FAILs on the box.
+(empty: the next items move up from Next.)
 
 ## Next
 

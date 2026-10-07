@@ -28,6 +28,7 @@ sys.dont_write_bytecode = True
 MOVE = (0.38, 0.0, 0.45, 1.0)   # peak speed 1.9x the average (a sine is 1.6), a touch longer settle
 SETTLE = (0.2, 0.8, 0.2, 1.0)
 SMOOTH_S = 0.2       # the camera path is low-passed: the next move starts before the last settles
+LIFT_STEP = 0.3      # replan raises a move that crosses a blank frame by this much (log of the width) a round
 HOLD_PUSH = 0.035    # a held framing keeps pushing in, 3.5% over the hold: nothing stops dead
 SAFE = 0.045         # the safe frame's margin, share of the short side
 CPS = 14             # typed characters a second
@@ -139,6 +140,28 @@ def load_flow(d, fid, vertical):
     f = json.loads(p.read_text())
     f["real"] = [i for i, s in enumerate(f["steps"]) if not s.get("auto")]   # what a story's step numbers index
     return f
+
+
+def bad_steps(beats, flows):
+    """Exits with one line per beat whose "steps" (or "after") is not one of its flow's step numbers, listing
+    the valid ones and what each does: a story's numbers skip the auto scrolls, and a flow's waits are no step."""
+    out = []
+    for bi, b in enumerate(beats):
+        f = flows.get(b.get("flow"))
+        if not f:
+            continue
+        want = list(b.get("steps") or []) + ([b["after"]] if "after" in b else [])
+        wrong = [i for i in want if not isinstance(i, int) or not 0 <= i < len(f["real"])]
+        if wrong:
+            what = []
+            for n, si in enumerate(f["real"]):
+                s = f["steps"][si]
+                arg = s.get("text") or s.get("label") or (f"{s['dy']} px" if "dy" in s else "")
+                what.append(f"{n} {s['kind']}" + (f" {arg!r}" if arg else ""))
+            out.append(f"ERROR: beat {bi} ({b['job']}, flow {b['flow']!r}): step {', '.join(map(str, wrong))} is not one of the "
+                       f"flow's {len(f['real'])} step(s): " + ("; ".join(what) or "none") + " (waits and auto scrolls are not steps)")
+    if out:
+        sys.exit("\n".join(out))
 
 
 # ---------------------------------------------------------------- the plan
@@ -307,6 +330,7 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
         if b.get("flow") and b["flow"] not in flows:
             flows[b["flow"]] = load_flow(d, b["flow"], vertical)
             order.append(b["flow"])
+    bad_steps(beats, flows)
     # a flow whose first beat begins far down its page (the hand's target was scrolled into view from the top)
     # starts there: the page's top is not part of the story, and the camera would otherwise fall thousands of
     # px down it in a second
@@ -699,9 +723,12 @@ def camera(keys, n, fps, W, H, wmin=0.0):
         w = math.exp(math.log(wa0) + (math.log(b["cam"][2]) - math.log(wa0)) * p)
         q = (w - wa0) / (b["cam"][2] - wa0) if abs(b["cam"][2] - wa0) > 1 else p
         if far > 0.6:
-            # a long travel lifts away and comes back down (a crane, not a dolly): the page never streaks past
             q = p
-            w *= math.exp(min(0.45, 0.22 * far) * math.sin(math.pi * p))
+        # a long travel lifts away and comes back down (a crane, not a dolly): the page never streaks past; a
+        # move that would cross bare page or ground lifts higher ("lift", set by replan) so it keeps product in frame
+        lift = (min(0.45, 0.22 * far) if far > 0.6 else 0.0) + b.get("lift", 0.0)
+        if lift:
+            w *= math.exp(lift * math.sin(math.pi * p))
         out[i] = [a["cam"][0] + (b["cam"][0] - a["cam"][0]) * q, a["cam"][1] + (b["cam"][1] - a["cam"][1]) * q, w]
     # low-pass: x, y and log w, with the ends held (no pull toward zero)
     sig = SMOOTH_S * fps
@@ -1016,6 +1043,24 @@ def held_key(keys, t):
     return None
 
 
+def fade_need(lines, cam, W, H):
+    """(n, 4) frame px: the edge fade [left, top, right, bottom] each line (shown_lines rows) needs to hide
+    where the frame of camera (cx, cy, w) cuts it: its visible part plus 10 px, at the side edges at most about
+    a word of its type (the cut word goes, the rest of the line reads). 0 at an edge that does not cut it."""
+    import numpy as np
+    cx, cy, w = cam
+    h, k = w * H / W, W / w
+    fx0, fy0, fx1, fy1 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+    m = TEXT_M / k
+    x0, y0, x1, y1 = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+    word = np.maximum(40, 3 * (y1 - y0) * k)
+    return np.column_stack([
+        np.where(x0 < fx0 + m, np.minimum(word, (np.minimum(x1, fx1) - fx0) * k + 10), 0),
+        np.where(y0 < fy0 + m, (np.minimum(y1, fy1) - fy0) * k + 10, 0),
+        np.where(x1 > fx1 - m, np.minimum(word, (fx1 - np.maximum(x0, fx0)) * k + 10), 0),
+        np.where(y1 > fy1 - m, (fy1 - np.maximum(y0, fy0)) * k + 10, 0)]).clip(0)
+
+
 def edge_fades(plan):
     """Per frame [left, top, right, bottom] frame px: where a held frame still cuts a line that is not part of
     the focus, that edge fades out over a short band (the line's visible part plus 10 px, at most about a word
@@ -1041,20 +1086,7 @@ def edge_fades(plan):
             cut &= ~on_focus(lines, keys[j]["focus"])
         if not cut.any():
             continue
-        cx, cy, w = cam[i]
-        h, k = w * H / W, W / w
-        fx0, fy0, fx1, fy1 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
-        m = TEXT_M / k
-        for x0, y0, x1, y1, _ in lines[cut]:
-            word = max(40, 3 * (y1 - y0) * k)          # about a word of this line's type: the cut word goes
-            if x0 < fx0 + m:
-                out[i, 0] = max(out[i, 0], min(cap, word, (min(x1, fx1) - fx0) * k + 10))
-            if x1 > fx1 - m:
-                out[i, 2] = max(out[i, 2], min(cap, word, (fx1 - max(x0, fx0)) * k + 10))
-            if y0 < fy0 + m:
-                out[i, 1] = max(out[i, 1], min(cap, (min(y1, fy1) - fy0) * k + 10))
-            if y1 > fy1 - m:
-                out[i, 3] = max(out[i, 3], min(cap, (fy1 - max(y0, fy0)) * k + 10))
+        out[i] = np.minimum(fade_need(lines[cut], cam[i], W, H), cap).max(axis=0)
     # held for 0.25 s either side, then eased: the fade never pops
     r = max(1, int(0.25 * fps))
     for c in range(4):
@@ -1067,6 +1099,7 @@ def edge_fades(plan):
 def text_cuts(plan):
     """[(t, problem, key j)] for every held frame where the frame edge cuts a line of text: on the focus it is a
     framing failure; elsewhere it must sit under an edge fade (plan["edge"]) at least as deep as the cut."""
+    import numpy as np
     W, H, fps = plan["width"], plan["height"], plan["fps"]
     keys, layers, cam = plan["keys"], plan["canvas"]["layers"], plan["cam"]
     edge = plan.get("edge")
@@ -1085,14 +1118,51 @@ def text_cuts(plan):
         foc = cut & on_focus(lines, keys[j]["focus"])
         if foc.any():
             out.append((t, f"{int(foc.sum())} line(s) of text on the focus cut by the frame edge", j))
-        elif cut.any() and not (edge and any(v > 0 for v in edge[i])):
-            out.append((t, f"{int(cut.sum())} line(s) of text cut by the frame edge, not faded", j))
+            continue
+        rest = cut & ~foc
+        if rest.any() and holding(cam, i, fps):
+            need = fade_need(lines[rest], cam[i], W, H)
+            need[:, [0, 2]] = need[:, [0, 2]].clip(None, FADE_MAX * min(W, H))   # a side fade hides the cut word, the line reads on
+            short = (need > np.array(edge[i] if edge else [0, 0, 0, 0]) + 0.5).any(axis=1)
+            if short.any():
+                side = ["left", "top", "right", "bottom"][int(np.argmax((need[short] - np.array(edge[i] if edge else [0] * 4)).max(axis=0)))]
+                out.append((t, f"{int(short.sum())} line(s) of text cut by the {side} edge, not faded"
+                               + (" (deeper than the edge fade can go)" if edge else ""), j))
     return out
 
 
-def framing(plan, words_box=None):
+BLANK_FILL = 0.04   # a frame whose estimated product fill is under this shows nothing: page whitespace or bare ground
+
+
+def blank_frames(plan, d):
+    """[(t, problem, key i)] for every frame, moves and transitions included, whose estimated product fill
+    (fill_cells over every plate the frame touches, as the canvas is at that time) is under BLANK_FILL. Key i:
+    the key held, else the key the camera is moving to (its "lift" widens the move)."""
+    W, H, fps = plan["width"], plan["height"], plan["fps"]
+    plates, layers, keys = plan["canvas"]["plates"], plan["canvas"]["layers"], plan["keys"]
+    order = sorted(range(len(keys)), key=lambda n: keys[n]["t"])
+    out, cache = [], {}
+    for i, c in enumerate(plan["cam"]):
+        t = i / fps
+        if t >= plan.get("end", 1e9) - 0.15:
+            break
+        fill = 0.0
+        for pi, p in enumerate(plates):
+            h = c[2] * H / W
+            if p["x"] < c[0] + c[2] / 2 and p["x"] + p["w"] > c[0] - c[2] / 2 and p["y"] < c[1] + h / 2 and p["y"] + p["h"] > c[1] - h / 2:
+                fill += fill_of(fill_cells(d, layers, pi, p, t, cache), p, c, W, H)
+        if fill < BLANK_FILL:
+            j = held_key(keys, t)
+            if j is None:
+                j = next((n for n in order if keys[n]["t"] > t), None)
+            out.append((t, f"a blank frame (product fill {fill:.2f}, under {BLANK_FILL}): the camera shows page whitespace or bare ground", j))
+    return out
+
+
+def framing(plan, words_box=None, d=None):
     """Every frame, from the plan's own camera: the held focus inside the safe frame, never under the words,
-    the cursor wholly in frame or not shown, no capture shown bigger than it was taken. [(t, problem, key i)]"""
+    the cursor wholly in frame or not shown, no capture shown bigger than it was taken, no line of text cut by
+    the frame edge outside an edge fade, and (given the project dir d) no blank frame. [(t, problem, key i)]"""
     W, H, fps = plan["width"], plan["height"], plan["fps"]
     m = SAFE * min(W, H)
     keys = plan["keys"]
@@ -1134,7 +1204,9 @@ def framing(plan, words_box=None):
             if x0 < 0 or y0 < 0 or x0 + cw > W or y0 + ch > H:
                 out.append((t, f"the cursor is cut by the frame edge at ({x:.0f}, {y:.0f})", j))
     if plan.get("canvas", {}).get("layers") and any(L.get("lines") for L in layers):
-        out += [p for p in text_cuts(plan) if "on the focus" in p[1]]
+        out += text_cuts(plan)
+    if d is not None and plan.get("canvas", {}).get("plates") and layers:
+        out += blank_frames(plan, d)
     return out
 
 
@@ -1146,15 +1218,25 @@ def words_rect(W, H):
     return [W * 0.07, y + h * 0.35, W * 0.6, h * 0.65]
 
 
-def replan(plan, rounds=6):
+def replan(plan, rounds=6, d=None):
     """Fix framing failures at their root, the key's framing: widen it (up to the page) and re-centre on its
-    focus, then rebuild the camera. Returns the problems left."""
+    focus; a blank frame in a move lifts that move higher (the camera rises until the frame holds product);
+    then rebuild the camera. Returns the problems left."""
     W, H, fps = plan["width"], plan["height"], plan["fps"]
+    layered = bool(plan.get("canvas", {}).get("layers"))
     for _ in range(rounds):
-        bad = framing(plan)
-        idx = sorted({j for _, _, j in bad if j is not None})
-        if not bad or not idx:
+        if layered:
+            plan["edge"] = edge_fades(plan)
+        bad = framing(plan, d=d)
+        moving = [(t, w, j) for t, w, j in bad if j is not None and w.startswith("a blank frame") and held_key(plan["keys"], t) is None]
+        moves = {j for _, _, j in moving}
+        idx = sorted({j for p in bad if p not in moving for j in [p[2]] if j is not None})
+        if not bad or not (idx or moves):
             break
+        for j in moves:
+            for k in plan["keys"]:          # a key merged into this one by camera() (within 0.3 s) carries it too
+                if 0 <= k["t"] - plan["keys"][j]["t"] < 0.3:
+                    k["lift"] = round(k.get("lift", 0) + LIFT_STEP, 2)
         for j in idx:
             k = plan["keys"][j]
             cx, cy, w = k["cam"]
@@ -1166,15 +1248,16 @@ def replan(plan, rounds=6):
             cx = fx if F[2] > w2 * 0.8 else min(max(cx, F[0] + F[2] - w2 / 2 + w2 * 0.06), F[0] + w2 / 2 - w2 * 0.06)
             cy = fy + (h2 * 0.17 if k.get("words") else 0) if F[3] > h2 * 0.5 else min(max(cy, F[1] + F[3] - h2 / 2 + h2 * 0.08 + (h2 * 0.3 if k.get("words") else 0)), F[1] + h2 / 2 - h2 * 0.08)
             k["cam"] = [cx, cy, w2]
-        text_guard(plan["keys"], plan.get("canvas", {}).get("layers", []), W, H, plan.get("wmin", 0), only=set(idx))
+        if idx:
+            text_guard(plan["keys"], plan.get("canvas", {}).get("layers", []), W, H, plan.get("wmin", 0), only=set(idx))
         cam, _ = camera(plan["keys"], plan["durationInFrames"], fps, W, H, plan.get("wmin", 0))
         plan["cam"] = [[round(x, 2) for x in c] for c in cam]
         if plan.get("cursor_raw"):
             plan["cursor"] = [list(c) for c in plan["cursor_raw"]]
             gate_cursor(plan["cursor"], plan["cam"], W, H, fps, plan.get("touch"))
-    if plan.get("canvas", {}).get("layers"):
+    if layered:
         plan["edge"] = edge_fades(plan)
-    return framing(plan)
+    return framing(plan, d=d)
 
 
 def crop_layers(d, plan, margin=120):
@@ -1297,7 +1380,7 @@ def check_render(d, plan, video):
     d = Path(d)
     W, H, fps = plan["width"], plan["height"], plan["fps"]
     out = []
-    bad = framing(plan)
+    bad = framing(plan, d=d)
     for a, b in runs([t for t, _, _ in bad], 1 / fps * 1.5):
         what = next(w for t, w, _ in bad if a <= t <= b)
         out.append(("FAIL", f"framing {a:.2f}-{b:.2f} s: {what}", "product.py plan re-plans the camera; widen the beat or give it fewer words"))
@@ -1513,6 +1596,43 @@ def demo():
     assert text_cuts(tp)
     tp["edge"] = edge_fades(tp)
     assert tp["edge"][45][0] > 0 and tp["edge"][45][2] > 0 and not text_cuts(tp), (tp["edge"][45], text_cuts(tp)[:2])
+    # a big headline that is not the focus, cut by the bottom edge deeper than an edge fade can go: framing
+    # fails (it used to pass with "every frame holds"); replan re-frames until it is whole or out
+    lay[0]["lines"] = [[100, 100, 600, 40], [200, 480, 800, 150]]
+    tp = {**text_plan([500, 300, 1000], [100, 100, 400, 40]), "cursor": [[0, 0, 0, 0, 0]] * 90, "words": [], "durationInFrames": 90, "wmin": 400}
+    tp["edge"] = edge_fades(tp)
+    assert any("bottom edge, not faded" in m for _, m, _ in framing(tp)), framing(tp)[:2]
+    assert not replan(tp), replan(tp)[:2]
+    # a blank frame: a move down a tall page crosses 1800 px of whitespace between the hero and the footer;
+    # framing names the blank frames, replan lifts the move until every frame holds product
+    import tempfile
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as td:
+        pg = np.full((3000, 1440, 3), 255, np.uint8)
+        noise = (np.random.default_rng(1).random((600, 1440, 3)) * 255).astype(np.uint8)
+        pg[:600], pg[2400:] = noise, noise
+        Image.fromarray(pg).save(Path(td) / "page.png")
+        ks = [{"t": 0.0, "cam": [720, 300, 1100], "focus": [300, 100, 800, 300], "words": False, "wmax": 1872},
+              {"t": 3.0, "cam": [720, 2700, 1100], "focus": [300, 2550, 800, 300], "words": False, "wmax": 1872}]
+        bp = {"width": 1920, "height": 1080, "fps": 30, "keys": ks, "words": [], "durationInFrames": 150, "end": 9, "wmin": 400,
+              "canvas": {"plates": [{"x": 0, "y": 0, "w": 1440, "h": 3000}],
+                         "layers": [{"plate": 0, "t": 0, "kind": "base", "src": "page.png", "x": 0, "y": 0, "w": 1440, "h": 3000, "res": 3.0}]},
+              "cursor": [[0, 0, 0, 0, 0]] * 150}
+        bp["cam"] = camera(ks, 150, 30, 1920, 1080, 400)[0]
+        blank = [t for t, m, _ in framing(bp, d=td) if m.startswith("a blank frame")]
+        assert blank and 1.0 < min(blank) and max(blank) < 3.0, blank[:3]
+        assert not replan(bp, d=td), replan(bp, d=td)[:2]
+        assert ks[1].get("lift", 0) > 0
+    # a beat's step past its flow's steps: one line naming the beat, the flow and the valid steps, no traceback
+    fl = {"steps": [{"kind": "scroll", "dy": 900, "auto": True}, {"kind": "click", "label": "text=Search"}, {"kind": "write", "text": "github"}]}
+    fl["real"] = [1, 2]
+    try:
+        bad_steps([{"job": "hook", "flow": "s"}, {"job": "action", "flow": "s", "steps": [5]}], {"s": fl})
+        raise AssertionError("a bad step index must stop the plan")
+    except SystemExit as e:
+        msg = str(e)
+    assert "beat 1 (action, flow 's'): step 5" in msg and "0 click 'text=Search'; 1 write 'github'" in msg and "\n" not in msg, msg
+    bad_steps([{"job": "action", "flow": "s", "steps": [0, 1]}], {"s": fl})
     # the render check: an OCR box touching the frame edge is a cut word; on the focus it fails
     bx = [[1800, 500, 120, 30], [0, 900, 80, 30], [500, 500, 300, 30]]
     assert [lv for lv, _ in edge_text(bx, 1920, 1080, [1700, 480, 220, 80])] == ["FAIL", "WARN"]

@@ -4,6 +4,32 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Product film: no blank frame, no headline cut by the edge, a wrong step number explained (backlog Now 1).
+  The framing check now reads every frame of the plan for content (`journey.blank_frames`: the same edge
+  cells as the fill guard, over every page the frame touches, moves and state changes included; under 4% is
+  blank) and fails any held line of text cut by the frame edge where no edge fade covers it (a headline cut by
+  the top or bottom edge deeper than the fade's 12% of the short side used to pass as "every frame holds").
+  The planner fixes both: a held framing is re-framed as before, and a move that crosses a blank frame lifts
+  higher (a "lift" on the key it moves to, raised each replan round) until the frame keeps product in view;
+  what is still blank or cut FAILs `product.py plan` with its times. A beat's `steps` (or `after`) past its
+  flow's steps exits with one line naming the beat, the flow and each valid step (`0 click 'text=Search'; 1
+  write 'github'`) instead of an `IndexError`; `story.md` says the numbers skip waits and auto scrolls. Tests:
+  `journey.py demo` (a bottom-cut headline fails and replan clears it; a move down 1800 px of page whitespace
+  fails with blank frames and passes once lifted; `"steps": [5]` gives the one-line message). Four real
+  stories (two sites, both aspects) plan with no new failure.
+- Captures on vertical read on a phone (backlog Now 2). plan.py measures a capture card's evidence text (the
+  lines under its marks or highlight, else its headline) from its DOM line boxes at the size the card draws it
+  (`capture_xh`: line box x 0.42, at the browser window's, shot's or sticker's own fit). On 9:16 a shot or
+  browser capture under 28 px x-height becomes a sticker cropped to that evidence, the crop taking the band's
+  shape at the largest size that holds it (never past 1:1), every line whole. `check.py plan` FAILs a capture
+  card still under 28 px on vertical (the plan used to pass with 0 FAIL). Test: `check.py demo` with the
+  audit's two browser captures planned as boxes about a fifth of the frame tall: 22 and 16 px, both FAIL;
+  after `readable_captures` 39 and 53 px, no FAIL. With no head found, a capture on vertical takes the
+  overlay band (4-96% wide, from 10% down) instead of the 72%-wide default box. `tests/smoke.py`'s page
+  capture is now a sticker on its first sentence: example.com's body text as a shot read at 4 px.
+- Tests clean up: `tests/smoke.py` and `tests/golden.py` delete their temp folder on success (they kept
+  every one outside CI: 1.6 GB of `ave-smoke-*` and 467 MB of `ave-golden-*` on one machine) and keep it
+  only on failure, printing its path. The Linux golden stills take the card timing change.
 - The no-creator path renders a lively edit (backlog Now 1). "No creator" is the recommended answer, so it
   has a style of its own: `profile.py style edits/<name>` writes `DEFAULT_STYLE` when the profile has no
   creators (it used to exit `no creator style.json found`), and `plan.py` plans with it when style.json is

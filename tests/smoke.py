@@ -60,7 +60,9 @@ def steps(work):
     (work / "style.json").write_text(json.dumps(style))
     (edit / "visuals.json").write_text(json.dumps([
         {"word": "notion", "nth": 1, "kind": "logo", "brand": "notion"},
-        {"word": "notion", "nth": 1, "kind": "capture", "url": "https://example.com", "width": 500},
+        {"word": "notion", "nth": 1, "kind": "capture", "url": "https://example.com", "width": 500, "format": "sticker",
+         "marks": [{"kind": "highlight", "find": "This domain is for use in"}]},
+        # a page's body text reads on a phone only re-set as a sticker (check.py plan FAILs a capture under 28 px x-height)
         {"word": "faster", "nth": 1, "kind": "anim", "type": "flow",
          "props": {"nodes": [{"icon": "mail", "label": "email"}, {"logo": "notion", "label": "notion"}]}},
     ]))

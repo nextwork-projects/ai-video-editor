@@ -589,7 +589,7 @@ def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_na
     pace, best = 1.0, None
     while pace >= 0.45:
         j = journey.build(d, story, aspect, fps, variant, pace)
-        left = journey.replan(j)
+        left = journey.replan(j, d=d)
         total = j["durationInFrames"] / fps
         p95, med = journey.plan_speed(j)
         if pace < 1.0 and (p95 > journey.SPEED_BAR[0] or med > journey.SPEED_BAR[1]):
@@ -629,7 +629,7 @@ def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_na
         print(f"FAIL framing: {len(left)} frames still fail after re-planning the camera; first: " +
               "; ".join(f"{t:.2f} s {w}" for t, w, _ in left[:5]))
     else:
-        print(f"framing: every frame holds (focus in the safe frame, cursor whole or hidden, nothing past 1:1), {j['durationInFrames']} frames")
+        print(f"framing: every frame holds (focus in the safe frame, cursor whole or hidden, nothing past 1:1, text whole or faded, no blank frame), {j['durationInFrames']} frames")
     return plan
 
 
