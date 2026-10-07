@@ -29,9 +29,6 @@ Sources:
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
   SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
 
-Cloud:
-- `modal_render.py` installs Node in the Modal image by piping NodeSource's script to bash as root; use the signed apt source like setup.py.
-
 Carried over (still untested live):
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download
   path, untested live (no public OneDrive sample). Test with a real share; if Microsoft has

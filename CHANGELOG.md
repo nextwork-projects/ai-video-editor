@@ -4,6 +4,8 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The Modal render image installs Node from NodeSource's signed apt source; check_plugins now rejects any downloaded script piped into a shell, root or not.
+
 - The Debian and Ubuntu Node fix line ran NodeSource's setup script as root. It now adds NodeSource's
   signing key and apt source by hand, then installs `nodejs`. `tests/check_plugins.py` fails any file that
   pipes a downloaded script into `sudo` and a shell. Test: `setup.py demo`.

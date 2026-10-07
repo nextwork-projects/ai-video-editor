@@ -44,7 +44,12 @@ CHROME_DEPS = ["libnss3", "libdbus-1-3", "libatk1.0-0", "libasound2", "libxrandr
 # package.json rebuilds it.
 image = (modal.Image.debian_slim(python_version="3.12")
          .apt_install("ca-certificates", "curl", "gnupg", *CHROME_DEPS)
-         .run_commands("curl -fsSL https://deb.nodesource.com/setup_22.x | bash -", "apt-get install -y nodejs")
+         .run_commands(  # NodeSource's signed apt source, not its setup script piped to a root shell
+             "mkdir -p /etc/apt/keyrings && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+             " | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg",
+             'echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main"'
+             " > /etc/apt/sources.list.d/nodesource.list",
+             "apt-get update && apt-get install -y nodejs")
          .add_local_file(REMOTION / "package.json", "/r/package.json", copy=True)
          .add_local_file(REMOTION / "package-lock.json", "/r/package-lock.json", copy=True)
          .run_commands("cd /r && npm ci --no-audit --no-fund && npx remotion browser ensure")
