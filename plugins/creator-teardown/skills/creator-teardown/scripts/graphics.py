@@ -349,6 +349,13 @@ def boxes(mask):
     return sorted(out, key=lambda b: -b["box"][2] * b["box"][3])
 
 
+def part_of(a, b):
+    """True when box a is mostly inside the bigger box b."""
+    iw = max(0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+    ih = max(0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+    return a[2] * a[3] < b[2] * b[3] and iw * ih >= 0.7 * a[2] * a[3]
+
+
 def iou(a, b):
     ax1, ay1, bx1, by1 = a[0] + a[2], a[1] + a[3], b[0] + b[2], b[1] + b[3]
     iw, ih = max(0, min(ax1, bx1) - max(a[0], b[0])), max(0, min(ay1, by1) - max(a[1], b[1]))
@@ -359,7 +366,9 @@ def iou(a, b):
 def overlay_dets(F, band):
     """Graphics on moving footage: per sample, the regions that hold still for +-0.4 s while most of
     the frame changes (a cut or a moving camera under them), rectangular enough and not flat (a
-    sky that happens to hold still is not a graphic). A sample whose footage is still gives none."""
+    sky that happens to hold still is not a graphic). A sample whose footage is still gives none.
+    Footage that only drifts (a slow push on a still) changes too little in 0.4 s for that, so the
+    sample falls back to drift_dets."""
     import cv2
     n, H, W = F.shape[:3]
     G = F.astype(np.float32)
@@ -369,8 +378,15 @@ def overlay_dets(F, band):
         js = [j for j in range(max(0, i - 2), min(n, i + 3)) if j != i]
         d = np.max([np.abs(G[j] - G[i]).mean(-1) for j in js], axis=0) if js else None
         if d is None or (d >= 25).mean() < 0.4:
-            out.append([])
+            out.append(drift_dets(G, i, band))
             continue
+        if 2 <= i < n - 2:
+            # A dissolve or a cut: the frame is (near) the mix of the samples either side. It resets; what holds
+            # still through the mix is where the two pictures happen to agree, not a graphic.
+            mix = float(np.abs(G[i] - (G[i - 2] + G[i + 2]) / 2).mean())
+            if mix < 0.55 * float(np.abs(G[i - 2] - G[i + 2]).mean()):   # a pan measures 0.67-0.9
+                out.append([])
+                continue
         m = (d < 12).astype(np.uint8)
         if band:
             m[int(band[0] * H):int(band[1] * H) + 1] = 0
@@ -387,12 +403,104 @@ def overlay_dets(F, band):
     return out
 
 
+DRIFT_WIN = 5          # samples each side (1 s): a slow push moves an edge a pixel or more in that time
+EDGE = 60              # Sobel magnitude of a hard edge (a letter, a card border) at analysis width
+EDGE_TEXT = 0.2        # share of a drift box that is still hard edges: lettering (OCR may miss it)
+
+
+def drift_dets(G, i, band):
+    """Graphics over footage that only drifts (a slow push on a still): the hard edges that stay
+    exactly put for +-1 s while the picture's other hard edges move. Smooth ground is left out (it
+    barely changes when it drifts, so it would look still), and so is a sample whose edges mostly
+    hold (a still frame, a held shot): then nothing tells a graphic from the picture. Kept: places
+    dense with still edges where most edges are still (lettering, a card border), closed into boxes."""
+    import cv2
+    n, H, W = G.shape[:3]
+    js = [j for j in range(max(0, i - DRIFT_WIN), min(n, i + DRIFT_WIN + 1)) if j != i]
+    if len(js) < DRIFT_WIN:
+        return []
+    d = np.max([np.abs(G[j] - G[i]).mean(-1) for j in js], axis=0)
+    g = cv2.cvtColor(G[i], cv2.COLOR_RGB2GRAY)
+    e = np.hypot(cv2.Sobel(g, cv2.CV_32F, 1, 0), cv2.Sobel(g, cv2.CV_32F, 0, 1)) > EDGE
+    still = e & (d < 8)
+    if band:
+        still[int(band[0] * H):int(band[1] * H) + 1] = False
+    if e.sum() < 50 or (e & ~still).sum() < 0.3 * e.sum():
+        return []
+    S, E = cv2.blur(still.astype(np.float32), (9, 5)), cv2.blur(e.astype(np.float32), (9, 5))
+    # closed 9 px both ways: the letters into a line, a title's two lines into one box
+    m = cv2.morphologyEx(((S >= 0.25) & (S >= 0.6 * E)).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    keep = []
+    for b in boxes(m):
+        x, y, w, h = b["box"]
+        if b["fill"] < 0.5 or w * h > 0.6:
+            continue
+        # The edges round it must mostly move: near the centre of a slow push the picture itself
+        # holds still and fades into motion; a laid-on graphic stops at its edge.
+        y0, y1, x0, x1 = int(y * H), int((y + h) * H) + 1, int(x * W), int((x + w) * W) + 1
+        ring = np.zeros((H, W), bool)
+        ring[max(0, y0 - (y1 - y0) // 2 - 2):y1 + (y1 - y0) // 2 + 2,
+             max(0, x0 - (x1 - x0) // 4 - 2):x1 + (x1 - x0) // 4 + 2] = True
+        ring[y0:y1, x0:x1] = False
+        if (e & ring).sum() >= 10 and (still & ring).sum() > 0.5 * (e & ring).sum():
+            continue
+        keep.append({**b, "edges": float(still[y0:y1, x0:x1].mean())})
+    return keep
+
+
 def grow_track(tr, F):
     """The track's run of samples widened to every neighbouring sample showing the same picture in
     its box: the footage under it stood still there, so the moving-footage test could not see it."""
     box = tr["boxes"][len(tr["boxes"]) // 2]
     ref = own_crop(F[tr["idx"][len(tr["idx"]) // 2]], box)
     same = [float(np.abs(own_crop(F[i], box) - ref).mean()) < 14 for i in range(len(F))]
+    a, b = tr["idx"][0], tr["idx"][-1]
+    while a > 0 and same[a - 1]:
+        a -= 1
+    while b + 1 < len(F) and same[b + 1]:
+        b += 1
+    return {**tr, "idx": list(range(a, b + 1)), "boxes": [box] * (b - a + 1), "last": b}
+
+
+def to_text(tr, look):
+    """A drift track's box snapped to the OCR lines it holds: the still-edge box can stop short of a
+    line's end over a busy picture, or take in a still patch of the picture next to it."""
+    if not look:
+        return tr
+    i0, i1 = tr["idx"][0] / SFPS, (tr["idx"][-1] + 1) / SFPS
+    x, y, w, h = [float(np.median([b[j] for b in tr["boxes"]])) for j in range(4)]
+    snaps = []
+    for s in look.get("samples") or []:
+        if i0 <= s["t"] <= i1:
+            ls = [b for tx, b, cap in s["lines"] if not cap and max(0, min(x + w, b[0] + b[2]) - max(x, b[0]))
+                  * max(0, min(y + h, b[1] + b[3]) - max(y, b[1])) >= 0.15 * b[2] * b[3]]
+            if ls:
+                x0, y0 = min(b[0] for b in ls), min(b[1] for b in ls)
+                snaps.append([x0, y0, max(b[0] + b[2] for b in ls) - x0, max(b[1] + b[3] for b in ls) - y0])
+    if len(snaps) < 2:
+        return tr
+    box = [float(np.median([b[j] for b in snaps])) for j in range(4)]
+    return {**tr, "boxes": [box] * len(tr["boxes"])}
+
+
+def grow_drift(tr, F):
+    """grow_track for a graphic found over drifting footage. drift_dets needs it held for +-1 s, so
+    its run starts and ends a second inside the truth, and the box's whole picture drifts, so
+    grow_track's test stops early. Compared instead: only the pixels on the graphic's own still
+    edges (its lettering), which match wherever it is up."""
+    import cv2
+    H, W = F.shape[1:3]
+    k = len(tr["idx"]) // 2
+    r, box = tr["idx"][k], tr["boxes"][k]
+    x0, y0, x1, y1 = int(box[0] * W), int(box[1] * H), int((box[0] + box[2]) * W) + 1, int((box[1] + box[3]) * H) + 1
+    G = [F[i, y0:y1, x0:x1].astype(np.float32) for i in range(len(F))]
+    g = cv2.cvtColor(G[r], cv2.COLOR_RGB2GRAY)
+    m = np.hypot(cv2.Sobel(g, cv2.CV_32F, 1, 0), cv2.Sobel(g, cv2.CV_32F, 0, 1)) > EDGE
+    for j in (tr["idx"][0], tr["idx"][-1]):
+        m &= np.abs(G[j] - G[r]).mean(-1) < 8
+    if m.sum() < 10:
+        return tr
+    same = [float(np.abs(G[i] - G[r]).mean(-1)[m].mean()) < 20 for i in range(len(F))]
     a, b = tr["idx"][0], tr["idx"][-1]
     while a > 0 and same[a - 1]:
         a -= 1
@@ -602,6 +710,17 @@ def own_crop(f, b, size=32):
     return cv2.resize(f[y0:y1, x0:x1], (size, size), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
+def speaker_share(look):
+    """Share of samples with a face in the usual place: a speaker. Faces in photos or footage that
+    turn up all over the frame (a documentary of portraits) are not one."""
+    ss = (look or {}).get("samples") or []
+    fs = [s["face"] for s in ss if s["face"]]
+    if not fs:
+        return 0.0
+    ux, uy = (float(np.median([f[j] + f[j + 2] / 2 for f in fs])) for j in (0, 1))
+    return sum(abs(f[0] + f[2] / 2 - ux) <= 0.12 and abs(f[1] + f[3] / 2 - uy) <= 0.12 for f in fs) / len(ss)
+
+
 def faces_at(look):
     """t -> face box from look.py's samples (3 a second)."""
     if not look:
@@ -712,7 +831,7 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
     # No speaker most of the time and no clean plate (a vlog, a walk, b-roll): the plate method would
     # call the moving footage a graphic. Find what holds still while the footage moves instead.
     fit_share = float(np.mean([block_median(F[i], plate_of[i]) <= PLATE_FIT for i in range(n)]))
-    face_share = sum(1 for i in range(n) if face(i / SFPS)) / n
+    face_share = speaker_share(look)
     overlay = fit_share < 0.5 and face_share < 0.5
 
     # Per sample: changed regions that are not the speaker or the captions.
@@ -747,8 +866,10 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
                 best["idx"].append(i)
                 best["last"] = i
                 best["fill"] = max(best["fill"], d["fill"])
+                best["edges"] = max(best["edges"], d.get("edges", 0.0))
             else:
-                tracks.append({"boxes": [d["box"]], "idx": [i], "last": i, "fill": d["fill"]})
+                tracks.append({"boxes": [d["box"]], "idx": [i], "last": i, "fill": d["fill"],
+                               "edges": d.get("edges", 0.0)})
     def jitter(tr):
         """How irregularly its edges move: a laid-over graphic holds still or drifts on a line,
         a hand jumps about. The median distance of each edge from a straight-line fit."""
@@ -776,15 +897,34 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
         mid = tr["idx"][len(tr["idx"]) // 2]
         c = like_plate(F[mid], plate_of[mid], tr["boxes"][len(tr["idx"]) // 2])
         return c > 0.65 or (c > 0.5 and not abrupt(tr))
+    def laid_on(tr):
+        """A graphic found over drifting footage arrives or leaves while the picture stays: its box
+        changes across the entrance (or exit) and most of the frame does not. A still patch of the
+        picture (the fixed point of a slow push) only comes and goes with its shot.
+        ponytail: a graphic that both arrives and leaves on a cut is dropped too."""
+        box, a, b = tr["boxes"][len(tr["boxes"]) // 2], tr["idx"][0], tr["idx"][-1]
+        x0, y0 = int(box[0] * W), int(box[1] * H)
+        x1, y1 = int((box[0] + box[2]) * W) + 1, int((box[1] + box[3]) * H) + 1
+        for p, q in ((a - 2, a + 1), (b + 2, b - 1)):
+            if 0 <= p < n and 0 <= q < n:
+                d = np.abs(F[p].astype(np.float32) - F[q]).mean(-1)
+                inside = float(d[y0:y1, x0:x1].mean())
+                d[y0:y1, x0:x1] = np.nan
+                if inside >= 14 and inside >= 2 * float(np.nanmean(d)):   # a cut or a dissolve changes both
+                    return True
+        return False
+
     if overlay:
         # Grown over the samples where the footage stood still, then kept when it is a laid-on graphic:
         # text in it or a hard rectangular edge, and not up for most of the video (a watermark, a frame).
-        tracks = [grow_track(tr, F) for tr in tracks]
-        tracks = [tr for tr in tracks if MIN_HOLD <= (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS <= 0.6 * dur
-                  and jitter(tr) <= 0.015 and (tr["fill"] >= 0.85 or text_lines_in(
+        tracks = [grow_drift(to_text(tr, look), F) if tr["edges"] else grow_track(tr, F) for tr in tracks]
+        tracks = [tr for tr in tracks if (tr["edges"] == 0 or laid_on(tr)) and MIN_HOLD <= (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS <= 0.6 * dur
+                  and jitter(tr) <= 0.015 and (tr["fill"] >= 0.85 or tr["edges"] >= EDGE_TEXT or text_lines_in(
                       tr["boxes"][0], tr["idx"][0] / SFPS, (tr["idx"][-1] + 1) / SFPS, look) >= 1)]
         tracks = [tr for k, tr in enumerate(tracks)   # two tracks grown into one graphic: keep the first
-                  if not any(iou(tr["boxes"][0], o["boxes"][0]) >= 0.5 and set(tr["idx"]) & set(o["idx"]) for o in tracks[:k])]
+                  if not any(iou(tr["boxes"][0], o["boxes"][0]) >= 0.5 and set(tr["idx"]) & set(o["idx"]) for o in tracks[:k])
+                  and not any(o is not tr and set(tr["idx"]) & set(o["idx"]) and part_of(tr["boxes"][0], o["boxes"][0])
+                              for o in tracks)]   # one line of a title found on its own as well
     else:
         tracks = [tr for tr in tracks if (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS >= MIN_HOLD
                   and len(tr["idx"]) >= 0.5 * (tr["idx"][-1] - tr["idx"][0] + 1) and jitter(tr) <= 0.015
@@ -1170,6 +1310,60 @@ def demo_moving():
         assert x and x["kind"] == "fade" and 0.15 <= x["duration_s"] <= 0.45, x
 
 
+def drift_clip(mp4, W=640, H=360, FPS=30):
+    """A 9 s motion-graphics explainer fixture, no speaker: two generated stills (soft noise with a few
+    hard-edged shapes) each slowly pushed in and panned (a Ken Burns drift), a hard cut at 4.5 s with
+    no graphic on it. Hand-labelled truth: one title box (dark band, a white line of text) up 1.0-4.0 s
+    in the lower third."""
+    import cv2
+    from PIL import Image, ImageDraw, ImageFont
+
+    def still(seed):
+        r = np.random.default_rng(seed)
+        big = np.asarray(Image.fromarray((r.random((H // 24, W // 24, 3)) * 150 + 50).astype(np.uint8))
+                         .resize((W, H), Image.BICUBIC)).copy()
+        for _ in range(5):
+            x, y = int(r.integers(0, W - 120)), int(r.integers(0, H - 120))
+            cv2.rectangle(big, (x, y), (x + int(r.integers(30, 110)), y + int(r.integers(30, 110))),
+                          tuple(int(v) for v in r.integers(0, 255, 3)), -1)
+        return big
+    stills = [still(21), still(22)]
+    title = Image.new("RGB", (400, 52), (24, 26, 32))
+    ImageDraw.Draw(title).text((18, 8), "how the grid stays up", fill="white", font=ImageFont.load_default(size=32))
+    title = np.asarray(title, np.float32)
+    tx, ty, t0, t1 = 120, 250, 1.0, 4.0
+    rng = np.random.default_rng(7)
+    frames = []
+    for i in range(9 * FPS):
+        t = i / FPS
+        k, u = (0, t / 4.5) if t < 4.5 else (1, (t - 4.5) / 4.5)
+        s = 1.0 + 0.12 * u                  # a slow push about the top centre (as generated stills get)
+        M = np.float32([[s, 0, -(s - 1) * W / 2], [0, s, 0]])
+        img = cv2.warpAffine(stills[k], M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT).astype(np.float32)
+        if t0 <= t < t1:
+            a = min(1.0, (t - t0) / 0.2)                      # a 0.2 s fade in, cut out
+            img[ty:ty + 52, tx:tx + 400] = img[ty:ty + 52, tx:tx + 400] * (1 - a) + title * a
+        frames.append(np.clip(img + rng.normal(0, 2, img.shape), 0, 255).astype(np.uint8))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+                    "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "18", str(mp4)],
+                   input=b"".join(f.tobytes() for f in frames), check=True)
+    return [(t0, t1, [tx / W, ty / H, 400 / W, 52 / H])]
+
+
+def demo_drift():
+    """Slow-drifting stills under a title, and a hard cut with nothing on it: the title is found, the cut is not."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mp4 = Path(tmp) / "d.mp4"
+        truth = drift_clip(mp4)
+        r = measure_video(mp4, None, {"cuts": [4.5], "zooms": []}, None, None)
+        p, rc = precision_recall(r["graphics"], truth)
+        print(f"  drifting stills ({r.get('mode')} mode): precision {p:.2f}, recall {rc:.2f}, "
+              + "; ".join(f"{g['t_in']}-{g['t_out']} {[round(v, 2) for v in g['box']]} {g['kind']}" for g in r["graphics"]))
+        assert p == 1.0 and rc == 1.0, (p, rc, r["graphics"])
+        g = r["graphics"][0]
+        assert 0.8 <= g["t_in"] <= 1.4 and 3.6 <= g["t_out"] <= 4.4, g
+
+
 def demo_kinds():
     """An app icon with its name under it is a logo, not a text card; a text card stays one."""
     from PIL import Image, ImageDraw, ImageFont
@@ -1281,6 +1475,7 @@ def demo():
         assert "\n" not in line and "{" not in line and len(line) < 300 and "slide/" in line, line
     demo_kinds()
     demo_moving()
+    demo_drift()
     # style-edit's split layout when the graphics own the top panel and the speaker sits below it
     top = {"zones_pct": {"top": 82, "middle": 10, "bottom": 0, "full": 8}, "median_box": [8, 9, 84, 33], "covers_face_pct": 0}
     assert split_layout(top, {"y_pct": 71}, True) == {"mode": "split", "seam": 44, "source": "graphics.py"}

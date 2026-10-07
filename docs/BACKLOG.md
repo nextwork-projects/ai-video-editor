@@ -21,11 +21,10 @@ Sources:
 
 ## Next
 
-- Overlay mode finds nothing when the footage under the graphics barely moves. A public motion-graphics
-  explainer (slow-drifting generated stills, cuts every 6 s, 8 hand-labelled one-line titles) scored
-  precision 0.00, recall 0.00: `overlay_dets` needs 40% of the frame changing within 0.4 s, and its one
-  find was part of the footage. look.py's OCR also returned no line inside 6 of the 8 title boxes, so
-  the text tests had nothing to read.
+- The code kind guess calls white one- and two-line titles over photos "photo" (6 of 8 on the
+  re-scored documentary) or "UI recording". Drift detection was tuned on that one video; a second
+  slow-drift video (generated stills, titles that arrive and leave on cuts, which `laid_on` drops)
+  is untested.
 
 - Teardowns made before `"transitions": []` was written leave the key out for a creator who only cuts,
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
@@ -41,5 +40,4 @@ Carried over (still untested live):
 
 ## Needs a decision from the maintainer
 
-- Merge `upgrade` into `main`: the pull request with before/after screenshots is being opened.
 - Cutout model licence: RVM is GPL-3.0 (downloaded at first use, never shipped).

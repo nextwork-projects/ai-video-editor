@@ -4,6 +4,24 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Teardown graphics found nothing over footage that only drifts (slow pushes on stills, dissolves
+  between them). New in overlay mode: `drift_dets` keeps hard edges that hold exactly still for
+  +-1 s while the picture's other edges move, and drops a box whose surround holds still too (the
+  fixed point of a push). A drift track is grown on its own lettering (`grow_drift`), snapped to the
+  OCR lines it holds (`to_text`), and kept only when its box changes at its entrance or exit while
+  the rest of the frame does not (`laid_on`). Samples in a dissolve or on a cut find nothing.
+  Faces that turn up all over the frame (portraits in a documentary) no longer count as a speaker,
+  so such a video gets overlay mode. Test: `graphics.py demo` (a title over a slow push, a hard cut
+  with nothing on it).
+- look.py marked held titles as captions when there was no transcript: OCR misreads of a held line
+  restarted its run, so the 4 s limit never fired, and the caption band then hid the titles from
+  graphics.py. A line now carries on a nearly identical one from the sample before. Test:
+  `look.py demo`.
+- Re-scored on one public documentary (colourised stills, slow pushes, dissolves, 8 hand-labelled
+  one- and two-line titles; 90 s): precision 0.00 / recall 0.00 before, 1.00 / 1.00 after. OCR read a
+  line inside every title; 3 of 8 were marked captions before (and set the caption band), 0 after.
+  The code kind guess still calls most of these titles "photo".
+
 ## ai-editor 2.0.0, creator-teardown 2.3.0 (2026-10-07)
 
 - Teardown graphics in overlay mode (moving footage, no steady speaker) had no entrance or exit.
