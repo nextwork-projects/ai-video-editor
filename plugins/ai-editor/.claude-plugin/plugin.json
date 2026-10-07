@@ -2,7 +2,7 @@
   "name": "ai-editor",
   "displayName": "AI Video Editor",
   "description": "Edit your own talking-head video in a creator's measured style: retakes and pauses cut, then zooms, captions and cards rendered with Remotion on your laptop or AWS Lambda.",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "author": { "name": "NextWork", "url": "https://nextwork.ai" },
   "homepage": "https://github.com/nextwork-projects/ai-video-editor",
   "repository": "https://github.com/nextwork-projects/ai-video-editor",

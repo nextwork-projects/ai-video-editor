@@ -4,6 +4,8 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.0.0, creator-teardown 2.3.0 (2026-10-07)
+
 - Teardown graphics in overlay mode (moving footage, no steady speaker) had no entrance or exit.
   `overlay_motion` tracks the graphic's settled picture through the source frames (where it is found
   gives a slide, its size a scale, how much of it shows a cut or fade) and fits the curve with the same

@@ -46,7 +46,7 @@ cd plugins/creator-teardown && claude plugin tag --dry-run && claude plugin tag 
 cd plugins/ai-editor && claude plugin tag --dry-run && claude plugin tag --push && cd ../..
 ```
 
-That creates and pushes `creator-teardown--v2.0.0` and `ai-editor--v1.1.1`. `claude plugin tag`
+That creates and pushes `creator-teardown--v2.3.0` and `ai-editor--v2.0.0`. `claude plugin tag`
 validates the plugin, checks plugin.json and the marketplace entry agree, and refuses a dirty tree
 or an existing tag. Without `--push` it prints the `git push origin <tag>` command instead.
 
