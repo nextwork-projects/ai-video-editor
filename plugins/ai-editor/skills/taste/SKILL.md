@@ -1,6 +1,6 @@
 ---
 name: taste
-description: Remembers how the user likes their videos edited, so they never give the same correction twice. Saves every correction or preference about an edit (the cut, captions, visuals, sound, layout) into ~/.ai-video-editor/taste.md as a plain rule, and into taste.json when it maps to a setting the scripts read (pause length, caption size, words per caption, zooms per minute, sound on or off, layout), deduplicated, scoped to every video or just this one, and counted each time it is applied so `report` shows what it learned and what had to be said twice. Every other AI editor skill reads both before it starts. Use whenever the user reacts to an edit ("too slow", "captions are too small", "fewer zooms", "I hate the whoosh", "always use the split", "don't put logos there", "that's perfect, keep it like that"), and when they ask "what do you know about my taste", "show my settings", "forget that rule", "reset my taste" or "are you learning".
+description: Remembers how the user likes their videos edited, so they never give the same correction twice. Saves every correction or preference about an edit (the cut, captions, visuals, sound, layout) into ~/.ai-video-editor/taste.md as a plain rule, and into taste.json when it maps to a setting the scripts read (pause length, caption size, words per caption, zooms per minute, sound on or off, layout), deduplicated, scoped to every video or just this one, and counted each time it is applied so `report` shows what it learned and what had to be said twice; one that would help everyone goes to the maintainers. Every other AI editor skill reads both before it starts. Use whenever the user reacts to an edit ("too slow", "captions are too small", "fewer zooms", "I hate the whoosh", "always use the split", "don't put logos there", "that's perfect, keep it like that"), and when they ask "what do you know about my taste", "show my settings", "forget that rule", "reset my taste" or "are you learning".
 license: MIT
 compatibility: Python 3.9+, standard library only. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -24,9 +24,10 @@ The user's own rules, kept outside the plugin (plugin updates never touch them):
 
 1. Find the behaviour behind what they said, not the one instance. "The 'router' card is too
    small" becomes "Cards fill the space they have", not "make the router card bigger".
-2. Scope. When it is clear ("always", "I hate X", a fix to this video's content), don't ask. When
-   it could go either way, ask in the question box: "Always, or just this video?" with the options
-   `Every video (Recommended)` and `Just this video`.
+2. Scope. After every correction, ask in the question box: "Is this about this video, your style, or
+   would it help everyone?" with the options `My style (Recommended)`, `Just this video` and
+   `Would help everyone`. Skip the question only when they already said it ("always", "just this one").
+   `Would help everyone` saves it to their style too, then step 6.
 3. Save it with `add`, with the setting when one maps (table below) and the edit it was said on:
 
 ```bash
@@ -58,6 +59,19 @@ python3 "$S/taste.py" add visuals "Logos stay smaller than the captions" --edit 
    If `add` prints `regression`, the rule was already applied and did not hold: say so, and
    make it more concrete (a setting, a number) instead of saving the same words again.
 5. Then redo the edit with it.
+6. On `Would help everyone`, write it as a rule for every user of the editor, never about this video:
+   what was wrong, the general rule, the skill or check that should own it, and a small example
+   without their media, names or links (the script scrubs paths, file names, emails, handles and links too):
+
+```bash
+python3 "$S/taste.py" suggest "Zoom snapped in over 2 frames" "Zooms ease in over at least 0.5 s" --owner "style-edit quality.py zoom check" --example "a 1.2x punch at 0.07 s"
+python3 "$S/taste.py" issue          # shows the issue it would open
+```
+
+   If `gh auth status` succeeds, ask in the question box: "Send it to the editor's maintainers as a
+   GitHub issue?" with `Yes, open an issue (Recommended)` / `No, keep it on my computer`. On yes:
+   `python3 "$S/taste.py" issue --yes`, and give them the issue link. No gh, or no: it stays in
+   `~/.ai-video-editor/suggestions.jsonl`, where the maintainers' `improve` skill reads it.
 
 ## Is it learning
 
@@ -92,7 +106,7 @@ the creator's style disagree, say so once and follow the rule.
 
 ## Files
 
-- `scripts/taste.py`: `add`, `report`, `show`, `forget`, `rule`, `set`, `unset`, `get`, `demo`. A thin
+- `scripts/taste.py`: `add`, `report`, `show`, `forget`, `rule`, `set`, `unset`, `get`, `suggest`, `issue`, `demo`. A thin
   CLI over the plugin's `lib/ai_editor/taste.py`, whose `load_json()` and `merge()` are what plan.py
   and the cut use to lay the taste over the defaults and style.json.
 - `~/.ai-video-editor/rules.json`: every rule with its scope, corrections, times applied and

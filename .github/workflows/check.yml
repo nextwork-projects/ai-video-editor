@@ -76,7 +76,16 @@ jobs:
           python $A/style-edit/scripts/check.py demo
           python $A/style-edit/scripts/quality.py demo
           python $A/style-edit/scripts/sheet.py demo
+          python $A/style-edit/scripts/ai_tells.py demo
+          python $A/style-edit/scripts/route.py demo
+          python $A/product-video/scripts/gates.py demo
+          python $A/product-video/scripts/product.py demo
+          python $A/product-video/scripts/journey.py demo
+          python $A/product-video/scripts/meter.py demo
+          python $A/product-video/scripts/sound.py demo
+          python $A/improve/scripts/improve.py demo
           python tests/golden.py demo
+          node tests/test_record.mjs
       - name: List a TikTok profile
         continue-on-error: true
         run: python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py list tiktok --limit 3
@@ -122,6 +131,8 @@ jobs:
           python plugins/creator-teardown/skills/creator-teardown/scripts/fetch.py doctor
       - name: End to end
         run: python tests/smoke.py
+      - name: Recording safety (deny list, blur on a synthetic page)
+        run: node tests/test_record.mjs --require-chrome
 
   # The renderer's look pinned by four stills (tests/golden/). Ubuntu only: each OS rasterises
   # fonts its own way. On a failure the fresh stills and diffs are uploaded: if the change was

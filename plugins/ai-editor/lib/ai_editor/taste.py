@@ -14,6 +14,11 @@
     python3 taste.py set <key.path> <value>       set a setting in taste.json (value parsed as JSON if it can be)
     python3 taste.py unset <key.path>
     python3 taste.py get                          taste.json as JSON
+    python3 taste.py suggest "<what was wrong>" "<the general rule>" --owner <skill or check> [--example "..."]
+                                  a correction that would help every user: one line in suggestions.jsonl,
+                                  scrubbed of paths, emails, handles and file names (the improve skill reads it)
+    python3 taste.py issue [--yes]                the latest suggestion as a GitHub issue on the editor's repo:
+                                  without --yes, only shows it; with --yes (after the user said yes), gh opens it
     python3 taste.py demo                         self-check
 
 Files in ~/.ai-video-editor/ (AI_EDITOR_HOME overrides; outside the plugin, so updates never wipe them):
@@ -25,6 +30,7 @@ Files in ~/.ai-video-editor/ (AI_EDITOR_HOME overrides; outside the plugin, so u
   rules.json  the same rules with their history: [{"id", "section", "rule", "setting", "value", "scope"
               ("all" | "video:<name>"), "corrections": [{"edit", "at", "rule", "value"}], "applied",
               "applied_in": [edit names], "since_fix", "regressions": [{"edit", "at"}]}]
+  suggestions.jsonl  corrections the user said would help everyone: {"at", "what", "rule", "owner", "example"}
 
 How a rule is applied: plan.py and build_timeline.py call load_json() (their only hook). It returns
 taste.json plus the "this video only" settings of the edit being worked on, and counts every setting
@@ -35,6 +41,9 @@ import datetime
 import difflib
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -324,6 +333,54 @@ def report():
     return "\n".join(lines)
 
 
+REPO = "nextwork-projects/ai-video-editor"
+MEDIA = r"[\w.-]+\.(?:mov|mp4|m4v|mkv|webm|avi|wav|mp3|m4a|aac|png|jpe?g|heic|gif)"
+
+
+def scrub(text):
+    """A suggestion leaves the computer only without the user's media or names: paths, file names, emails,
+    @handles and URLs become placeholders."""
+    text = text.replace(str(Path.home()), "~")
+    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "<email>", text)
+    text = re.sub(r"https?://\S+", "<link>", text)
+    text = re.sub(r"(?<![\w])@[\w.]{2,}", "@creator", text)
+    text = re.sub(r"(?<!\S)(?:~|\.{1,2})?(?:/[\w.-]+){2,}/?", "<path>", text)
+    return re.sub(MEDIA, "<file>", text, flags=re.I)
+
+
+def suggestions_path():
+    return HOME / "suggestions.jsonl"
+
+
+def suggest(what, rule, owner, example=""):
+    """A correction the user said would help everyone, as a general rule for the maintainers."""
+    row = {"at": now(), "what": scrub(what), "rule": scrub(rule), "owner": scrub(owner), "example": scrub(example)}
+    HOME.mkdir(parents=True, exist_ok=True)
+    with open(suggestions_path(), "a") as f:
+        f.write(json.dumps(row) + "\n")
+    return row
+
+
+def issue(yes=False):
+    """The latest suggestion as a GitHub issue. Shows it unless yes; opens it with gh only when gh is logged in."""
+    rows = [json.loads(x) for x in suggestions_path().read_text().splitlines() if x.strip()] if suggestions_path().exists() else []
+    if not rows:
+        return "No suggestions yet."
+    r = rows[-1]
+    title = f"Suggestion: {r['rule'][:80]}"
+    body = (f"**What was wrong:** {r['what']}\n\n**The general rule:** {r['rule']}\n\n**Owner:** {r['owner']}\n\n"
+            + (f"**Example:** {r['example']}\n\n" if r["example"] else "") + "Sent from the AI video editor's taste skill.")
+    if not yes:
+        return f"{title}\n\n{body}"
+    if not shutil.which("gh") or subprocess.run(["gh", "auth", "status"], capture_output=True).returncode:
+        return "gh is not logged in: the suggestion stays in suggestions.jsonl."
+    cmd = ["gh", "issue", "create", "--repo", REPO, "--title", title, "--body", body]
+    res = subprocess.run(cmd + ["--label", "feedback"], capture_output=True, text=True)
+    if res.returncode:      # the label may not exist on the repo
+        res = subprocess.run(cmd, capture_output=True, text=True)
+    return res.stdout.strip() or res.stderr.strip()
+
+
 def demo():
     global HOME
     old_argv = sys.argv
@@ -380,6 +437,13 @@ def demo():
         # forget takes the setting and the bullet with it
         forget(next(x for x in load_rules() if x.get("setting") == "cut.max_pause")["id"])
         assert "max_pause" not in read_json().get("cut", {}) and load_md()["Cut"] == []
+        # a suggestion for everyone carries the rule, never the user's files, names or links
+        r = suggest(f"zoom snapped on {Path.home()}/Movies/take 3.mov for @someone", "Zooms ease over at least 0.5 s",
+                    "style-edit quality.py", "jane@example.org saw it on https://example.com/x, IMG.MOV")
+        assert "Movies" not in json.dumps(r) and "@someone" not in r["what"] and "<file>" in r["example"], r
+        assert "<email>" in r["example"] and "<link>" in r["example"] and r["rule"] == "Zooms ease over at least 0.5 s", r
+        assert scrub("captions at 1/3 height") == "captions at 1/3 height"
+        assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** style-edit quality.py" in issue()
     sys.argv = old_argv
     print("demo ok")
 
@@ -412,6 +476,11 @@ def main():
         if status == "regression":
             print(f"note: already applied {r['applied']}x, and it had to be said again. Check why it did not "
                   "hold: a setting no script reads, or a word rule too vague to follow.")
+    elif cmd == "suggest" and len(a) >= 3 and flag("--owner"):
+        r = suggest(a[1], a[2], flag("--owner"), flag("--example") or "")
+        print(f"suggested: {r['rule']} ({r['owner']}) -> {suggestions_path()}")
+    elif cmd == "issue":
+        print(issue("--yes" in a))
     elif cmd == "forget" and len(a) == 2:
         r = forget(int(a[1]))
         print(f"forgot #{a[1]}: {r['rule']}" if r else f"no rule #{a[1]}")

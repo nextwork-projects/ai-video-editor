@@ -17,11 +17,13 @@ Read a skill's `SKILL.md` in full before doing its task.
 | `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms" |
 | `product-video` | `plugins/ai-editor/skills/product-video/` | "make a launch video for <url>", "product video of my site", pastes a website |
 | `clips` | `plugins/ai-editor/skills/clips/` | "clip this video", "make shorts from my podcast", drops a long video or YouTube link |
+| `improve` | `plugins/ai-editor/skills/improve/` | maintainers: "improve the editor", "turn feedback into fixes", "process suggestions" |
 | `creator-teardown` | `plugins/creator-teardown/skills/creator-teardown/` | "break down @handle", "tear down @handle" |
 
 Order: `start` asks a few questions once, then runs setup, creator-teardown, cut and style-edit in order.
 `creator-teardown` measures a creator, `cut` cleans the user's take, `style-edit` renders
-it in that creator's style. `taste` runs whenever the user corrects an edit.
+it in that creator's style. `taste` runs whenever the user corrects an edit; a correction the user says would help everyone goes to
+`~/.ai-video-editor/suggestions.jsonl` (and, if they agree, a GitHub issue), which `improve` turns into fixes here.
 `product-video` stands alone: a URL in, a product video out (no footage, no creator).
 
 ## Paths

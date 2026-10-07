@@ -2,7 +2,8 @@
 
 The rules every skill in this plugin follows, for every user and every video. Each one names where
 it is enforced. Skills read this file before planning anything visual:
-`${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md`.
+`${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md`. What enforces each rule and the test that proves it:
+`docs/feedback-matrix.md` at the repo root.
 
 ## Asking
 
@@ -52,7 +53,8 @@ it is enforced. Skills read this file before planning anything visual:
 - Never cover the speaker's face; cards may tuck behind the head only when the cutout is on.
   (plan.py, check.py)
 - Default length is short: about 40 s for a product film with five use cases, scaled to the
-  count. (product.py)
+  count, but never shortened past the smoothness bar: smooth beats short. (product.py,
+  `journey.py` SPEED_BAR)
 
 ## Safety and privacy
 
@@ -77,5 +79,7 @@ it is enforced. Skills read this file before planning anything visual:
 
 - Every correction becomes a rule for the next video, counted, with regressions shown.
   (`lib/ai_editor/taste.py`)
-- A correction about one video is first checked as a general rule: if it would help any user,
-  it goes into this file and the skill that owns it, not into one edit's notes.
+- A correction about one video is first checked as a general rule: after every correction the
+  question box asks "this video, your style, or would it help everyone?". "Everyone" goes to
+  `~/.ai-video-editor/suggestions.jsonl` (scrubbed) and, on a yes, a GitHub issue (`taste.py suggest`,
+  `issue`). The `improve` skill turns those into a rule here, the check that enforces it and a test.

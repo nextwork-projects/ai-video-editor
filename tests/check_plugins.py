@@ -16,6 +16,17 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATHS_LINE = "Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md"
 errors = []
+KEY_URLS = ("https://console.typesafe.ai/keys", "https://aistudio.google.com/apikey",
+            "https://elevenlabs.io/app/settings/api-keys", "https://modal.com/signup")
+EVALS = [("plugins/ai-editor/evals/setup-plan-first", "tool: AskUserQuestion"),
+         ("plugins/ai-editor/evals/setup-plan-first", "what each costs"),
+         ("plugins/ai-editor/evals/start-asks", "tool: AskUserQuestion"),
+         ("plugins/ai-editor/evals/launch-video-url", "tool: AskUserQuestion"),
+         ("plugins/ai-editor/evals/launch-video-url", "what the video must show"),
+         ("plugins/ai-editor/evals/render-unapproved", "Approve"),
+         ("plugins/ai-editor/evals/captions-too-small", "help everyone"),
+         ("plugins/ai-editor/evals/improve-from-feedback", "improve"),
+         ("plugins/creator-teardown/evals/tear-down-handle", "tool: AskUserQuestion")]
 
 
 def frontmatter(path):
@@ -42,6 +53,9 @@ def check_skill(path):
         errors.append(f"{path}: compatibility must be 1-500 chars")
     if PATHS_LINE not in body:
         errors.append(f"{path}: missing the line {PATHS_LINE!r}")
+    # every question goes in the question box (PRINCIPLES.md "Asking"); vendored skills keep their own text
+    if not (path.parent / "LICENSE").exists() and "AskUserQuestion" not in body:
+        errors.append(f"{path}: never says to ask in the question box (AskUserQuestion)")
     for ref in re.findall(r"\$\{CLAUDE_SKILL_DIR\}/((?:references|scripts)/[\w./-]+)", body):
         if not (path.parent / ref).exists():
             errors.append(f"{path}: points at {ref}, which does not exist")
@@ -88,6 +102,18 @@ def main():
             if not (ROOT / s).is_dir():
                 errors.append(f"{extra}: skills path {s} does not exist")
 
+    # Setup links straight to each key's page (PRINCIPLES.md "Asking"), so nobody hunts for it.
+    setup = (ROOT / "plugins/ai-editor/skills/setup/SKILL.md").read_text(encoding="utf-8")
+    for url in KEY_URLS:
+        if url not in setup:
+            errors.append(f"plugins/ai-editor/skills/setup/SKILL.md: lost the direct key link {url}")
+
+    # The rules only an agent can follow are proven by evals (docs/feedback-matrix.md); they must not vanish.
+    for case, grader in EVALS:
+        d = ROOT / case
+        if not (d / "prompt.md").exists() or not any(grader in g.read_text(encoding="utf-8") for g in d.glob("graders/*.md")):
+            errors.append(f"{case}: missing, or no grader with {grader!r}")
+
     # The style.json contract is copied into creator-teardown so it ships with that plugin.
     def section(p):
         t = p.read_text(encoding="utf-8")
@@ -100,7 +126,7 @@ def main():
     for p in ROOT.rglob("*"):
         # Vendored third-party skills (their own LICENSE file next to SKILL.md) stay verbatim.
         vendored = any((q / "LICENSE").exists() and (q / "SKILL.md").exists() for q in p.parents)
-        if p.suffix in (".md", ".json", ".py", ".yml") and "node_modules" not in p.parts and ".git" not in p.parts and not vendored:
+        if p.suffix in (".md", ".json", ".py", ".yml") and "node_modules" not in p.parts and ".git" not in p.parts and not vendored and "results" not in p.parts:
             if chr(0x2014) in p.read_text(encoding="utf-8", errors="ignore"):
                 errors.append(f"{p}: contains an em dash")
 

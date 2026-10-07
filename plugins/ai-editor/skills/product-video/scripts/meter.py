@@ -65,7 +65,12 @@ def camera(a, b):
     rhs = np.concatenate([u, v])
     (tx, ty, k), *_ = np.linalg.lstsq(A, rhs, rcond=None)
     resid = float(np.sqrt(np.mean((A @ np.array([tx, ty, k]) - rhs) ** 2)))
-    return -tx / w, -ty / w, math.log1p(k), diff, resid
+    # what is left once the camera move is undone: a cut changes the picture, a fast scroll only moves it
+    M = np.float32([[1 + k, 0, tx - k * cx], [0, 1 + k, ty - k * cy]])
+    warped = cv2.warpAffine(a, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    m = 24
+    left = float(np.abs(warped[m:-m, m:-m].astype(np.int16) - b[m:-m, m:-m].astype(np.int16)).mean())
+    return -tx / w, -ty / w, math.log1p(k), diff, resid if left > 12 else 0.0
 
 
 def measure(video, t0=None, t1=None):

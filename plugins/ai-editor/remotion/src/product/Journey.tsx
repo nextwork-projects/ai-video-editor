@@ -173,7 +173,8 @@ export const Journey: React.FC<{ plan: JourneyPlan; fams: Fams }> = ({ plan, fam
         </AbsoluteFill>
       ) : null}
       {t >= plan.end ? <AbsoluteFill style={{ background: plan.brand.ground, opacity: prog(t, plan.end, 0.5, "power2.out") }}>
-        <Logo plan={plan} t={t - plan.end} fams={fams} W={W} H={H} />
+        {/* the logo's own entrance starts as the canvas leaves, so no frame holds still between them */}
+        <Logo plan={plan} t={t - plan.end + 0.2} fams={fams} W={W} H={H} />
       </AbsoluteFill> : null}
     </AbsoluteFill>
   );

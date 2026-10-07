@@ -6,8 +6,8 @@ through them, every frame drawn by Remotion (nothing recorded plays back).
     python3 journey.py demo                          self-check, no network
 
 A story is beats, in the order the film tells them (references/story.md "Story first"):
-    {"beats": [{"job": "hook", "flow": "search", "text": "Learn anything by building"},
-               {"job": "action", "flow": "search", "steps": [0, 1], "text": "Search NextWork"},
+    {"beats": [{"job": "hook", "flow": "search", "text": "<the promise, in the site's words>"},
+               {"job": "action", "flow": "search", "steps": [0, 1], "text": "<the search box's own label>"},
                {"job": "result", "flow": "search"}, ...,
                {"job": "payoff", "flow": "library", "steps": [1]}, {"job": "end"}]}
 A beat's "steps" index the flow's steps (its states.json, auto scrolls skipped); "result" pushes onto
@@ -32,6 +32,7 @@ HOLD_PUSH = 0.035    # a held framing keeps pushing in, 3.5% over the hold: noth
 SAFE = 0.045         # the safe frame's margin, share of the short side
 CPS = 14             # typed characters a second
 GAP = 0.06           # space between pages on the canvas, share of a page's width
+SECONDS_PER_USE_CASE = 8   # default length: about 40 s for five use cases (action + result), the hook, payoff and end included
 JOBS = {             # job -> the shots that do it (references/story.md)
     "hook": "the first page, wide, pushing in, the promise in the site's words",
     "reveal": "a push from wide onto the product",
@@ -264,7 +265,7 @@ def union(*rs):
     return [x0, y0, x1 - x0, y1 - y0]
 
 
-def build(d, story, aspect="16:9", fps=60, variant="linear"):
+def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
     """story (with beats) -> the journey part of a plan: canvas, per-frame camera and cursor, words, beats,
     sound cues, and the focus each held framing must keep in frame."""
     import numpy as np
@@ -302,7 +303,8 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
                 plates[alias]["h"] = max(plates[alias]["h"], hgt)
                 continue
             # the next page sits level with where the camera leaves the last one, so the travel is sideways
-            x = plates[-1]["x"] + plates[-1]["w"] * (1 + GAP) if plates else 0
+            # a phone page is framed with a sliver of ground each side: the gap keeps the next page out of it
+            x = plates[-1]["x"] + plates[-1]["w"] * (1 + (0.3 if vertical else GAP)) if plates else 0
             y = plates[-1]["endy"] if plates else 0
             plates.append({"x": x, "y": y, "w": f["viewport"][0], "h": hgt, "endy": y})
             where[(fid, pi)] = len(plates) - 1
@@ -342,7 +344,10 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
             # too tall to sit above the words at a readable size: the words leave before the camera gets there
             wend[0] = min(wend[0], t0 - 1.3)
             words_on = False
-        cam = fit(T, plate, (W, H), words_on, wmin, pad=1.06 if wide else 1.2)
+        # never closer than ~60% of a desktop page (85% of a phone page): the page keeps its context, and the
+        # camera never has to zoom 2.5x in a second to get there
+        floor = max(wmin, plate["w"] * (0.84 if vertical else 0.6))
+        cam = fit(T, plate, (W, H), words_on, floor, pad=1.06 if wide else 1.2)
         keys.append({"t": round(t0, 3), "cam": cam, "focus": focus or T, "words": words_on, "wmax": plate["w"] * (1.06 if vertical else 1.3)})
 
     def view_rect(fid, state):
@@ -357,9 +362,10 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
         text = b.get("text")
         wend[0] = start + 0.15 + max(2.0, 1.0 + 0.32 * len(text.split())) if text else -1.0
         if job == "end":
-            out_beats.append({"job": "end", "start": round(t, 3), "end": round(t + 3.4, 3)})
+            end_len = 3.4 if pace >= 0.9 else 3.0
+            out_beats.append({"job": "end", "start": round(t, 3), "end": round(t + end_len, 3)})
             cues += [{"t": round(t, 3), "kind": "swell"}, {"t": round(t + 0.05, 3), "kind": "hit"}]
-            t += 3.4
+            t += end_len
             break
         f = flows[b["flow"]]
         fid = b["flow"]
@@ -371,16 +377,22 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
             layer(fid, 0, t, "base" if not layers else ("plate-in" if fresh else "fade"), 0.0 if not layers else 0.6)
             if layers[-1]["kind"] == "plate-in":
                 cues.append({"t": round(t, 3), "kind": "whoosh"})
-                t += 1.0          # the camera's travel to a new page takes its time: nothing streaks past
+                t += 1.0          # the camera's travel to a new page takes its time (never paced down: smooth first)
         steps = [f["real"][i] for i in b.get("steps", [])]
         panel = f.get("_open_panel")
         if job in ("hook", "reveal"):
             p, vr = view_rect(fid, 0)
-            dur = b.get("dur", 3.0)
+            dur = max(1.8, 1.0 + 0.3 * len((text or "").split()), b.get("dur", 3.0) * pace)
             # wide on the whole page, pushing in to where the next beat acts
             top = [vr[0] + vr[2] * 0.06, vr[1] + vr[3] * 0.03, vr[2] * 0.88, vr[3] * 0.5]
+            if f.get("headline"):      # the page's own headline, whole: the hook never crops it
+                hl = f["headline"]
+                top = [vr[0] + hl[0], vr[1] + hl[1], hl[2], hl[3]]
             w0 = p["w"] * (1.06 if vertical else 1.12)
-            keys.append({"t": round(t, 3), "cam": [vr[0] + vr[2] / 2, top[1] + top[3] / 2 + w0 * H / W * 0.17 if text else vr[1] + vr[3] / 2, w0],
+            if f.get("headline"):
+                c0 = fit(top, p, (W, H), bool(text), wmin, pad=1.15)
+                c0[2] = max(c0[2], min(w0, c0[2] * 1.15))
+            keys.append({"t": round(t, 3), "cam": c0 if f.get("headline") else [vr[0] + vr[2] / 2, top[1] + top[3] / 2 + w0 * H / W * 0.17 if text else vr[1] + vr[3] / 2, w0],
                          "focus": top, "words": bool(text), "wide": True, "wmax": p["w"] * (1.06 if vertical else 1.3)})
             nxt = next((bb for bb in beats[bi + 1:] if bb.get("steps")), None)
             if nxt and nxt["flow"] == fid:
@@ -390,7 +402,7 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
             t += dur
         # ---- the steps this beat performs (an action with words lets them land first: words, then the hand)
         if job == "action" and text and steps:
-            t += 0.8
+            t += 0.8 * max(0.6, pace)
         for si in steps:
             s = f["steps"][si]
             # auto scrolls (a target scrolled into view) just before this step
@@ -402,6 +414,23 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
                 t += 0.4
             kind = s["kind"]
             p, vr = view_rect(fid, s["from"])
+            if kind == "write" and s.get("caret"):
+                # typed into what already has focus (after a shortcut or a button): no hand, the text appears
+                c = s["caret"]
+                lines = max(x[1] for x in c["pos"]) + 1
+                T = union([p["x"] + s["rect"][0], p["y"] + s["rect"][1], s["rect"][2], s["rect"][3]],
+                          [p["x"] + c["left"], p["y"] + c["top"], max(x[0] for x in c["pos"]) + 12, lines * c["lh"]])
+                if panel:
+                    T = union(T, panel)
+                key(t + 0.5, T, p, bool(text))
+                layer(fid, s["empty"], t + 0.3, "fade", 0.18)
+                t0 = t + 0.6
+                n = len(s["text"])
+                layer(fid, s["to"], t0, "type", n / CPS, caret={**c, "top": c["top"] + p["y"]}, cps=CPS, n=n)
+                cues += [{"t": round(t0 + j / CPS, 3), "kind": "tick"} for j in range(0, n, 2)]
+                s["_focus"] = T
+                t = t0 + n / CPS + 0.45
+                continue
             if kind in ("click", "hover", "type"):
                 # rect and at are plate px; the plate sits at p.x, p.y
                 tgt = [p["x"] + s["rect"][0], p["y"] + s["rect"][1], s["rect"][2], s["rect"][3]]
@@ -420,9 +449,9 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
                     cur = [cam[0] + cam[2] * 0.3, cam[1] + cam[2] / (W / H) * 0.32]
                 dist = math.hypot(hand[0] - cur[0], hand[1] - cur[1])
                 mv = min(1.0, max(0.55, 0.5 + dist / 1800))
-                t_click = t + max(1.25, mv + 0.5)      # the camera settles, then the hand clicks
+                t_click = t + max(1.25 * max(0.75, pace), mv + 0.5 * max(0.6, pace))      # the camera settles, then the hand clicks
                 # the camera frames what the hand acts on; the hand fades in once it is wholly in frame (gate_cursor)
-                key(t_click - 0.45, T, p, bool(text), focus=T)
+                key(t_click - 0.45 * max(0.6, pace), T, p, bool(text), focus=T)
                 cursor_moves.append({"t0": round(t_click - mv - 0.1, 3), "t1": round(t_click - 0.1, 3), "a": cur, "b": hand, "hand": kind == "click"})
                 cur = hand
                 if kind == "hover":
@@ -496,7 +525,7 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
                 tall = f["states"][s["to"]]
                 p, tr = at(fid, s["to"])
                 layer(fid, s["to"], t, "base")
-                dur = min(3.4, max(1.6, abs(s["dy"]) / 750))
+                dur = min(3.0, max(1.4, abs(s["dy"]) / 800))     # a reading pace down the page, never paced down
                 # the camera travels down the page: from the top of the tall still to its bottom viewport
                 cbt = content_box(gray(d, tall["src"], tall["size"]))
                 x0, x1 = tr[0] + cbt[0], cbt[2]
@@ -525,7 +554,7 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
             if st is not None and st.get("_focus"):
                 p = plates[where[(fid, f["states"][st["to"]]["plate"])]]
                 key(t + 0.9, st["_focus"], p, bool(text))
-            t += max(b.get("dur", 2.4), 1.2 + 0.3 * len((text or "").split()))
+            t += max(b.get("dur", 2.4) * pace, 1.4, 1.2 + 0.3 * len((text or "").split()) if text else 0)   # a result is held long enough to read
         elif job == "payoff":
             st = last
             if st is None:
@@ -536,12 +565,12 @@ def build(d, story, aspect="16:9", fps=60, variant="linear"):
             p = plates[where[(fid, f["states"][st["to"]]["plate"])]] if st else plates[-1]
             # slow pull-out to the whole page, held on what the beat ended on
             fr = (st or {}).get("_focus") or [p["x"], p["y"], p["w"], f["viewport"][1]]
-            dur = b.get("dur", 3.2)
+            dur = max(2.0, b.get("dur", 3.2) * pace)
             keys.append({"t": round(t + dur, 3), "cam": [p["x"] + p["w"] / 2, fr[1] + fr[3] / 2, min(p["w"] * 1.1, max(wmin, p["w"] * (1.06 if vertical else 1.1)))],
                          "focus": fr, "words": bool(text), "wide": True, "wmax": p["w"] * (1.06 if vertical else 1.3)})
             t += dur
         elif job == "action":
-            t += 0.35
+            t += 0.35 * pace
         if text:
             # the words open the beat and leave before the hand is busy: the UI carries the rest
             if wend[0] - start > 1.2:
@@ -703,6 +732,8 @@ def framing(plan, words_box=None):
     wb = words_box or words_rect(W, H)
     for i, (cx, cy, w) in enumerate(plan["cam"]):
         t = i / fps
+        if t >= plan.get("end", 1e9) - 0.15:
+            break          # the canvas is fading into the logo card
         k = W / w
         tf = lambda x, y: ((x - cx) * k + W / 2, (y - cy) * k + H / 2)
         if k > plan.get("dsf", 3) * 1.02:
@@ -765,6 +796,20 @@ def replan(plan, rounds=6):
             plan["cursor"] = [list(c) for c in plan["cursor_raw"]]
             gate_cursor(plan["cursor"], plan["cam"], W, H, fps, plan.get("touch"))
     return framing(plan)
+
+
+def plan_speed(plan):
+    """How busy the camera is, from the plan: (p95, median) of its speed in frame diagonals a second (pan and
+    zoom together; the diagonal, so a tall frame and a wide one compare). v4 of the reference project, which
+    measured inside the Linear bar, planned at p95 1.28 (16:9) and 0.94 (9:16), medians 0.03-0.07."""
+    import numpy as np
+    c = np.array(plan["cam"])
+    diag = c[:-1, 2] * (1 + (plan["height"] / plan["width"]) ** 2) ** 0.5
+    v = (np.hypot(np.diff(c[:, 0]), np.diff(c[:, 1])) / diag + np.abs(np.diff(np.log(c[:, 2])))) * plan["fps"]
+    return float(np.percentile(v, 95)), float(np.median(v))
+
+
+SPEED_BAR = (1.3, 0.22)
 
 
 def stills_at(plan):
@@ -945,6 +990,14 @@ def demo():
     plan["cam"], _ = camera(plan["keys"], len(c), 60, 1920, 1080)
     assert framing(plan), "a cut-off focus must fail"
     assert not replan(plan), framing(plan)[:3]
+    # the cursor wholly in frame or not shown: one on the frame's right edge fails, gate_cursor hides it
+    plan["cursor"] = [[x + w / 2 - 2, y, 1.0, 0, 0] for x, y, w in plan["cam"]]
+    assert any("cursor is cut" in m for _, m, _ in framing(plan))
+    gate_cursor(plan["cursor"], plan["cam"], 1920, 1080, 60, False)
+    assert not any("cursor" in m for _, m, _ in framing(plan)), framing(plan)[:3]
+    # the frame filled by product: an empty ground (any colour) counts as none of it, UI detail as all of it
+    busy = (np.random.default_rng(0).random((540, 960, 3)) * 255).astype(np.uint8)
+    assert content_fill(np.full((540, 960, 3), 40, np.uint8)) == 0 and content_fill(busy) > 0.9
     print("demo ok")
 
 

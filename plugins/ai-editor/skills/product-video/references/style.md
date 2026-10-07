@@ -118,7 +118,8 @@ Measured from "New Raycast. Coming 2026" (39 s, pure UI): 4-7 cuts per 30 s, med
 
 `meter.py` (optical flow, Farneback, fitted to one camera move a frame) on the reference films and ours,
 2026-10-06. Speed in % of the frame width a second; jerk in %/s^3 on the velocity smoothed over 0.05 s;
-judder and dead stops per 10 s; carry = how much of the motion before a cut continues after it (1 = all).
+judder and dead stops per 10 s; a cut is a change that undoing the camera move does not explain; carry = how much
+of the motion before a cut continues after it (1 = all).
 
 | film | fps | speed median | jerk p95 | judder /10 s | stops /10 s | cuts /10 s | carry |
 |---|---|---|---|---|---|---|---|
@@ -126,9 +127,9 @@ judder and dead stops per 10 s; carry = how much of the motion before a cut cont
 | Linear, Releases trailer | 60 | 3.58 | 2910 | 0 | 2.0 | 0 | n/a |
 | Linear, Initiatives demo | 25 | 0.16 | 121 | 0.07 | 0.33 | 0.13 | 0 |
 | Linear, Releases demo | 30 | 0.06 | 151 | 1.66 | 0.41 | 0.08 | n/a |
-| Apple, Child safety | 30 | 11.83 | 13382 | 0.44 | 0.29 | 3.85 | 0.32 |
+| Apple, Child safety | 30 | 11.83 | 13371 | 0.44 | 0.29 | 3.71 | 0.31 |
 | Apple, Creator Studio | 24 | 10.88 | 30294 | 0.57 | 1.43 | 7.14 | 0.22 |
-| Apple, Siri next step | 30 | 3.34 | 8415 | 0.42 | 0.52 | 8.24 | 0.24 |
+| Apple, Siri next step | 30 | 3.44 | 8509 | 0.42 | 0.52 | 6.67 | 0.25 |
 
 The bar for the rendered film: Linear's launch pieces. No judder, under 0.5 dead stops in 10 s, jerk p95
 under 3000, few cuts and those carried. `check` prints the meter line and WARNs outside it.

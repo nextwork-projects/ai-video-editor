@@ -5,7 +5,8 @@ a caption or the footage without anyone looking.
     ~/.ai-video-editor/venv/bin/python tests/golden.py            render, compare with tests/golden/
     ~/.ai-video-editor/venv/bin/python tests/golden.py --update   render, overwrite tests/golden/
     ~/.ai-video-editor/venv/bin/python tests/golden.py --out DIR  also keep the fresh stills and diffs in DIR
-    python tests/golden.py demo                                   self-check of the diff, no renderer
+    python tests/golden.py demo                                   self-check of the diff, and the default look
+                                                                  planned with no banned AI tell; no renderer
 
 Makes a 5 s test video, captions and three overlay cards that need no network capture (chat,
 terminal, toasts), plans it without sound, renders the stills and compares four of them with the
@@ -55,7 +56,8 @@ def run(*cmd, cwd):
         sys.exit(f"GOLDEN FAIL: {Path(str(cmd[1])).name if len(cmd) > 1 else cmd[0]} exited {r.returncode}\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
 
 
-def render(work):
+def make_plan(work):
+    """The golden edit, planned with the defaults (no look, no brand): returns its edit folder."""
     edit = work / "edits" / "golden"
     edit.mkdir(parents=True)
     run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=540x960:r=30:d=5",
@@ -79,8 +81,22 @@ def render(work):
          "props": {"items": [{"app": "Inbox", "title": "comment now", "word": "comment"}]}},
     ]))
     run(sys.executable, SK / "plan.py", work / "style.json", edit / "captions.json", "--no-sfx", cwd=work)
+    return edit
+
+
+def render(work):
+    edit = make_plan(work)
     run(sys.executable, SK / "edit.py", "stills", edit, "--no-check", cwd=work)
     return edit / "stills"
+
+
+def banned(edit, stills=None):
+    """The default look must carry no banned AI tell (references/ai-tells.md): plan side, and on the stills."""
+    sys.path.insert(0, str(SK))
+    from ai_tells import check_plan, check_stills
+    plan = json.loads((edit / "plan.json").read_text())
+    found = check_plan(plan) + (check_stills(stills, plan) if stills else [])
+    return [f"{f['tell']}: {f['where']}" for f in found if f["level"] == "BAN"]
 
 
 def demo():
@@ -103,6 +119,13 @@ def demo():
     recolour = base.copy()
     recolour[150:300, 60:480] = (30, 30, 200)                       # panel turned red: fails
     assert diff(base, recolour)[0] > TILE_MAX
+    with tempfile.TemporaryDirectory() as t:
+        edit = make_plan(Path(t))
+        assert banned(edit) == [], banned(edit)                     # the default look has no banned tell
+        plan = json.loads((edit / "plan.json").read_text())
+        plan["look"] = {"preset": "neutral", "ground": "linear-gradient(135deg,#6366F1,#8B5CF6)"}
+        (edit / "plan.json").write_text(json.dumps(plan))
+        assert any("purple-blue" in b for b in banned(edit)), banned(edit)   # and the check can fail
     print("demo ok")
 
 
@@ -117,6 +140,9 @@ def main():
     a = ap.parse_args()
     work = Path(tempfile.mkdtemp(prefix="ave-golden-"))
     stills = render(work)
+    ban = banned(stills.parent, stills)
+    if ban:
+        sys.exit("GOLDEN FAIL: the default look carries a banned AI tell: " + "; ".join(ban))
     out = Path(a.out).resolve() if a.out else None
     if out:
         out.mkdir(parents=True, exist_ok=True)

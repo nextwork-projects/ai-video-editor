@@ -9,6 +9,8 @@ compatibility: Python 3.9+, ffmpeg, Node 20+ and the Remotion renderer the setup
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video follows (story first, smooth before varied, nothing leaves the frame, privacy, no presses that write).
+
 A URL in. A product video out, made only of the site's real UI, real recorded click-throughs of it, its own
 colours and type, and its own words, scored and mixed for this cut. `S="${CLAUDE_SKILL_DIR}/scripts"`,
 `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
@@ -69,7 +71,9 @@ Then a second call:
    CC-BY credit line goes into `share.txt`. Use `--yt-cookies` (their Chrome's YouTube login) only if
    YouTube blocks the download, and only after asking. On "Not sure", say plainly that Instagram, TikTok and
    YouTube may mute or claim the video and offer the generated score instead; then do what they choose.
-   The download never leaves the project folder. Plan with `--music audio/track.wav`: cuts snap to its
+   For their own file, ask the same rights question, then
+   `python3 "$S/product.py" music product/<name> --file audio/<their track> --rights own|cc|licensed|unsure`.
+   `plan --music audio/<file>` refuses a track with no recorded rights. The download never leaves the project folder. Plan with `--music audio/track.wav`: cuts snap to its
    detected beats.
 9. **Sound effects**: subtle UI sounds (Recommended: clicks and key ticks where the UI acts, a swell into
    the logo) / none.
@@ -80,7 +84,7 @@ Then a second call:
     Public pages only / Later.
 
 Write the answers to `product/<name>/brief.json` (`{"tagline", "must_show": [...], "audience", "action",
-"must_include": [urls]}`). Example brief for nextwork.ai: must_show = the Create button (prompt your
+"must_include": [urls]}`). `plan` refuses without it. Example brief for nextwork.ai: must_show = the Create button (prompt your
 own project), search other people's projects, roadmaps, step-by-step guides, the portfolio in Your Library.
 
 **Logging in** (on "Yes"): say this plainly first: the login is kept in a browser profile of its own,
@@ -100,7 +104,7 @@ whose `--user-data-dir` is that profile), then `node "$S/login.mjs" check <url>`
 `record.mjs` uses that profile for that domain (installed Chrome, headless).
 
 While recording a logged-in product:
-- **Read-only.** `record.mjs` refuses to press delete, remove, pay, buy, upgrade, subscribe, billing,
+- **Read-only.** `record.mjs` refuses to press create, delete, remove, pay, buy, upgrade, subscribe, billing,
   publish, invite, transfer, log out, unless the step carries `"allow": true`, which you add only after
   asking in the question box. Creating something (a project from a prompt) is a write: ask first, then do
   one, with an obviously test prompt (starting "TEST, safe to delete:"), and tell the
@@ -153,6 +157,10 @@ focused field and the typed text with the caret measured per character, a tall s
 waits for each view to finish loading (pictures, skeletons) before taking it. Look at the stills: a loading
 page, a click that opened the wrong thing, a modal you did not want. Fix the flow and capture again
 (`--only <id>`). Without `--states` it records screencasts (`flows/*.mp4`) for the shot film below.
+`{"write": "..."}` types into whatever has focus (a search a button or shortcut opened); a link that opens
+a new tab is followed in the same one; with a dialog open, a `text=` target is looked for in the dialog
+first; a flow may carry `"mobile": {"steps": [...]}` where the phone layout's controls differ. Each take
+also records the page's headline, so the opening never crops it.
 
 ## 5. Story and plan
 
@@ -162,6 +170,12 @@ case, payoff, end. Each beat's `steps` are its flow's step numbers.
 ```bash
 $PY "$S/product.py" plan product/<name> --story story.json --style linear --aspect 16:9 [--music generated|eleven|none|audio/<track>] [--sfx subtle|none] [--vo audio/vo.wav]
 ```
+
+Length: about 8 s a use case (40 s for five), the hook, payoff and logo included, unless the user asked
+for a length (`--length`, or `"length"` in the story). The plan paces the result, hook, payoff and travel
+moments down to fit, never below reading time, and keeps the story, the steps and every per-frame check.
+It stops shortening where the camera would get busier than the reference films (`journey.py` SPEED_BAR,
+from the planned camera): smooth beats short, so a site with long pages can run a few seconds over.
 
 A story of beats plans the rendered film (`journey.py`): the pages on one canvas left to right, one camera
 on one easing, a drawn cursor, every change revealed in place, 60 fps. The plan checks every frame from the
@@ -180,7 +194,8 @@ Writes `animatic-<tag>/sheet.png`: the start, middle and end of every beat, capt
 and words, in seconds. Run the `storyboard-critic` agent on the sheet; apply its fixes to the story (order,
 steps, words, a capture) and plan again; two rounds at most. Then show the sheet and ask in the question
 box: **Approve** (Recommended) / **Change the order** / **Swap a shot** / **Redo a capture**. Do not render
-before Approve.
+before Approve. On Approve, stamp it: `$PY "$S/product.py" approve product/<name> --plan plan-linear-16x9.json`.
+`render` refuses a plan with no stamp, or one whose plan or story changed after it (`scripts/gates.py`).
 
 `stills` still makes the denser per-shot sheet for the shot film.
 
@@ -233,7 +248,8 @@ the video, sheet and share.txt, and ask for notes. Notes about taste go to the t
 - `scripts/journey.py`: the rendered film's plan (canvas, camera, cursor per frame), the framing guarantee, the render checks. `journey.py demo` self-checks.
 - `scripts/meter.py`: the smoothness meter. `meter.py demo` self-checks.
 - `scripts/login.mjs`: login (a visible window on a dedicated profile), check, logout, where.
-- `scripts/product.py`: pages, record, copy, plan, animatic, stills, render, check, meter, share, tts. `product.py demo` self-checks.
+- `scripts/product.py`: pages, record, copy, plan, animatic, stills, approve, render, check, meter, share, tts. `product.py demo` self-checks.
+- `scripts/gates.py`: what `plan` and `render` refuse without (brief, approval, music rights, story order). `gates.py demo` self-checks.
 - `scripts/sound.py`: the score, the effects, the mix and the master. `sound.py demo` self-checks.
 - `audio/LICENSES.md`: every sound's licence and evidence (all synthesised; what was evaluated and why not).
 - `references/story.md`: story.json, the shot library, flows, the words rules, purposes, 9:16.

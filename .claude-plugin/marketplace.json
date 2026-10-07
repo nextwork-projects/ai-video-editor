@@ -24,7 +24,7 @@
       "category": "media",
       "tags": ["video", "editing"],
       "keywords": ["video-editing", "captions", "jump-cut", "remotion", "talking-head"],
-      "skills": ["./skills/setup", "./skills/start", "./skills/cut", "./skills/style-edit", "./skills/taste", "./skills/motion-design", "./skills/product-video", "./skills/clips"]
+      "skills": ["./skills/setup", "./skills/start", "./skills/cut", "./skills/style-edit", "./skills/taste", "./skills/motion-design", "./skills/product-video", "./skills/clips", "./skills/improve"]
     }
   ]
 }

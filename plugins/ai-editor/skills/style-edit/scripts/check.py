@@ -252,10 +252,55 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             out.append(finding("WARN", first, ("no graphic at all" if first is None else f"first graphic lands at {first:.1f} s")
                                + f"; the creator's winners show one by {want:.1f} s" + (f" (her other videos: {ctl:.1f} s)" if ctl is not None else ""),
                                "anchor a visual to a word in the first sentence (visuals.json)"))
+    for c, n in unsaid_numbers(plan):
+        out.append(finding("FAIL", c["start"], f"'{c['trigger_word']}' {c['anim']['type']} shows {n}, a number nobody says",
+                           "show the page that published it (a capture), or only the words the speaker says"))
     # the AI-made look (references/ai-tells.md): BAN -> FAIL, WARN -> WARN
     from ai_tells import check_plan as ai_tells, for_brand
     for f in for_brand(ai_tells(plan, visuals), brand):
         out.append(finding("FAIL" if f["level"] == "BAN" else "WARN", None, f"AI tell '{f['tell']}': {f['where']}", f["fix"]))
+    return out
+
+
+UNITS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+TENS = dict(zip("twenty thirty forty fifty sixty seventy eighty ninety".split(), range(20, 100, 10)))
+BIG = {"hundred": 100, "thousand": 1000, "million": 10 ** 6, "billion": 10 ** 9}
+REAL_ANIMS = ("social_post", "video_card", "terminal")   # a real post or clip (fetched), a command line: not a statistic
+
+
+def nums(text):
+    """The numbers written in a text, normalised ("1,200" -> "1200", "40%" -> "40")."""
+    return {str(float(n.replace(",", ""))).removesuffix(".0") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+
+
+def said_numbers(text):
+    """The numbers spoken in a transcript, written as digits or words ("forty two" -> 42, "ten" -> 10)."""
+    out, ws = nums(text), re.findall(r"[a-z]+", text.lower())
+    for i, w in enumerate(ws):
+        v = UNITS.index(w) if w in UNITS else TENS.get(w, BIG.get(w))
+        if v is None:
+            continue
+        if w in TENS and i + 1 < len(ws) and ws[i + 1] in UNITS[1:10]:
+            out.add(str(v + UNITS.index(ws[i + 1])))
+        out.add(str(v))
+    return out
+
+
+def unsaid_numbers(plan):
+    """[(card, number)]: a number on a built card that the speaker never says. A capture or a real post is the
+    source itself and is exempt. Without captions there is nothing to check against."""
+    from ai_tells import strings
+    spoken = " ".join(ch.get("text", "") for ch in (plan.get("captions") or {}).get("chunks", []))
+    if not spoken.strip():
+        return []
+    said = said_numbers(spoken)
+    out = []
+    for c in plan["cards"]:
+        a = c.get("anim") or {}
+        if a.get("type") in REAL_ANIMS:
+            continue
+        for n in sorted({n for _, t in strings(a.get("props") or {}) for n in nums(t)} - said):
+            out.append((c, n))
     return out
 
 
@@ -538,6 +583,12 @@ def demo():
     assert any("winners show one by 0.0 s" in f["what"] for f in check_plan(hk, face))
     hk["targets"]["first_graphic_s"] = 1.0
     assert not any("winners" in f["what"] for f in check_plan(hk, face))
+    # numbers on a built card are the speaker's: "40%" said as "forty" passes, an invented "3x" fails
+    talk = {**plan, "captions": {"style": {"y_pct": 68}, "chunks": [{"text": "it grew forty two percent in ten days", "words": []}]},
+            "cards": [{"anim": {"type": "arrow_callout", "props": {"text": "42% in 10 days"}}, "trigger_word": "grew", "start": 0},
+                      {"anim": {"type": "chat", "props": {"messages": [{"text": "3x faster"}]}}, "trigger_word": "it", "start": 1},
+                      {"anim": {"type": "social_post", "props": {"text": "99 likes"}}, "trigger_word": "days", "start": 2}]}
+    assert [(c["trigger_word"], n) for c, n in unsaid_numbers(talk)] == [("it", "3")], unsaid_numbers(talk)
     print("demo ok")
 
 

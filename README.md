@@ -17,7 +17,7 @@ Two Claude Code plugins, installed together:
 | Plugin | What it does |
 |---|---|
 | `creator-teardown` | Breaks down a creator's top TikTok or YouTube Shorts videos: views, word-level transcripts, pace, cuts per 10 seconds, zooms and caption style. Writes `teardown.md` and `style.json`. |
-| `ai-editor` | `start` is the front door: it asks, then runs the rest. `setup` installs everything. `cut` removes retakes, false starts and dead air from your video. `style-edit` renders it in the creator's style. `taste` remembers every correction you give. `product-video` turns a website URL into a launch video made of its real UI. `clips` finds the best 3-5 short clips in a long video or podcast and edits each one. |
+| `ai-editor` | `start` is the front door: it asks, then runs the rest. `setup` installs everything. `cut` removes retakes, false starts and dead air from your video. `style-edit` renders it in the creator's style. `taste` remembers every correction you give. `product-video` turns a website URL into a launch video made of its real UI. `clips` finds the best 3-5 short clips in a long video or podcast and edits each one. `improve` (for maintainers) turns the corrections users mark as helping everyone into rules, checks and tests in this repo. |
 
 What `style-edit` adds on its own, each timed to the word you say:
 

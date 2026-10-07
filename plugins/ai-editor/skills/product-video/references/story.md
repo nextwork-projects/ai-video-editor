@@ -14,18 +14,27 @@ straight to the cursor doing the thing. Raycast's never leave the product. The s
    screen. Never an invented line.
 2. **Reveal**: the product, wide, the camera pushing in to where the first job starts.
 3. **Use cases, 2-5**, each as **cause then effect**: an `action` beat (the hand does X in the real UI) and
-   a `result` beat (the camera pushes onto Y, what changed). Order them as the user's own journey: what a
-   new user does first comes first, and each one should leave the screen where the next begins.
+   a `result` beat (the camera pushes onto Y, what changed). Order them as the journey a new user takes,
+   whatever the user listed first:
+   - **discover and learn first**: search, browse, a guided path, a template, a demo;
+   - **make your own later**: create, prompt, build, configure, once the viewer has seen what is possible;
+   - **end on what they own or can do**: their library, workspace, dashboard, the thing they shipped. That
+     is the payoff.
+   Each one should leave the screen where the next begins. Say so when you reorder the user's list, and why.
 4. **Payoff**: what it all adds up to (their work saved, shipped, shared), on a slow pull-out.
 5. **End**: the logo and the address (the one action), held.
+
+**Length**: about 8 s a use case, 40 s for five (`journey.SECONDS_PER_USE_CASE`), unless the user asked for
+one. Results, hook, payoff and holds are paced down to fit, never below reading time and never past the
+smoothness bar (travels between pages and scrolls are never hurried); the beats stay.
 
 `storyboard.md`, one block per beat:
 
 ```
-## 3. action: search other people's projects
+## 3. action: search what others made
 job: action (cause)
-words: "Search NextWork"
-capture: flow j-search, steps 0-1 (type "claude code", Enter), logged in
+words: the search box's own label, e.g. "Search templates"
+capture: flow search, steps 0-1 (a query typed, Enter), logged in
 hands off: the results fill the page under the search box; the next beat pushes onto them
 ```
 
@@ -86,10 +95,10 @@ fast moves. Screencast `flow` shots remain for a product whose own animation is 
 
 ```json
 {"beats": [
-  {"job": "hook", "flow": "j-search", "text": "Learn anything by building", "dur": 2.8},
-  {"job": "action", "flow": "j-search", "steps": [0, 1], "text": "Search NextWork"},
-  {"job": "result", "flow": "j-search", "dur": 2.0},
-  {"job": "payoff", "flow": "j-library", "steps": [1], "dur": 3.0},
+  {"job": "hook", "flow": "search", "text": "<the promise, in the site's words>", "dur": 2.8},
+  {"job": "action", "flow": "search", "steps": [0, 1], "text": "<the search box's label>"},
+  {"job": "result", "flow": "search", "dur": 2.0},
+  {"job": "payoff", "flow": "library", "steps": [1], "dur": 3.0},
   {"job": "end"}]}
 ```
 

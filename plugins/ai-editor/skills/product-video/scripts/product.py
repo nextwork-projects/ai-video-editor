@@ -15,6 +15,7 @@
     python3 product.py share  DIR                                     share.txt: caption + alt text
     python3 product.py tts    DIR --text "..." [--voice ID]           audio/vo.mp3 (ElevenLabs key only)
     python3 product.py meter  VIDEO                                   smoothness: speed, jerk, judder, stops, carry across cuts
+    python3 product.py approve DIR --plan plan-linear-16x9.json       after the user chose Approve on the animatic: render needs it
     python3 product.py demo                                           self-check, no network
 
 DIR holds site.json (crawl) and story.json (the beats, written from `copy`; references/story.md).
@@ -34,6 +35,7 @@ PLUGIN = HERE.parents[2]
 STYLE = PLUGIN / "skills" / "style-edit" / "scripts"
 sys.dont_write_bytecode = True
 sys.path[:0] = [str(STYLE), str(PLUGIN / "lib")]
+import gates  # noqa: E402  (the steps a film cannot skip: brief, approval, licence, story order)
 
 SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
 FPS = 30
@@ -417,12 +419,13 @@ def rect_any(ref, site):
     return ref if isinstance(ref, list) else rect_of(ref, site)
 
 
-def build_plan(d, variant, aspect, length=30, music="generated", vo=None, sfx="subtle", own=None, story_name="story.json", tag=None, fps=FPS):
+def build_plan(d, variant, aspect, length=None, music="generated", vo=None, sfx="subtle", own=None, story_name="story.json", tag=None, fps=FPS):
     d = Path(d)
     site, story = load(d, "site.json"), load(d, story_name)
     tag = tag or tag_of(variant, aspect)
     if "beats" in story:
-        return build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, max(fps, 60))
+        return build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, max(fps, 60), length)
+    length = length or 30
     if aspect == "9:16":
         story = {**story, "shots": [v for v in (vertical_shot(s, d) for s in story["shots"]) if not v.get("skip")]}
     W, H = SIZES[aspect]
@@ -570,7 +573,7 @@ def build_plan(d, variant, aspect, length=30, music="generated", vo=None, sfx="s
     return plan
 
 
-def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, fps):
+def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_name, tag, fps, length=None):
     """The rendered film (journey.py): beats over UI states, one camera, 60 fps. The framing is checked on
     every frame from the camera path and re-planned until it holds; what still fails stops the plan."""
     import journey
@@ -579,8 +582,28 @@ def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_na
         sys.exit("\n".join(problems))
     for p in problems:
         print(p)
-    j = journey.build(d, story, aspect, fps, variant)
-    left = journey.replan(j)
+    # the length: the story's, else about 8 s a use case (40 s for five). Result, hook, payoff and travel beats
+    # are paced down until it fits; the story, the steps and the per-frame checks stay the same.
+    cases = sum(1 for b in story["beats"] if b.get("job") == "action")
+    target = gates.target_length(story, length)
+    pace, best = 1.0, None
+    while pace >= 0.45:
+        j = journey.build(d, story, aspect, fps, variant, pace)
+        left = journey.replan(j)
+        total = j["durationInFrames"] / fps
+        p95, med = journey.plan_speed(j)
+        if pace < 1.0 and (p95 > journey.SPEED_BAR[0] or med > journey.SPEED_BAR[1]):
+            break               # shorter would be busier than the reference films: smooth beats short
+        calm = p95 <= journey.SPEED_BAR[0] and med <= journey.SPEED_BAR[1]
+        if not left and (best is None or (calm and total < best[0]["durationInFrames"] / fps)):
+            best = (j, left, pace)          # the shortest that passes every frame and stays calm
+        if total <= target + 1 and not left:
+            break
+        pace = round(pace - 0.05, 2)
+    j, left, pace = best or (j, left, pace)
+    p95, med = journey.plan_speed(j)
+    print(f"length: {j['durationInFrames'] / fps:.1f} s (target {target:.0f} s for {cases} use cases, pace {pace}); "
+          f"camera speed p95 {p95:.2f}, median {med:.2f} frame diagonals/s (bar {journey.SPEED_BAR[0]}, {journey.SPEED_BAR[1]})")
     j.pop("cursor_raw", None)
     total = j["durationInFrames"] / fps
     plan = {"composition": "ProductVideo", **{k: v for k, v in j.items() if k != "cues"}, "variant": variant, "story": story_name,
@@ -650,6 +673,8 @@ def check_story(story, site, length=None, d=None):
     out = []
     items = story.get("beats") or story.get("shots", [])
     import journey
+    if "beats" in story:
+        out += gates.story_order(items)
     for i, s in enumerate(items):
         if "beats" in story:
             if s.get("job") not in journey.JOBS:
@@ -814,6 +839,8 @@ def cmd_stills(d, plan_name):
 def cmd_render(d, plan_name, draft=False, modal=False, use_lambda=False):
     import edit
     d = Path(d).resolve()
+    if gates.need_approval(d, plan_name):
+        sys.exit(f"ERROR: {gates.need_approval(d, plan_name)}")
     plan_path = d / plan_name
     plan = json.loads(plan_path.read_text())
     tag = plan_path.stem[len("plan-"):]
@@ -1102,6 +1129,7 @@ def demo():
     carried = check_story({"shots": [{"kind": "flow", "flow": "a", "from": 0, "to": 3}, {"kind": "flow", "flow": "a", "from": 3, "to": 6}]}, site)
     assert not any("just showed" in p for p in carried), carried
     wrong = check_story({"shots": [{"kind": "grid", "els": ["el-0"], "job": "action"}]}, site)
+    assert any("opens on 'end'" in p for p in check_story({"beats": [{"job": "end"}]}, site))   # gates.story_order runs here
     assert any("cannot do the action job" in p for p in wrong), wrong
     import tempfile as _t
     with _t.TemporaryDirectory() as td:
@@ -1139,7 +1167,8 @@ def main():
         out = sheet(sys.argv[2], Path(sys.argv[2]) / "sheet.png")
         return print(f"REVIEW THIS: {out}")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["crawl", "pages", "record", "music", "copy", "plan", "animatic", "stills", "render", "check", "share", "tts", "meter"])
+    ap.add_argument("cmd", choices=["crawl", "pages", "record", "music", "copy", "plan", "animatic", "stills", "approve", "render", "check", "share", "tts", "meter"])
+    ap.add_argument("--file", help="music: the user's own track inside DIR (audio/...), to record its licence")
     ap.add_argument("--url", help="music: a YouTube or other yt-dlp link")
     ap.add_argument("--start"), ap.add_argument("--end")
     ap.add_argument("--rights", choices=list(RIGHTS), help="music: the user's answer to who holds the rights")
@@ -1153,7 +1182,7 @@ def main():
     ap.add_argument("--mobile", action="store_true", help="record: the phone layout (430x932 @3x) for 9:16")
     ap.add_argument("--variant", "--style", dest="variant", choices=STYLES, default="linear")
     ap.add_argument("--aspect", choices=list(SIZES), default="16:9")
-    ap.add_argument("--length", type=float, default=30)
+    ap.add_argument("--length", type=float, help="seconds; default 30 for a shot film, about 8 a use case (40 for five) for a story of beats")
     ap.add_argument("--music", default="generated",
                     help="generated (scored here, default) | eleven (ElevenLabs Music, the user's key) | none | audio/<their track>")
     ap.add_argument("--vo", help="a voiceover inside DIR (audio/...)")
@@ -1177,6 +1206,10 @@ def main():
     if a.cmd == "copy":
         return cmd_copy(a.a)
     if a.cmd == "music":
+        if not a.rights:
+            sys.exit("ERROR: --rights is required: ask who holds the rights in the question box first")
+        if a.file:
+            return print(json.dumps(gates.record_file(a.a, a.file, a.rights, a.credit), indent=1))
         return cmd_music(a.a, a.url, a.start, a.end, a.rights, a.credit, a.yt_cookies)
     if a.cmd == "pages":
         return cmd_pages(a.a)
@@ -1184,6 +1217,10 @@ def main():
         sys.exit(subprocess.run(["node", str(HERE / "record.mjs"), a.a, *(["--cookies", a.cookies] if a.cookies else []),
                                  *(["--mobile"] if a.mobile else [])]).returncode)
     if a.cmd == "plan":
+        own_track = a.music if a.music not in ("generated", "eleven", "none") else None
+        for why in (gates.need_brief(a.a), gates.need_licence(a.a, own_track)):
+            if why:
+                sys.exit(f"ERROR: {why}")
         music, own = (a.music, None) if a.music in ("generated", "eleven", "none") else ("own", a.music)
         if music == "eleven":
             own = "audio/eleven.mp3"
@@ -1202,12 +1239,14 @@ def main():
         return
     if a.cmd == "meter":
         sys.exit(subprocess.run([sys.executable, str(HERE / "meter.py"), a.a, *([a.b] if a.b else [])]).returncode)
-    if a.cmd in ("animatic", "stills", "render", "check") and not a.plan:
+    if a.cmd in ("animatic", "stills", "approve", "render", "check") and not a.plan:
         sys.exit("--plan plan-<variant>-<aspect>.json is required")
     if a.cmd == "animatic":
         return cmd_animatic(a.a, a.plan)
     if a.cmd == "stills":
         return cmd_stills(a.a, a.plan)
+    if a.cmd == "approve":
+        return print(gates.approve(a.a, a.plan))
     if a.cmd == "render":
         return cmd_render(a.a, a.plan, a.draft, a.modal, a.use_lambda)
     if a.cmd == "check":

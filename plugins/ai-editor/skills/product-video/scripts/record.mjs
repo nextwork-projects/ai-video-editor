@@ -89,8 +89,8 @@ const CURSOR = `(() => {
 })()`;
 
 // Never pressed while recording, whatever a flow says, unless the step carries "allow": true (which the
-// skill sets only after asking the user): anything that deletes, pays, upgrades, publishes or invites.
-const DENY = /\b(delete|remove|destroy|erase|pay|purchase|buy|checkout|upgrade|subscribe|billing|cancel (plan|subscription)|publish|send invites?|invite|transfer|deactivate|close account|log ?out|sign ?out)\b/i;
+// skill sets only after asking the user): anything that creates, deletes, pays, upgrades, publishes or invites.
+const DENY = /\b(create|delete|remove|destroy|erase|pay|purchase|buy|checkout|upgrade|subscribe|billing|cancel (plan|subscription)|publish|send invites?|invite|transfer|deactivate|close account|log ?out|sign ?out)\b/i;
 
 // Personal data blurred in the page itself, before the frame is captured: email addresses, the names
 // and words the flow lists, avatars, billing panels, email fields. window.__aiBlurHits says what.
@@ -142,7 +142,9 @@ const FINDEL = (target) => `(async () => {
     const rank = (e) => (/^(A|BUTTON|INPUT|TEXTAREA|SUMMARY)$/.test(e.tagName) || e.getAttribute('role') ? 0 : 1);
     const said = (e) => (e.innerText || e.placeholder || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase();
     // the exact words first (a "Create" button before "Create a Docker Container"), then controls, then the shortest
-    all.sort((a, b) => side(a) - side(b) || (said(a) !== t) - (said(b) !== t) || rank(a) - rank(b) || (a.innerText || '').length - (b.innerText || '').length);
+    // with a dialog open, what a person clicks is in the dialog
+    const modal = (e) => (e.closest('[role=dialog], [aria-modal=true], dialog[open], [role=listbox]') ? 0 : 1);
+    all.sort((a, b) => side(a) - side(b) || modal(a) - modal(b) || (said(a) !== t) - (said(b) !== t) || rank(a) - rank(b) || (a.innerText || '').length - (b.innerText || '').length);
     el = all[0] || null;
   } else el = [...document.querySelectorAll(want)].find((e) => vis(e) && !side(e)) || [...document.querySelectorAll(want)].find((e) => vis(e) && strip(e)) || null;
   if (!el) return null;
@@ -275,7 +277,8 @@ async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
   const sdir = path.join(out, "states");
   fs.mkdirSync(sdir, { recursive: true });
   const id = flow.id + SUFFIX;
-  for (const f of fs.readdirSync(sdir)) if (f.startsWith(id + "-")) fs.rmSync(path.join(sdir, f));
+  // this take's old stills only (a desktop take never deletes the phone take's, "<id>-m-...")
+  for (const f of fs.readdirSync(sdir)) if (new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d\\d-`).test(f)) fs.rmSync(path.join(sdir, f));
   const st = { id, url: flow.url, viewport: [W, H], dsf: DSF, mobile: MOBILE, plates: [], states: [], steps: [] };
   let plate = 0, off = 0, n = 0, cur;
   const sy = () => ev("Math.round(document.scrollingElement ? document.scrollingElement.scrollTop : scrollY)");
@@ -317,6 +320,12 @@ async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
   };
   await newPlate();
   cur = await snap("start");
+  // the page's own headline (an h1, else the biggest type in view): the film's opening never crops it
+  st.headline = await ev(`(() => { const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 20 && r.height > 10 && r.top >= 0 && r.bottom <= innerHeight; };
+    let el = [...document.querySelectorAll('h1')].find(vis);
+    if (!el) el = [...document.querySelectorAll('h2, p, span, div')].filter((e) => vis(e) && e.children.length === 0 && (e.innerText || '').trim().length > 8)
+      .sort((a, b) => parseFloat(getComputedStyle(b).fontSize) - parseFloat(getComputedStyle(a).fontSize))[0];
+    if (!el) return null; const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round); })()`);
   for (const step of flow.steps) {
     if (step.wait != null) continue;
     if (step.goto) {
@@ -347,7 +356,23 @@ async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
       const to = await snap("key");
       st.steps.push({ kind: "key", label: step.key, from: cur, to, navigates: nav }); cur = to; continue;
     }
-    if (step.write) throw new Error(`flow ${flow.id}: "write" is not supported with --states; use "type" on the field`);
+    if (step.write) {
+      // typing into whatever has focus (a search box a shortcut or a button just opened): no click first
+      await ev(`(() => { const e = document.activeElement; if (!e) return false; e.setAttribute('placeholder', ''); e.style.caretColor = 'transparent';
+        const st = document.createElement('style');
+        st.textContent = ':focus::placeholder, :focus *::placeholder { color: transparent !important } :focus::before, :focus *::before, :focus::after, :focus *::after { opacity: 0 !important }';
+        document.head.appendChild(st); return true; })()`);
+      await sleep(250);
+      const empty = await snap("focused");
+      for (const ch of step.write) { await s("Input.insertText", { text: ch }); await sleep(25); }
+      await sleep((step.hold ?? 1.2) * 1000);
+      const caret = await ev(CARET(step.write));
+      const r = await ev(`(() => { const r = document.activeElement.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round); })()`);
+      const typed = await snap("typed");
+      if (caret) caret.top += off;
+      st.steps.push({ kind: "write", rect: [r[0], r[1] + off, r[2], r[3]], text: step.write, from: cur, empty, to: typed, caret });
+      cur = typed; continue;
+    }
     const t = step.click || step.move || step.hover || step.type;
     const r = await rectOf(t);
     const cx = r[0] + Math.min(r[2] / 2, 60 + r[2] * 0.2), cy = r[1] - off + r[3] / 2;
@@ -358,8 +383,10 @@ async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
       st.steps.push({ kind: "hover", rect: r, label: t, at: [cx, cy + off], from: cur, to }); cur = to; continue;
     }
     const label = await ev(`(document.elementFromPoint(${cx}, ${cy})?.closest('a, button, [role=button], input') || {}).innerText || ''`);
-    if (!step.allow && !step.type && (DENY.test(t) || DENY.test(label || ""))) throw new Error(`flow ${flow.id}: refused to press ${JSON.stringify(label || t)} (deletes, pays, publishes or invites). Ask the user; then "allow": true on the step.`);
+    if (!step.allow && !step.type && (DENY.test(t) || DENY.test(label || ""))) throw new Error(`flow ${flow.id}: refused to press ${JSON.stringify(label || t)} (creates, deletes, pays, publishes or invites). Ask the user; then "allow": true on the step.`);
     const u0 = await ev("location.pathname");
+    // a link that opens a new tab opens in this one: the flow follows the click, as the film must
+    await ev(`(() => { const a = document.elementFromPoint(${cx}, ${cy})?.closest('a[target]'); if (a) a.removeAttribute('target'); return true; })()`);
     await s("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
     await sleep(90);
     await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1 });
@@ -426,7 +453,8 @@ async function main() {
         console.error(`  blurring the logged-in account's name and handle (${me.tokens.length} words, flows/whoami.json)`);
       } else console.error("  WARN: could not read the logged-in account's name; add it to flows.json blur.text");
     }
-    for (const flow of spec.flows.filter((f) => !only || f.id === only)) {
+    // a flow may carry "mobile": {...} for the phone layout (other steps where the controls differ)
+    for (const flow of spec.flows.filter((f) => !only || f.id === only).map((f) => (MOBILE && f.mobile ? { ...f, ...f.mobile } : f))) {
       const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
       const s = (m, p) => cdp.send(m, p, sessionId);
@@ -529,8 +557,9 @@ async function main() {
         await glide(r[0] + Math.min(r[2] / 2, 60 + r[2] * 0.2), r[1] + r[3] / 2);
         if (st.move || st.hover) { mark(st.hover ? "hover" : "move", r, t); await sleep((st.hold ?? (st.hover ? 1.0 : 0.3)) * 1000); continue; }
         const label = await ev(`(document.elementFromPoint(${mx}, ${my})?.closest('a, button, [role=button], input') || {}).innerText || ''`);
-        if (!st.allow && !st.type && (DENY.test(t) || DENY.test(label || ""))) throw new Error(`flow ${flow.id}: refused to press ${JSON.stringify(label || t)} (deletes, pays, publishes or invites). Ask the user; then "allow": true on the step.`);
+        if (!st.allow && !st.type && (DENY.test(t) || DENY.test(label || ""))) throw new Error(`flow ${flow.id}: refused to press ${JSON.stringify(label || t)} (creates, deletes, pays, publishes or invites). Ask the user; then "allow": true on the step.`);
         mark(st.type ? "type" : "click", r, st.type ? st.text : t);
+        await ev(`(() => { const a = document.elementFromPoint(${mx}, ${my})?.closest('a[target]'); if (a) a.removeAttribute('target'); return true; })()`);
         await sleep(160);
         await s("Input.dispatchMouseEvent", { type: "mousePressed", x: mx, y: my, button: "left", clickCount: 1 });
         await sleep(90);
