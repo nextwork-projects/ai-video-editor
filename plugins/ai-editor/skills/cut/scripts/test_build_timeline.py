@@ -109,6 +109,45 @@ def test_stretched_label_is_not_clipped():
     assert md.split("## What plays")[1].split("## Cuts")[0].split("\n")[-3] == "so if you", md
 
 
+
+def test_hidden_repeat_is_listed_and_shown():
+    """The sample: Whisper labels "content" 117.07-119.01 s over "and to break down competitor ads and"
+    (spoken 117.7-119.4 s). A label holding far more speech than its word is listed, re-transcribed
+    when possible, and otherwise marked in transcript.txt. A long label over silence is not listed."""
+    import retakes as R
+    import transcribe as T
+    words = [{"text": "ads", "start": 116.6, "end": 117.0, "type": "word"},
+             {"text": "content", "start": 117.07, "end": 119.01, "type": "word"},
+             {"text": "strategies", "start": 119.5, "end": 120.0, "type": "word"},
+             {"text": "if", "start": 121.0, "end": 124.0, "type": "word"}]   # 3 s label, 0.1 s of audio
+    loud = [(116.6, 117.0), (117.7, 119.4), (119.5, 120.0), (123.9, 124.0)]
+    lvl = [-20.0 if any(a <= i * B.RMS_WIN_S < b for a, b in loud) else -60.0 for i in range(int(125 / B.RMS_WIN_S))]
+    assert [i for i, _ in B.unheard(words, lvl, -40.0)] == [1], B.unheard(words, lvl, -40.0)
+
+    old = B.window_rms_db, B.derive_noise_db
+    B.window_rms_db, B.derive_noise_db = (lambda src: lvl), (lambda lv: (-40.0, {}))
+    try:
+        asked = []
+        def again(s, e):
+            asked.append((s, e))
+            return [{"text": x, "start": 117.7 + n * 0.2, "end": 117.85 + n * 0.2, "type": "word"}
+                    for n, x in enumerate("and to break down competitor ads and content".split())]
+        got = [w["text"] for w in T.recheck("a.wav", T.with_spacing([dict(w) for w in words]), again)
+               if w["type"] == "word"]
+        assert asked == [(117.07, 119.01)] and got[1:9] == "and to break down competitor ads and content".split(), got
+        kept = [w for w in T.recheck("a.wav", T.with_spacing([dict(w) for w in words]), lambda s, e: [])
+                if w["type"] == "word"]
+        assert kept[1]["unheard_s"] > 1.0 and "unheard_s" not in kept[3], kept
+        view = R.text_view(kept)
+        assert "content [1.3s of speech not transcribed]" in view, view
+        assert "not transcribed" not in R.say(kept, 0, 3)    # Jev's questions and spans see the plain words
+        one = T.recheck("a.wav", T.with_spacing([dict(w) for w in words]),
+                        lambda s, e: [{"text": "content", "start": 117.7, "end": 119.4, "type": "word"}])
+        assert not any(w.get("unheard_s") for w in one), one    # heard again as one word: drawn out
+    finally:
+        B.window_rms_db, B.derive_noise_db = old
+
+
 if __name__ == "__main__":
     test_derive()
     test_audible_end()
@@ -116,4 +155,5 @@ if __name__ == "__main__":
     test_spans()
     test_frames_and_retime()
     test_stretched_label_is_not_clipped()
+    test_hidden_repeat_is_listed_and_shown()
     print("all ok")

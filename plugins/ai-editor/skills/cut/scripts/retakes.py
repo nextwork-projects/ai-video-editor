@@ -89,8 +89,11 @@ def phrases(toks):
     return out
 
 
-def say(toks, a, b):
-    return " ".join(t["text"].strip() for t in toks[a:b + 1])
+def say(toks, a, b, mark=False):
+    """The words a..b. mark: a label transcribe.py found holding more speech than its word gets
+    "[N.Ns of speech not transcribed]" after it (transcript.txt only)."""
+    return " ".join(t["text"].strip() + (f" [{t['unheard_s']:.1f}s of speech not transcribed]"
+                                         if mark and t.get("unheard_s") else "") for t in toks[a:b + 1])
 
 
 SPANS_HINT = "Quote words from here in spans.json; use \"after\": <a start time> when a phrase repeats."
@@ -103,7 +106,7 @@ def text_view(toks, name="", hint=SPANS_HINT):
     for a, b in phrases(toks):
         gap = toks[a]["start"] - prev if prev is not None else 0
         lines.append((f"(+{gap:.1f}s) " if gap >= 1.0 else "") +
-                     f"[{toks[a]['start']:.2f}-{toks[b]['end']:.2f}] {say(toks, a, b)}")
+                     f"[{toks[a]['start']:.2f}-{toks[b]['end']:.2f}] {say(toks, a, b, mark=True)}")
         prev = toks[b]["end"]
     return "\n".join(lines) + "\n"
 
@@ -186,7 +189,12 @@ def restarts(toks):
             while n + k < len(seq) and m + k < n and seq[m + k][0] == seq[n + k][0]:
                 k += 1
             content = any(w not in STOP for w, _ in seq[n:n + k])
-            if k >= (2 if n - m <= NEAR_WORDS else 3) and (content or k >= 4):
+            # "a lot of tokens and a lot of money": the first run finished its thing, then "and"
+            # starts a second item in the same shape. A list, not a retry.
+            rest = [w for w, _ in seq[m + k:n]]
+            c = max((x for x, w in enumerate(rest) if w in ("and", "or")), default=None)
+            listed = c is not None and any(w not in STOP for w in rest[:c]) and all(w in STOP for w in rest[c:])
+            if k >= (2 if n - m <= NEAR_WORDS else 3) and (content or k >= 4) and not listed:
                 best = (m, k)
                 break
         i, j = (seq[best[0]][1], seq[n][1]) if best else (None, None)
@@ -253,6 +261,21 @@ def hook_line(toks, take):
         ea, eb = bl.a + bl.size, bl.b + bl.size
     xe, ye = (x[ea - 1][1], y[eb - 1][1]) if ea else (keep, take[0])
     return keep, end_of[xe], min(end_of[ye], take[1])
+
+
+LIKE_BEFORE = {"and", "so", "but", "or", "um", "uh", "was", "were"}
+
+
+def loose_like(toks, i):
+    """Is "like" at token i set off as a hesitation? A pause or comma either side, or after
+    "and"/"so"/"was"..., or opening a clause. "models like Claude" is a comparison: never a filler."""
+    prev = toks[i - 1] if i else None
+    nxt = toks[i + 1] if i + 1 < len(toks) else None
+    if prev is None or prev["text"].strip().endswith((".", "?", "!", ",")) or toks[i]["text"].strip().endswith(","):
+        return True
+    if toks[i]["start"] - prev["end"] >= 0.3 or (nxt and nxt["start"] - toks[i]["end"] >= 0.3):
+        return True
+    return bool(set(nwords(prev["text"])) & LIKE_BEFORE)
 
 
 def find(toks):
@@ -323,7 +346,7 @@ def find(toks):
             w0 = flat[:m.start()].count(" ")
             w1 = w0 + m.group(0).count(" ")
             a, b = seq[w0][1], seq[w1][1]
-            if a >= tail:
+            if a >= tail or (kind == "filler" and m.group(0) == "like" and not loose_like(toks, a)):
                 continue
             ctx = say(toks, max(0, a - 12), min(len(toks) - 1, b + 12))
             cid = f"c{len(cands)}"
@@ -640,8 +663,12 @@ def main():
         try:
             code = propose(d, key=key, force=a.force)
         except jev.JevError as e:
-            print(f"{e}. Falling back: decide the cut yourself from transcript.txt.", file=sys.stderr)
             (d / "candidates.md").write_text(candidates_md(find(load(d))))
+            if e.rejected_key:
+                print(f"TypeSafe rejected the saved key ({e}). Save a new one with the setup skill's setkey step. "
+                      "Meanwhile decide the cut yourself from transcript.txt and candidates.md.", file=sys.stderr)
+                return 5
+            print(f"{e}. Falling back: decide the cut yourself from transcript.txt.", file=sys.stderr)
             return 4
         if code == 4:
             print(f"No TypeSafe key. Wrote {d / 'transcript.txt'} and {d / 'candidates.md'}: "

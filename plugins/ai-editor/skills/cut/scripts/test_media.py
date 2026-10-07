@@ -16,6 +16,7 @@ render.py frame counts: "span N: X frames, wanted X+1" must never happen.
 """
 import json
 import math
+import os
 import random
 import subprocess
 import sys
@@ -84,8 +85,12 @@ def test_real_renders():
                 ed = d / f"{src.stem}-{run}"
                 ed.mkdir()
                 (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": frames}))
+                # the second run renders through a temp folder with a ' in its name
+                quoted = d / "it's tmp"
+                quoted.mkdir(exist_ok=True)
+                env = dict(os.environ, **({"TMPDIR": str(quoted), "TMP": str(quoted), "TEMP": str(quoted)} if run else {}))
                 r = subprocess.run([sys.executable, HERE / "render.py", src, ed, "--no-hw"],
-                                   capture_output=True, text=True)
+                                   capture_output=True, text=True, env=env)
                 assert r.returncode == 0, (name, frames, r.stdout[-400:], r.stderr[-400:])
 
 
@@ -118,8 +123,36 @@ def test_music_bed():
         assert kept < 7 - 2.0, (kept, spans)      # the 0.7-0.85 s pauses were tightened
 
 
+
+def test_scribe_network_error_is_a_message():
+    """No network: a one-line message and exit 3, not a traceback."""
+    import contextlib
+    import io
+    import urllib.error
+    import transcribe as T
+    old = T.urllib.request.urlopen
+    def down(*a, **k):
+        raise urllib.error.URLError("nodename nor servname provided")
+    T.urllib.request.urlopen = down
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            wav = Path(d) / "a.wav"
+            wav.write_bytes(b"RIFF")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                try:
+                    T.run_scribe(wav, "k", "en")
+                    raise AssertionError("no exit")
+                except SystemExit as e:
+                    assert e.code == 3, e.code
+            assert "unreachable" in err.getvalue() and "--engine whisper" in err.getvalue(), err.getvalue()
+    finally:
+        T.urllib.request.urlopen = old
+
+
 if __name__ == "__main__":
     test_window_property()
     test_real_renders()
     test_music_bed()
+    test_scribe_network_error_is_a_message()
     print("all ok")

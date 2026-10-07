@@ -15,7 +15,7 @@ Every question to the user goes in the question box: call the AskUserQuestion to
 
 A URL in. A product video out, made only of the site's real UI, real recorded click-throughs of it, its own
 colours and type, and its own words, scored and mixed for this cut. `S="${CLAUDE_SKILL_DIR}/scripts"`,
-`PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
+`$PY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
 Work in `product/<name>/` under the folder Claude Code was started in.
 
 ```

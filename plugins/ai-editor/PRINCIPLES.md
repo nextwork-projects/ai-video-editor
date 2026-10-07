@@ -1,14 +1,15 @@
 # Principles
 
-The rules every skill in this plugin follows, for every user and every video. Each one names where
-it is enforced. Skills read this file before planning anything visual:
+The rules every skill in this plugin follows, for every user and video. Each names where it is
+enforced. Skills read this file before planning anything visual:
 `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md`. What enforces each rule and the test that proves it:
 `docs/feedback-matrix.md` at the repo root.
 
 ## Asking
 
 - Every question goes in the question box (AskUserQuestion), recommended option first, free text
-  always allowed. Pages show evidence; they never collect answers. (every SKILL.md)
+  always allowed. Pages show evidence; they never collect answers. (every SKILL.md;
+  where to render has none)
 - Ask what the video must cover before building it: a short brief first. (start, product-video)
 - Taste is asked once at setup and saved; each video asks only what belongs to that video.
   (setup, `lib/ai_editor/profile.py`)

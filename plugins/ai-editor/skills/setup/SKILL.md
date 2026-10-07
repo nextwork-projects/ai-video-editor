@@ -60,7 +60,8 @@ delete, `node "${CLAUDE_PLUGIN_ROOT}/skills/product-video/scripts/login.mjs" log
 If `python3` itself is missing:
 - Mac: `brew install python`. No Homebrew? See step 2.
 - Windows: `winget install -e --id Python.Python.3.12`, then open a new terminal.
-- Linux: `sudo apt install -y python3 python3-venv`.
+- Linux: `sudo apt install -y python3 python3-venv` (Fedora: `sudo dnf install -y python3`; Arch:
+  `sudo pacman -S --needed python`).
 
 ## 2. System tools (ffmpeg, Node, git)
 
@@ -92,7 +93,7 @@ python3 "$U" model
 ```
 
 `venv` installs faster-whisper (free transcription on this computer), numpy, pillow and yt-dlp
-into `~/.ai-video-editor/venv`, at the exact versions in `requirements/requirements.lock` (about
+into the venv in `~/.ai-video-editor` (`AI_EDITOR_HOME` moves it), at the exact versions in `requirements/requirements.lock` (about
 1 minute). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
 `Python 3.10+ needed`: go back to step 1's Python line. `Run the venv step first.`: run `venv`.
 

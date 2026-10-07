@@ -34,7 +34,7 @@ export const TR_S = 0.62; // seconds a transition takes at k = 1
 /** Where a scene's type lives, % of the frame: clear of the app's top bar and the captions under it. */
 export const sceneBox = (w: number, h: number): [number, number, number, number] => (h > w ? [6, 13, 88, 52] : [6, 9, 88, 70]);
 
-const phases = (c: SceneCard, t: number, m: Motion) => {
+export const phases = (c: SceneCard, t: number, m: Motion) => {
   const T = TR_S * m.k;
   const tin = c.transition_in ?? "match", tout = c.transition_out ?? (tin === "block" || tin === "push" ? tin : "iris");
   return { T, tin, tout, pi: prog(t - c.start, 0, T, EASE[tin]), po: prog(t, c.end - T, T, EASE[tout]) };

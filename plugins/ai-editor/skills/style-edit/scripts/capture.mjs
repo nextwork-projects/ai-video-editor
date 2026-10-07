@@ -710,7 +710,7 @@ async function main() {
   }
   const bin = findBinary(SHELLS);
   if (!bin) {
-    console.error(`ERROR: no Chrome Headless Shell under ${SHELLS}. Run edit.py stills once (it installs the renderer).`);
+    console.error(`ERROR: no Chrome Headless Shell under ${SHELLS}. Run the setup skill (setup.py remotion) once.`);
     process.exit(1);
   }
   const cdp = launch(bin);

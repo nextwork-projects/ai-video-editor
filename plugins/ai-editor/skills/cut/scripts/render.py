@@ -108,7 +108,9 @@ def main():
                 print(f"  video {n}/{len(frames)}", flush=True)
 
     lst = tmp / "list.txt"
-    lst.write_text("".join(f"file '{tmp / f'{i:05d}.mp4'}'\n" for i in range(len(frames))))
+    # concat quoting: a ' in the temp path (a user name like O'Brien) is closed, escaped, reopened
+    lst.write_text("".join("file '" + str(tmp / f"{i:05d}.mp4").replace("'", "'\\''") + "'\n"
+                           for i in range(len(frames))))
     allv = tmp / "all.mp4"
     if subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
                        "-c", "copy", str(allv)]).returncode:

@@ -20,6 +20,11 @@ Whisper (the free engine) tidies speech: it drops some fillers and sometimes a f
 and CrisperWhisper keep them all. On a Whisper transcript, a repeated opening a second apart is
 often all that is left of a false start. Read the timings as well as the words.
 
+`[N.Ns of speech not transcribed]` after a word: Whisper folded more speech into that one label than
+the word holds, usually a repeat, and transcribing the stretch again did not recover it. No span can
+quote those words. If the label sits inside a retake, cut from the word before it to the keeper's
+first word; otherwise tell the user and let verify (step 3) say whether it survived.
+
 ## What you do not decide
 
 **Pauses.** `build_timeline.py` tightens every silence over the pause target, measured from the

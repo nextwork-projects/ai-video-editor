@@ -198,6 +198,46 @@ def test_no_key_falls_back():
         assert (Path(d) / "candidates.md").exists() and not (Path(d) / "spans.json").exists()
 
 
+
+def test_rejected_key_has_its_own_exit():
+    """A 401 from TypeSafe exits 5 with a new-key message; an outage stays 4 (the no-key fallback)."""
+    import contextlib
+    import io
+    old_get, old_post = R.keys.get, R.jev._post
+    try:
+        R.keys.get = lambda name: ("ts-bad", "test")
+        for code, want, says in ((401, 5, "rejected"), (503, 4, "Falling back")):
+            def post(body, key, tries=5, code=code):
+                raise R.jev.JevError(f"TypeSafe HTTP {code}: no", code)
+            R.jev._post = post
+            with tempfile.TemporaryDirectory() as d:
+                (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")))
+                err, argv = io.StringIO(), sys.argv
+                sys.argv = ["retakes.py", "propose", d]
+                with contextlib.redirect_stderr(err):
+                    got = R.main()
+                sys.argv = argv
+                assert got == want and says in err.getvalue(), (code, got, err.getvalue())
+                assert (Path(d) / "candidates.md").exists()
+    finally:
+        R.keys.get, R.jev._post = old_get, old_post
+
+
+def test_sample_list_and_comparison_are_not_candidates():
+    """On the sample: "models like Claude" is a comparison, "a lot of tokens and a lot of money" a list."""
+    words = [("to", 134.52, 134.88), ("models", 134.88, 135.16), ("like", 135.16, 135.4), ("Claude.", 135.4, 135.74),
+             ("Jev", 135.98, 136.18), ("is", 136.18, 136.38), ("good.", 136.38, 136.62),
+             ("It's", 167.76, 168.24), ("already", 168.24, 168.48), ("saved", 168.48, 168.8), ("me", 168.8, 168.98),
+             ("a", 168.98, 169.16), ("lot", 169.16, 169.4), ("of", 169.4, 169.5), ("tokens", 169.5, 169.78),
+             ("and", 169.78, 170.12), ("a", 170.12, 170.22), ("lot", 170.22, 170.38), ("of", 170.38, 170.46),
+             ("money", 170.46, 170.64), ("and", 170.64, 170.94), ("time.", 170.94, 171.26)]
+    toks = [{"text": w, "start": s, "end": e, "type": "word"} for w, s, e in words]
+    assert not R.find(toks), [(c["kind"], c["text"]) for c in R.find(toks)]
+    # a "like" set off as a hesitation is still asked about
+    loose = R.find(take("and like the thing is simple."))
+    assert [c["kind"] for c in loose] == ["filler"], loose
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

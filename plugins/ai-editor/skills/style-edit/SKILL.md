@@ -19,7 +19,7 @@ the stills sheet (step 5) and picks where to render (step 6).
 
 Paths are relative to the folder Claude Code was started in. Run the scripts with `python3` on Mac
 and Linux, `py` on Windows. `S="${CLAUDE_SKILL_DIR}/scripts"`,
-`VPY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
+`$VPY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
 
 ```
 edits/<name>/cut.mp4 + cut.transcript.json + words.json       (the cut skill)
@@ -89,7 +89,7 @@ on screen and the rules plan.py enforces.
 2. **Real things first:** write `visuals.json` (`references/shapes.md`): a named product
    or doc becomes a `capture` (with `marks` found by text), a quoted post a `post`, an app an `app`,
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`.
-3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) when available, else write them. Only
+3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
 4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube
    and GitHub images into `images/`, hides cookie banners, measures marks. Do not open the images one
@@ -159,8 +159,8 @@ python3 "$S/edit.py" estimate edits/<name>
 ```
 
 Prints `Laptop:`, `Modal:` and two `Other:` lines (GitHub Actions, Lambda) with this video's time and
-cost. Ask **one question** for every video, exactly three options in this order, none marked
-recommended, each carrying the printed numbers:
+cost. Ask **one question** for every video, exactly three options in this order, each carrying the
+printed numbers, none marked recommended (the one exception: only the user knows their time and money).
 
 1. **Laptop**: its time, free.
 2. **Modal**: its time and cost (Modal's Starter plan includes $30 of free credit a month). If the
@@ -234,7 +234,7 @@ so). Tell the user which file to open and how: `references/render.md` "Export to
 | `check.py plan found a FAIL` (edit.py stills) | fix the FAIL in the plan, plan again |
 | `... missing (run matte.py)` | run matte.py, then stills or render again |
 | `... missing (run sfx.py build, then plan.py)` | do exactly that |
-| `no Chrome Headless Shell` (capture.mjs) | run `edit.py stills` once (it installs the renderer), then capture again |
+| `no Chrome Headless Shell` (capture.mjs) | `python3 "${CLAUDE_PLUGIN_ROOT}/skills/setup/scripts/setup.py" remotion`, then capture again |
 | capture.mjs `failed <kind> '<word>'` | drop that visual or give it another URL; the rest were saved |
 | `Modal is not set up on this computer` | the setup skill's Modal step |
 | `the GitHub CLI (gh) is missing` / `... is public` | setup's GitHub CLI section / a private repo only |

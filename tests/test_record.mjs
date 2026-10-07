@@ -50,6 +50,36 @@ console.log("deny list ok");
   console.log("snapClip ok");
 }
 
+// The captions keep the leaving scene's ink until its ground is gone from under them (ground.ts): halfway
+// through an iris out (the old switch, 0.31 s early) the paper still covers a caption at 75%, near the end it does not
+{
+  const { groundCovers } = await import(pathToFileURL(path.join(ROOT, "plugins/ai-editor/remotion/src/ground.ts")).href);
+  const at = (kind, p, ph = 0.31) => groundCovers(kind, true, p, ph, 0.62, 1080, 1920, [50, 30], 540, 0.75 * 1920);
+  assert.equal(at("iris", 0.5), true, "iris out halfway: the ground is still under the captions");
+  assert.equal(at("iris", 0.2), false, "iris nearly closed on the face: the captions are on the footage");
+  assert.equal(at("match", 0.9), true);
+  assert.equal(at("match", 0.5), false, "a match out uncovers a low caption before halfway");
+  assert.equal(at("push", 0.6), true);
+  assert.equal(at("push", 0.4), false);
+  assert.equal(at("wipe", 0.6), true);
+  assert.equal(at("block", 1, 0.2), true);
+  assert.equal(at("block", 1, 0.4), false);
+  console.log("scene ink until the ground leaves ok");
+}
+
+// login.mjs finds Chrome off its fixed paths too: PATH on Linux (snap, a distro chromium), Edge on Windows
+{
+  const { chromeBinary } = await import(pathToFileURL(path.join(SCRIPTS, "product-video/scripts/login.mjs")).href);
+  const only = (want) => (p) => p === want;
+  assert.equal(chromeBinary("linux", { PATH: "/opt/x/bin:/home/u/.local/bin" }, only("/home/u/.local/bin/chromium")), "/home/u/.local/bin/chromium");
+  assert.equal(chromeBinary("linux", { PATH: "/usr/bin" }, only("/snap/bin/chromium")), "/snap/bin/chromium");
+  const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+  assert.equal(chromeBinary("win32", { PROGRAMFILES: "C:\\Program Files", "PROGRAMFILES(X86)": "C:\\Program Files (x86)", Path: "C:\\Windows" }, only(edge)), edge);
+  assert.equal(chromeBinary("win32", { Path: "C:\\Windows;D:\\Tools\\Chrome" }, only("D:\\Tools\\Chrome\\chrome.exe")), "D:\\Tools\\Chrome\\chrome.exe");
+  assert.equal(chromeBinary("linux", { PATH: "/usr/bin" }, () => false), null);
+  console.log("chrome lookup ok");
+}
+
 // login.mjs logout deletes only <home>/browser/<one hostname>: never the home, never every saved login
 {
   const { spawnSync } = await import("node:child_process");

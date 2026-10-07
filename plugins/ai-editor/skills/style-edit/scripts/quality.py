@@ -915,10 +915,11 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     rgbs = [np.array([int(h.lstrip("#")[k:k + 2], 16) for k in (4, 2, 0)], float) for h in cols]   # BGR
     worst_cap, edge_hits = [], []
     FW, FH = plan["width"], plan["height"]
-    # under a landed scene the captions are the ground's ink, not the caption colour (StyleEdit.tsx sceneCaptions):
-    # those pages are skipped. ponytail: the scene's own ink-on-ground pair is not measured here.
+    # under a landed scene the captions are the ground's ink, not the caption colour (StyleEdit.tsx sceneCaptions),
+    # until the leaving scene's ground is gone from under them (ground.ts, at most its end): those pages are skipped.
+    # ponytail: the scene's own ink-on-ground pair is not measured here.
     k_cap = MOTION_K.get(plan.get("motion"), 1.0)
-    inked = [(c["start"] + 0.31 * k_cap, c["end"] - 0.31 * k_cap) for c in cards if c.get("layout") == "scene"]
+    inked = [(c["start"] + 0.31 * k_cap, c["end"]) for c in cards if c.get("layout") == "scene"]
     for t, chunk in caps:
         if any(a <= t < b for a, b in inked):
             continue

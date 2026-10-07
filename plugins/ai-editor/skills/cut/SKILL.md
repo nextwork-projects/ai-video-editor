@@ -24,8 +24,8 @@ edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (wha
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
 started in. Never modify, move or copy the source file. Pass its path.
 
-Python: `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
-If it is missing, run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
+`$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows), the tool venv.
+No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ## No video yet?
 
@@ -87,10 +87,10 @@ TypeSafe's Jev judges them in one request (a fraction of a cent) into `spans.jso
 - **Exit 0.** Read `review.md` only: the few items Jev was unsure of. Fix any you disagree with in `spans.json` (shape: `references/shapes.md`; rules:
   `references/retake-detection.md`), then go to step 3. Do not re-decide the items Jev was sure of; the
   read-through in step 3 catches a wrong one.
-- **Exit 4: no TypeSafe key** (or Jev unreachable). Fall back to deciding yourself: read
-  `transcript.txt` and `candidates.md` (the places code flagged), follow
-  `references/retake-detection.md`, and write `spans.json` (`references/shapes.md`). Tell the user once that a
-  TypeSafe key makes this much cheaper (the `setup` skill walks them through it).
+- **Exit 4: no TypeSafe key** (or Jev unreachable); **exit 5: the key was rejected.** Decide yourself:
+  read `transcript.txt` and `candidates.md` (the places code flagged), follow
+  `references/retake-detection.md`, and write `spans.json` (`references/shapes.md`). Tell the user once
+  that a TypeSafe key (exit 5: a new one) makes this much cheaper, via the `setup` skill.
 
 Last take wins, except alternate hooks. Never type a timestamp and never write a span for
 a pause.
@@ -165,7 +165,7 @@ cut first", stop after approval and say they can ask for the style. Never start 
 |---|---|
 | `no such file` / `ffmpeg could not read audio` | ask for the right path; never copy or convert the source |
 | `faster-whisper missing` / `CrisperWhisper missing` | run with `$PY`, or the setup skill's step 3 |
-| `no ElevenLabs key` (exit 2) / `HTTP 4xx` (exit 3) | drop `--engine scribe`, or re-save the key with the setup skill |
+| `no ElevenLabs key` (exit 2) / `HTTP 4xx`, `unreachable` (3) | drop `--engine scribe`, or re-save the key with the setup skill |
 | `spans.json exists. Pass --force` | only on a fresh decision: `propose --force` (keeps spans.prev.json) |
 | build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |
 | `cannot derive a silence threshold` / `marked no silence` | speech and background are under 10 dB apart: `ffmpeg -i <source> -af volumedetect -vn -f null -`, pass `--noise` about 10 dB above the mean |

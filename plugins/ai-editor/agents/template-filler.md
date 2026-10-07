@@ -6,10 +6,11 @@ model: haiku
 ---
 
 You write visuals.json beats for a style-edit. The caller gives you the edit folder and the beats to fill
-(each: the sentence, its pick such as `capture:sticker` or `chat`, the word it lands on).
+(each: the sentence, its pick such as `capture:sticker` or `chat`, the word it lands on) and the full
+path of style-edit's `shapes.md`.
 
-Read `edits/<name>/beats.json`, `edits/<name>/captions.json` and
-`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/shapes.md`, section "visuals.json":
+Read `edits/<name>/beats.json`, `edits/<name>/captions.json` and the `shapes.md` whose full path the
+caller gives (style-edit's `references/shapes.md`), section "visuals.json":
 the beat shape for every pick. There are no type cards (words on a ground); they were removed:
 
 | pick | writes |

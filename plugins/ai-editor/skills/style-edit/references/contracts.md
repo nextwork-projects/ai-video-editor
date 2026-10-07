@@ -29,7 +29,7 @@ The ElevenLabs key stays where creator-teardown already keeps it: `~/.config/cre
 `AI_EDITOR_HOME` set, both read and save keys in `$AI_EDITOR_HOME/.env` instead and never open the
 shared file.
 
-Python scripts run with `~/.ai-video-editor/venv/bin/python` (`Scripts\python.exe` on Windows).
+Python scripts run with `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" <script>` (`py` on Windows), the editor's venv.
 Stdlib-only scripts may run with any `python3`.
 
 ## Transcription

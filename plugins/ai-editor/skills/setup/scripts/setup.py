@@ -57,27 +57,39 @@ FFMPEG_MIN = (4, 4)    # sfx.py mixes with amix normalize=0, added in FFmpeg 4.4
 # Optional extras, pinned; installed with the lock as constraints so they never move a pinned package.
 OPTIONAL = {"modal": "modal==1.6.1", "crisperwhisper": "crisperwhisper[transformers]==2.0.3"}
 
-INSTALL = {  # tool -> (mac, windows, linux)
+NODESOURCE = "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"
+PACMAN = "sudo pacman -S --needed --noconfirm "
+INSTALL = {  # tool -> (mac, windows, {linux package manager: command})
     "python": ("brew install python", "winget install -e --id Python.Python.3.12",
-               "sudo apt install -y python3 python3-venv"),
+               {"apt": "sudo apt install -y python3 python3-venv", "dnf": "sudo dnf install -y python3",
+                "pacman": PACMAN + "python"}),
     "ffmpeg": ("brew install ffmpeg", "winget install -e --id Gyan.FFmpeg",
-               "sudo apt install -y ffmpeg"),
+               {"apt": "sudo apt install -y ffmpeg", "dnf": "sudo dnf install -y ffmpeg-free",
+                "pacman": PACMAN + "ffmpeg"}),
+    # Debian and Ubuntu ship a Node older than 20, so apt gets NodeSource's; Fedora and Arch are current.
     "node": ("brew install node", "winget install -e --id OpenJS.NodeJS.LTS",
-             "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"),
-    "git": ("xcode-select --install", "winget install -e --id Git.Git", "sudo apt install -y git"),
+             {"apt": NODESOURCE, "dnf": "sudo dnf install -y nodejs", "pacman": PACMAN + "nodejs npm"}),
+    "git": ("xcode-select --install", "winget install -e --id Git.Git",
+            {"apt": "sudo apt install -y git", "dnf": "sudo dnf install -y git", "pacman": PACMAN + "git"}),
 }
 
 
 UPGRADE = {  # installed but older than the minimum
     "ffmpeg": ("brew upgrade ffmpeg", "winget upgrade -e --id Gyan.FFmpeg",
-               "sudo apt update && sudo apt install -y ffmpeg   (Ubuntu 22.04 or newer)"),
+               {"apt": "sudo apt update && sudo apt install -y ffmpeg   (Ubuntu 22.04 or newer)",
+                "dnf": "sudo dnf upgrade -y ffmpeg-free", "pacman": "sudo pacman -Syu --noconfirm ffmpeg"}),
     "node": ("brew upgrade node", "winget upgrade -e --id OpenJS.NodeJS.LTS", INSTALL["node"][2]),
 }
 
 
-def fix(tool, table=INSTALL):
+def linux_pm(which=shutil.which):
+    """apt, dnf or pacman: the first one this Linux has (apt when none is found)."""
+    return next((pm for pm, exe in (("apt", "apt-get"), ("dnf", "dnf"), ("pacman", "pacman")) if which(exe)), "apt")
+
+
+def fix(tool, table=INSTALL, os_name=None, which=shutil.which):
     mac, win, linux = table[tool]
-    return {"Darwin": mac, "Windows": win}.get(OS, linux)
+    return {"Darwin": mac, "Windows": win}.get(os_name or OS) or linux[linux_pm(which)]
 
 
 def run(cmd, **kw):
@@ -174,6 +186,25 @@ def drift(env, have, remotion_have):
     return out
 
 
+def adopt(env, have, remotion_have):
+    """What to record in env.json for an install made before env.json existed, when it already matches
+    the pins: every unconditional pin installed, every installed pinned package at a pinned version,
+    remotion at its pin. Anything else is {} for that area, so real drift stays a FIX."""
+    from ai_editor import lock
+    out = {}
+    if have and not env.get("python_packages"):
+        want = {}
+        for b in lock.blocks(LOCK.read_text(encoding="utf-8")):
+            want.setdefault(norm(b["name"]), [set(), False])[0].add(b["version"])
+            want[norm(b["name"])][1] |= not b["marker"]      # a pin with no marker applies everywhere
+        if all((n in have and have[n] in vs) if always else (n not in have or have[n] in vs)
+               for n, (vs, always) in want.items()):
+            out.update(python_lock=file_sha(LOCK), python_packages=have)
+    if remotion_have and not env.get("node_lock") and remotion_have == npm_version("remotion"):
+        out["node_lock"] = file_sha(NPM_LOCK)
+    return out
+
+
 def remotion_installed():
     try:
         return json.loads((REMOTION_HOME / "node_modules" / "remotion" / "package.json").read_text())["version"]
@@ -209,7 +240,11 @@ def checks():
     py_self = "py" if OS == "Windows" else "python3"
     here = Path(__file__).resolve()
     remo = remotion_installed()
-    d = drift(env_load(), installed(), remo)
+    have = installed()
+    found = adopt(env_load(), have, remo)
+    if found:   # installed before env.json: record it instead of sending a working install to repair
+        env_save(**found)
+    d = drift(env_load(), have, remo)
     rows.append(("python packages", VPY.exists() and not d["python"], "; ".join(d["python"][:4]) or str(VENV),
                  f'{py_self} "{here}" ' + ("repair" if VPY.exists() else "venv")))
     rows.append(("transcription model", model_cached() and not d["model"], f"faster-whisper {MODEL}",
@@ -633,6 +668,13 @@ def demo():
     assert modal_status() in ("ready", "no token", "missing")
     assert major("v22.3.0") == 22 and major(None) == 0
     assert fix("ffmpeg").split()[0] in ("brew", "winget", "sudo")
+    # Linux: the fix uses the package manager this computer has, not apt everywhere
+    has = lambda *exes: (lambda e: e in exes)   # noqa: E731
+    assert fix("ffmpeg", os_name="Linux", which=has("apt-get")) == "sudo apt install -y ffmpeg"
+    assert fix("ffmpeg", os_name="Linux", which=has("dnf")).startswith("sudo dnf install")
+    assert fix("node", os_name="Linux", which=has("pacman")) == "sudo pacman -S --needed --noconfirm nodejs npm"
+    assert fix("ffmpeg", UPGRADE, os_name="Linux", which=has("dnf")).startswith("sudo dnf upgrade")
+    assert fix("python", os_name="Darwin", which=has("dnf")) == "brew install python"
     # Free disk: FIX under 3 GB, with the reason
     assert disk_row(5e9) == (True, "5.0 GB free")
     ok, why = disk_row(2.9e9)
@@ -693,6 +735,15 @@ def demo():
     assert drift(good, {"numpy": "2.5.3"}, remo)["python"] == ["yt-dlp missing, pinned 2026.8.19"]
     assert drift({**good, "python_lock": "old"}, have, remo)["python"][0].startswith("requirements.lock changed")
     assert drift({}, have, None)["python"] == ["installed before version pins"]
+    # ...but an install that matches the lock is recorded, not sent to repair; a drifted one is not
+    from ai_editor import lock
+    exact = {norm(b["name"]): b["version"] for b in lock.blocks(LOCK.read_text(encoding="utf-8")) if not b["marker"]}
+    found = adopt({}, exact, remo)
+    assert found["python_packages"] == exact and found["node_lock"] == file_sha(NPM_LOCK), found
+    assert drift(found, exact, remo) == {"python": [], "renderer": [], "model": []}
+    assert adopt({}, {**exact, "yt-dlp": "2020.1.1"}, "4.0.1") == {}
+    assert "python_packages" not in adopt({}, {k: v for k, v in exact.items() if k != "yt-dlp"}, None)
+    assert adopt(good, exact, remo) == {}                    # already recorded: nothing to adopt
     assert drift(good, {}, None) == {"python": [], "renderer": [], "model": []}   # nothing installed: no drift
     assert drift({**good, "node_lock": "old"}, have, remo)["renderer"]
     assert drift(good, have, "4.0.1")["renderer"] == [f"remotion 4.0.1, pinned {remo}"]

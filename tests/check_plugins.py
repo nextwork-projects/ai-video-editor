@@ -104,6 +104,9 @@ def check_agent(path):
             errors.append(f"{path}: no {key}")
     if fm.get("name") != path.stem:
         errors.append(f"{path}: name {fm.get('name')!r} must match the file name")
+    # An agent prompt is not a skill: ${CLAUDE_PLUGIN_ROOT} and ${CLAUDE_SKILL_DIR} may reach it unexpanded.
+    if "${CLAUDE_" in path.read_text(encoding="utf-8"):
+        errors.append(f"{path}: uses a ${{CLAUDE_...}} path, which may not expand in an agent; have the caller pass the path")
 
 
 def load(path):
@@ -209,6 +212,17 @@ def main():
             if hashlib.sha256(w.encode()).hexdigest()[:16] in PRIVATE:
                 errors.append(f"{p}: contains a private name; keep public files generic")
                 break
+
+    # Skills run scripts through run.py, which finds the venv under AI_EDITOR_HOME; a hardcoded home
+    # path ignores it, and %USERPROFILE% does not expand in Git Bash.
+    for p in [*ROOT.glob("plugins/*/skills/*/SKILL.md"), *ROOT.glob("plugins/*/skills/*/references/*.md"),
+              *ROOT.glob("plugins/*/agents/*.md")]:
+        if re.search(r"~/\.ai-video-editor/venv|%USERPROFILE%", p.read_text(encoding="utf-8")):
+            errors.append(f"{p}: hardcodes the venv path; run scripts with lib/ai_editor/run.py")
+    run_a = ROOT / "plugins/ai-editor/lib/ai_editor/run.py"
+    run_b = ROOT / "plugins/creator-teardown/skills/creator-teardown/scripts/run.py"
+    if run_a.read_bytes() != run_b.read_bytes():
+        errors.append(f"{run_b}: differs from {run_a}; copy it across")
 
     for name, budget in READ_BUDGET.items():
         files = required_reads(ROOT / "plugins/ai-editor/skills" / name / "SKILL.md")

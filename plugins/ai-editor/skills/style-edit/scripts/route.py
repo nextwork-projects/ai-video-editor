@@ -75,9 +75,14 @@ def key():
 
 
 def ask_jev(qs, edit_dir, canned=None):
+    """Jev's answers, or {} when TypeSafe fails (a rejected key, an outage): picks stay null, as with no key."""
     from ai_editor import jev
-    return jev.ask("A short talking-head video. Each question is one sentence of it.", qs,
-                   key=key(), log_dir=edit_dir, canned=canned)
+    try:
+        return jev.ask("A short talking-head video. Each question is one sentence of it.", qs,
+                       key=key(), log_dir=edit_dir, canned=canned)
+    except jev.JevError as e:
+        print(f"{e}: picks left null, Claude routes from beats.json", file=sys.stderr)
+        return {}
 
 
 def prefer(style):
@@ -132,9 +137,9 @@ def pick_highlight(blocks, said, edit_dir=None, canned=None):
     from ai_editor import jev
     opts = {f"line{i}": b for i, b in enumerate(ranked)}
     ans = ask_jev({"h": jev.choice("Which line of the page is the evidence for what the speaker says in `said`?",
-                                   opts, said=said)}, edit_dir, canned)["h"]
+                                   opts, said=said)}, edit_dir, canned).get("h") or {}
     probs = ans.get("probabilities") or {}
-    best = ans.get("choice") or max(probs, key=probs.get)
+    best = ans.get("choice") or (max(probs, key=probs.get) if probs else None)
     return opts.get(best)
 
 
@@ -164,6 +169,19 @@ def demo():
     hl = pick_highlight(["Pricing starts at $5.", "Jev answers in 40 ms, 200x faster than a frontier model."],
                         "it's 40 to 200 times faster", canned={"h": {"type": "choice", "probabilities": {"line0": 0.9}}})
     assert hl.startswith("Jev answers"), hl   # ranked by shared words first, so line0 is the Jev line
+    # a failed request (rejected key, outage) leaves every pick null instead of a traceback
+    from ai_editor import jev
+    old = jev._post
+    try:
+        def post(body, key, tries=5):
+            raise jev.JevError("TypeSafe HTTP 401: bad key", 401)
+        jev._post = post
+        globals()["key"], real_key = (lambda: "ts-bad"), key
+        r = route([dict(b) for b in bs], goal="")
+        assert [b["pick"] for b in r] == [None, None, None], r
+        assert pick_highlight(["Jev answers in 40 ms, 200x faster."], "40 times faster") is None
+    finally:
+        jev._post, globals()["key"] = old, real_key
     print("route ok")
 
 

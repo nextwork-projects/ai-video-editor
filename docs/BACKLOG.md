@@ -17,36 +17,14 @@ Sources:
 
 ## Now
 
+1. **Skills fan out to subagents where work is independent** (faster, smaller main context): per-video teardown analysis, per-flow product captures/recordings, per-capture style-edit captures, per-candidate clip scoring, per-hook variant renders. Each worker is a plugin agent (haiku where the job is mechanical) returning a short JSON summary. Test: an eval or a dry run that shows the skill launching the workers in one message, and wall time measured before/after on the sample.
+
 (empty: the next item comes from Next)
 
 ## Next
 
-Cut:
-- Whisper can fold a whole spoken repeat into one stretched label: on the sample, "and to break down
-  competitor ads and" (117.7-119.4 s) sits inside "content" (117.07-119.01 s), so no span can quote it and
-  only verify sees it ("SURVIVED"). Fitting the label (build_timeline) does not recover the words. Test: a
-  label fitted over more audio than its word holds is listed for a re-transcription of that stretch.
-- `candidates.md` flags "like" in "models like Claude" as a filler and "a lot of tokens and" vs "a lot
-  of money and time" as a retake. Test: neither is a candidate on the sample.
-- A rejected TypeSafe key (401) returns exit 4 like "no key", so the model reads the full transcript
-  and tells the user a key would help (`retakes.py:631-634`). Give it its own exit and message.
-- `transcribe.py run_scribe` catches only HTTPError; a network error is a traceback.
-
 Skill wording:
-- `PY`/`VPY` in cut, style-edit, clips, product-video and creator-teardown are hardcoded to
-  `~/.ai-video-editor/venv` (ignores `AI_EDITOR_HOME`) and to `%USERPROFILE%\...` on Windows, which
-  Git Bash does not expand. Add `setup.py python` that prints the right interpreter; use it everywhere.
-- style-edit step 6 says "none marked recommended", against PRINCIPLES.md and every other question.
-  Say it is the one exception, or recommend Laptop.
-- "No Chrome Headless Shell" advice (style-edit table, `capture.mjs:658`) says run `edit.py stills`,
-  which needs a plan that does not exist yet at step 3. Point at `setup.py remotion`.
-- `route.py:110` does not catch `JevError`; a bad key or TypeSafe outage is a traceback with no row
-  in the table. Fall back to null picks like cut does.
-- creator-teardown quick mode says "about a minute per creator"; `look.py` alone is about 40 s a
-  video on 7 videos. State the real time, and list the exact commands quick mode runs (it conflicts
-  with "always run" in step 3).
 - cut step 0 says ask "even if they said 'edit my video like @creator'", which routes to start.
-- `agents/template-filler.md` uses `${CLAUDE_PLUGIN_ROOT}`, which may not expand in an agent prompt.
 - cut and clips use `python3` with no "`py` on Windows" line.
 - product-video brief: 11 questions over three calls; ask call 1, default the rest in one confirm.
 - `edit.py:43` copies the renderer with `dirs_exist_ok`, so deleted components stay in the user's copy.
@@ -56,17 +34,9 @@ Privacy and safety:
 - `setkey` from the clipboard sends any token-shaped text to the vendor; check the prefix first.
 
 Windows and Linux:
-- `login.mjs:22-27` finds Chrome only at fixed paths: no PATH lookup, no Edge on Windows, no snap or
-  flatpak Chromium. `check()` then spawns null with no message.
-- setup and creator-teardown Linux fixes are apt-only; the Node line pipes a remote script to
-  `sudo bash`.
-- `render.py:111` concat list breaks on a `'` in the temp path.
+- The apt Node fix line pipes NodeSource's remote script to `sudo bash` (Debian and Ubuntu ship a Node
+  older than 20). Flatpak Chromium is not found (no plain binary).
 - clips on Windows copies a multi-GB source instead of linking.
-
-Setup:
-- `setup.py doctor` says FIX "installed before version pins" for a working install with no
-  `env.json` and sends the user to `repair` (a full reinstall). Write `env.json` from what is
-  installed when it already matches the lock.
 
 Carried over (still untested live):
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download

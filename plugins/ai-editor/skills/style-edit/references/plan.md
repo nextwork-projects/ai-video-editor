@@ -67,7 +67,7 @@ the speaker, and a card above the head grows down behind the hair while its mark
 clear of the head. Overlay layout only. Then cut the speaker out where those cards are up:
 
 ```bash
-~/.ai-video-editor/venv/bin/python "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
+$VPY "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 ```
 
 It writes `edits/<name>/cutout/<range>/` (RGBA PNGs, about 0.5 MB a frame) and the plan's
@@ -107,7 +107,7 @@ lay the bed under the voice (a file of their own: copy it into the edit folder a
 `--track`):
 
 ```bash
-~/.ai-video-editor/venv/bin/python "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
+$VPY "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
 ```
 
 `.sfx/music.wav`: the track, or a bed generated for this cut's length (product-video sound.py,

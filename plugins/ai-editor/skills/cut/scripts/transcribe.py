@@ -69,8 +69,8 @@ def run_whisper(wav, lang):
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        sys.exit("ERROR: faster-whisper missing. Run this with ~/.ai-video-editor/venv/bin/python "
-                 "(the setup skill installs it).")
+        sys.exit("ERROR: faster-whisper missing. Run this with python3 <plugin>/lib/ai_editor/run.py, which uses "
+                 "the editor's venv (the setup skill installs it).")
     name = os.environ.get("AI_EDITOR_WHISPER_MODEL", "small")
     print(f"whisper model {name} (cpu, int8)", flush=True)
     # The pinned model (setup.py model); a size with no pin downloads from the Hub as before.
@@ -85,14 +85,42 @@ def run_whisper(wav, lang):
                                initial_prompt=FILLER_PROMPT, beam_size=5,
                                condition_on_previous_text=False, vad_filter=True,
                                vad_parameters={"min_silence_duration_ms": 500})
-    words = []
-    for s in segs:
-        for w in s.words or []:
-            t = w.word.strip()
-            if t:
-                words.append({"text": t, "start": round(w.start, 3), "end": round(w.end, 3),
-                              "type": "word"})
-    return with_spacing(words)
+
+    def words_of(segs):
+        return [{"text": w.word.strip(), "start": round(w.start, 3), "end": round(w.end, 3), "type": "word"}
+                for s in segs for w in (s.words or []) if w.word.strip()]
+
+    def again(start, end):
+        """The words in one stretch, transcribed on their own (no VAD: the stretch is speech)."""
+        segs, _ = model.transcribe(str(wav), language=lang, word_timestamps=True, initial_prompt=FILLER_PROMPT,
+                                   beam_size=5, condition_on_previous_text=False, clip_timestamps=[start, end])
+        return [w for w in words_of(segs) if w["start"] >= start - 0.05 and w["end"] <= end + 0.05]
+
+    return recheck(wav, with_spacing(words_of(segs)), again)
+
+
+def recheck(wav, words, again=None):
+    """A label holding far more speech than its word (build_timeline.unheard) is transcribed again on
+    its own; the new words replace it when there are more of them, one word means a drawn-out word.
+    With no words back (or no re-transcription, CrisperWhisper) the label keeps "unheard_s" (the voiced seconds), which transcript.txt shows so the cut can see the gap."""
+    import build_timeline as B
+    lvl = B.window_rms_db(wav)
+    noise, _ = B.derive_noise_db(lvl)
+    toks = [w for w in words if w["type"] != "spacing"]
+    found = B.unheard(toks, lvl, noise) if noise is not None else []
+    if not found:
+        return words
+    for i, voiced in reversed(found):
+        w = toks[i]
+        got = again(w["start"], w["end"]) if again else []
+        if len(got) > 1:
+            print(f"re-heard   {w['text']!r} {w['start']:.2f}-{w['end']:.2f}s: {' '.join(g['text'] for g in got)!r}")
+            toks[i:i + 1] = got
+        elif not got:   # one word heard again: a drawn-out word, nothing hidden
+            w["unheard_s"] = voiced
+            print(f"unheard    {w['text']!r} {w['start']:.2f}-{w['end']:.2f}s holds {voiced:.1f}s of speech; "
+                  "transcript.txt marks it")
+    return with_spacing(toks)
 
 
 def has_crisper():
@@ -120,7 +148,7 @@ def run_crisper(wav, lang):
         filler = inner.lower() in ("um", "uh", "umm", "uhh", "hmm", "mm", "er", "erm", "ah")
         words.append({"text": inner if tag and filler else t, "start": round(w.start, 3),
                       "end": round(w.end, 3), "type": "audio_event" if tag and not filler else "word"})
-    return with_spacing(words)
+    return recheck(wav, with_spacing(words))
 
 
 def run_scribe(wav, key, lang):
@@ -143,6 +171,10 @@ def run_scribe(wav, key, lang):
             payload = json.loads(r.read())
     except urllib.error.HTTPError as e:
         print(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}", file=sys.stderr)
+        sys.exit(3)
+    except (urllib.error.URLError, OSError) as e:   # no network, DNS, a timeout
+        print(f"ElevenLabs unreachable ({getattr(e, 'reason', e)}). Check the connection and run again, "
+              "or use --engine whisper (free, on this computer).", file=sys.stderr)
         sys.exit(3)
     return [{"text": w["text"], "start": w["start"], "end": w["end"], "type": w["type"]}
             for w in payload.get("words", []) if w.get("type") in ("word", "spacing", "audio_event")]

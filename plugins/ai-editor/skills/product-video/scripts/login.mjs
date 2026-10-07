@@ -19,14 +19,24 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const HOME = process.env.AI_EDITOR_HOME || path.join(os.homedir(), ".ai-video-editor");
-const CHROMES = {
-  darwin: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"],
-  linux: ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"],
-  win32: [path.join(process.env.PROGRAMFILES || "C:\\Program Files", "Google\\Chrome\\Application\\chrome.exe"),
-    path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe")],
-}[process.platform] || [];
-
-export const chromeBinary = () => CHROMES.find((p) => p && fs.existsSync(p)) || null;
+// Chrome, or a Chromium build (Edge on Windows): the usual install paths, then the names on PATH (snap's
+// /snap/bin/chromium, a distro's chromium, a portable install). Flatpak has no plain binary: install another.
+export const chromeCandidates = (platform = process.platform, env = process.env) => {
+  const win = platform === "win32", pf = env.PROGRAMFILES || "C:\\Program Files", pf86 = env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+  const fixed = {
+    darwin: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+    linux: ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"],
+    win32: [path.win32.join(pf, "Google\\Chrome\\Application\\chrome.exe"), path.win32.join(pf86, "Google\\Chrome\\Application\\chrome.exe"),
+      env.LOCALAPPDATA && path.win32.join(env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe"),
+      path.win32.join(pf86, "Microsoft\\Edge\\Application\\msedge.exe"), path.win32.join(pf, "Microsoft\\Edge\\Application\\msedge.exe")],
+  }[platform] || [];
+  const names = win ? ["chrome.exe", "msedge.exe"] : ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"];
+  const dirs = (env.PATH || env.Path || "").split(win ? ";" : ":").filter(Boolean);
+  return [...fixed.filter(Boolean), ...dirs.flatMap((d) => names.map((n) => (win ? path.win32 : path.posix).join(d, n)))];
+};
+export const chromeBinary = (platform, env, exists = fs.existsSync) => chromeCandidates(platform, env).find((p) => exists(p)) || null;
+const NO_CHROME = "ERROR: no Google Chrome, Chromium or Edge found (install paths and PATH). Install Chrome, or Chrome for Testing (npx @puppeteer/browsers install chrome@stable).";
 // A hostname and nothing else: dot-separated labels of letters, digits and inner hyphens. "..", "/", "", "a/b",
 // an absolute path or a drive letter is null, so no input can name a folder outside <home>/browser/.
 const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
@@ -56,6 +66,7 @@ const LOGGED_OUT = `(() => /(^|\\/)(login|log-in|signin|sign-in|auth|sso)(\\/|$|
 
 async function check(url) {
   const bin = chromeBinary();
+  if (!bin) return { ok: false, why: NO_CHROME };
   if (!hasProfile(url)) return { ok: false, why: `no profile for ${domainOf(url) || url}: run login first` };
   const dir = profileFor(url);
   // headless, on the same profile, over the DevTools pipe
@@ -80,7 +91,7 @@ async function check(url) {
 
 async function login(url, checkUrl) {
   const bin = chromeBinary();
-  if (!bin) { console.error("ERROR: no Google Chrome found. Install it, or Chrome for Testing (npx @puppeteer/browsers install chrome@stable)."); process.exit(1); }
+  if (!bin) { console.error(NO_CHROME); process.exit(1); }
   let dir;
   try { dir = profileFor(url); } catch (e) { console.error(`ERROR: ${e.message}`); process.exit(2); }
   fs.mkdirSync(dir, { recursive: true });

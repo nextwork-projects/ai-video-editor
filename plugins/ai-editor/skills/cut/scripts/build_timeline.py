@@ -265,6 +265,22 @@ def fit_labels(toks, lvl, noise_db):
     return out
 
 
+def unheard(toks, lvl, noise_db):
+    """[(index, voiced_s)]: implausibly long labels holding more voiced audio than their word can.
+    Whisper can fold a whole spoken repeat into one label (the sample's "content" over "and to break
+    down competitor ads and"); fitting the label cannot bring those words back, so transcribe.py
+    re-transcribes the stretch, and transcript.txt marks what is still missing."""
+    out = []
+    for i, w in enumerate(toks):
+        if w.get("type") != "word" or not implausible(w):
+            continue
+        voiced = sum(v > noise_db for v in lvl[int(w["start"] / RMS_WIN_S):int(w["end"] / RMS_WIN_S)]) * RMS_WIN_S
+        est = plausible_s(w["text"])
+        if voiced > max(2 * est, est + 0.5):   # the sample's "content": 1.3 s voiced, 0.56 s word
+            out.append((i, round(voiced, 2)))
+    return out
+
+
 def apply_labels(toks, labels):
     """toks with fitted labels as copies; the raw list is never changed."""
     return [dict(t, start=labels[i][0], end=labels[i][1]) if i in labels else t for i, t in enumerate(toks)]

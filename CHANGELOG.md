@@ -4,6 +4,63 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Skills ran the venv as `~/.ai-video-editor/venv/bin/python` (ignoring `AI_EDITOR_HOME`) or
+  `%USERPROFILE%\...\python.exe` (which Git Bash does not expand). Every skill now runs scripts with
+  `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" <script>` (`py` on Windows; creator-teardown ships the
+  same `run.py` in its scripts), which finds the venv under `AI_EDITOR_HOME` and falls back to the running Python
+  with a note before setup. creator-teardown's own venv fix line prints the real folder, quoted. Test:
+  `check_plugins.py` FAILs a SKILL.md, reference or agent that hardcodes `~/.ai-video-editor/venv` or
+  `%USERPROFILE%`, and the two `run.py` copies differing; `run.py demo`.
+- style-edit's where-to-render question marked no option recommended, against PRINCIPLES.md "Asking". Both now
+  say it is the one exception (only the user knows their time and money).
+- "No Chrome Headless Shell" (style-edit table, `capture.mjs`) said run `edit.py stills`, which needs a plan
+  that does not exist at step 3. Both now point at `setup.py remotion`, which installs it.
+- `route.py` crashed with a traceback on a rejected key or a TypeSafe outage. Picks are left null with the
+  error printed, as with no key, and a highlight falls back to the printed blocks. Test: `route.py demo` (a 401
+  leaves every pick null and no highlight).
+- creator-teardown quick mode said "about a minute per creator". It now lists exactly what it runs (Step 1
+  `list`, Step 2 with `--top 5`, Step 3b, Step 3c; no `metrics.py` or written passes, which settles the clash
+  with Step 3's "always run") and the measured time: about 15 minutes for 7 videos.
+- `agents/template-filler.md` read `${CLAUDE_PLUGIN_ROOT}/...`, which may reach an agent unexpanded. The caller
+  (style-edit step 3) now passes the full path of `shapes.md`. Test: `check_plugins.py` FAILs an agent that uses
+  `${CLAUDE_...}`.
+- A rejected TypeSafe key (401/403) exited 4 like "no key", so the cut told the user a key would help. It now
+  exits 5 with "TypeSafe rejected the saved key ... save a new one"; an outage stays 4. Test: `test_retakes.py`
+  (401 exits 5, 503 exits 4, both write candidates.md).
+- `candidates.md` flagged "like" in "models like Claude" as a filler and "a lot of tokens and" before "a lot of
+  money and time" as a retake. "like" is a filler candidate only when set off (a pause or comma, after
+  "and"/"so"/"was", or opening a clause); a repeat whose first run finished its item and ends in "and"/"or" is a
+  list. On the sample: both gone, every other candidate unchanged. Test: `test_retakes.py` (the sample's words).
+- A network error during Scribe transcription ended in a traceback. It now prints "ElevenLabs unreachable ...
+  or use --engine whisper" and exits 3. Test: `test_media.py` (a URLError exits 3 with the message).
+- Whisper could fold a spoken repeat into one stretched label, so no span could quote it and only verify saw it.
+  `transcribe.py` now lists every label holding far more voiced audio than its word (`build_timeline.unheard`:
+  more than twice a speech-rate length and that length plus 0.5 s), transcribes that stretch again on its own and splices in the
+  words when it hears more than one; when it hears none (or on CrisperWhisper), the word keeps `unheard_s` and
+  transcript.txt shows `[N.Ns of speech not transcribed]` after it (`retake-detection.md` says what to do). On
+  the sample: "AI" over 51.18-52.66 s came back as the hidden restart "I'm up. Jeff is just new a -". Test:
+  `test_build_timeline.py` (the sample's "content" over 117.7-119.4 s is listed and re-heard; a long label over
+  silence is not; nothing re-heard is marked; one word back is a drawn-out word).
+- `login.mjs` found Chrome only at fixed paths, and `check()` then spawned nothing with no message. It now also
+  looks on PATH (snap and distro Chromium, a portable install), at Chromium and Edge on a Mac, and at Edge on
+  Windows, and says what is missing. Test: `tests/test_record.mjs` (PATH on Linux, snap, Edge and PATH on Windows).
+- Linux fix lines were apt-only. setup and creator-teardown now print the dnf (Fedora) or pacman (Arch) line
+  when that is the package manager on the computer. Test: `setup.py demo`, `fetch.py demo`.
+- The cut render's concat list broke on a `'` in the temp path (a user name like O'Brien). It is quoted the way
+  ffmpeg reads it. Test: `test_media.py` (a render through a temp folder named `it's tmp`).
+- System yt-dlp preferred over the pinned venv copy: already fixed (`links.ytdlp`, `fetch.ytdlp` take the venv's
+  first).
+- `setup.py doctor` said FIX "installed before version pins" on a working install with no `env.json` and sent
+  the user to `repair`, a full reinstall. When what is installed matches the lock (every unconditional pin
+  present, every installed pinned package at a pinned version; remotion at its pin), doctor records it in
+  `env.json` instead; real drift is still a FIX. Test: `setup.py demo` (a lock-exact install is recorded and
+  shows no drift; a wrong yt-dlp or a missing one is not recorded).
+- Captions went back to white about 0.3 s before a leaving scene's paper was gone (the ink ended halfway
+  through the exit). The ink now holds until the scene's ground is gone from under the captions, per exit
+  (iris, match, push, wipe, block, fade; `remotion/src/ground.ts`); a scene held under the next keeps it to its
+  end. quality.py skips inked pages up to the scene's end. Test: `tests/test_record.mjs` (halfway through an
+  iris out the ground still covers a caption at 75%; nearly closed it does not).
+
 - Caption pages wrapped to two lines and mixed sizes inside one page (the sample's "down competitor ads",
   "for one substitute"): the stressed word was drawn 1.15x bigger and a page could wrap to two lines. Now a
   page is one line at one size (`max_lines` defaults to 1, fitted at the stressed weight with room for the

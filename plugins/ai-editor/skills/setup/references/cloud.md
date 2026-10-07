@@ -27,9 +27,8 @@ Then, one step at a time, checking each:
    ```
 
    Check: it prints `Modal installed.` On `Run the venv step first.`, run SKILL.md step 3 first.
-3. **Log in this computer.** Run the command it printed (Mac and Linux:
-   `~/.ai-video-editor/venv/bin/modal token new`, Windows:
-   `%USERPROFILE%\.ai-video-editor\venv\Scripts\modal.exe token new`) in the background. It opens
+3. **Log in this computer.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" -m modal token new`
+   (`py` for `python3` on Windows) in the background. It opens
    the browser: they approve the new token on the Modal page. If no browser opens, give them the
    link it printed. Check: it says the token was verified and saved.
 4. **Prove it works.**

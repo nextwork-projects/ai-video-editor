@@ -31,7 +31,13 @@ RETRY = (429, 500, 502, 503, 529)
 
 
 class JevError(RuntimeError):
-    pass
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code   # the HTTP status, when TypeSafe answered
+
+    @property
+    def rejected_key(self):
+        return self.code in (401, 403)
 
 
 def noul(question, true=None, false=None, **data):
@@ -65,7 +71,7 @@ def _post(body, key, tries=5):
                 wait = e.headers.get("retry-after")
                 time.sleep(float(wait) if wait and wait.replace(".", "").isdigit() else 2 ** attempt)
                 continue
-            raise JevError(f"TypeSafe HTTP {e.code}: {msg}")
+            raise JevError(f"TypeSafe HTTP {e.code}: {msg}", e.code)
         except (urllib.error.URLError, OSError) as e:
             if attempt < tries - 1:
                 time.sleep(2 ** attempt)
