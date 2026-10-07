@@ -14,7 +14,7 @@ import { prog } from "../motion";
 import { clamp01, Fams, Logo, ProductPlan, Words, wordsBox } from "./kit";
 
 type Layer = { plate: number; src: string; x: number; y: number; w: number; h: number; t: number; kind: string; dur: number;
-  rect?: number[]; weak?: number[] | null; caret?: { left: number; top: number; lh: number; pos: [number, number][]; color: string; size: number };
+  rect?: number[]; weak?: number[] | null; crop?: number[]; caret?: { left: number; top: number; lh: number; pos: [number, number][]; color: string; size: number };
   cps?: number; n?: number };
 export type JourneyPlan = ProductPlan & {
   journey: true; tone: "dark" | "light"; dsf: number;
@@ -37,9 +37,11 @@ const at = <T extends number[]>(arr: T[], f: number): number[] => {
   return arr[i].map((v, k) => v + (arr[j][k] - v) * u);
 };
 const crop = (L: Layer, r: number[]): React.CSSProperties => ({ position: "absolute", left: r[0], top: r[1], width: r[2], height: r[3], overflow: "hidden" });
-const Pic: React.FC<{ L: Layer; r?: number[]; style?: React.CSSProperties }> = ({ L, r, style }) => (
-  <Img src={staticFile(L.src)} style={{ position: "absolute", left: r ? L.x - r[0] : 0, top: r ? L.y - r[1] : 0, width: L.w, height: L.h, maxWidth: "none", ...style }} />
-);
+// a state may be cut down to what the camera shows of it (journey.crop_layers): crop is the canvas rect its picture covers
+const Pic: React.FC<{ L: Layer; r?: number[]; style?: React.CSSProperties }> = ({ L, r, style }) => {
+  const C = L.crop ?? [L.x, L.y, L.w, L.h];
+  return <Img src={staticFile(L.src)} style={{ position: "absolute", left: C[0] - (r ? r[0] : L.x), top: C[1] - (r ? r[1] : L.y), width: C[2], height: C[3], maxWidth: "none", ...style }} />;
+};
 
 const LayerView: React.FC<{ L: Layer; t: number; dark: boolean }> = ({ L, t, dark }) => {
   const p = L.dur > 0 ? settle(clamp01((t - L.t) / L.dur)) : 1;
@@ -150,7 +152,9 @@ export const Journey: React.FC<{ plan: JourneyPlan; fams: Fams }> = ({ plan, fam
   const a = at(plan.cam, frame), b = at(plan.cam, Math.min(plan.cam.length - 1, frame + 1));
   const speed = Math.hypot((b[0] - a[0]) * (W / a[2]), (b[1] - a[1]) * (W / a[2])) + Math.abs(Math.log(b[2] / a[2])) * W;
   const blur = speed > 7;
-  const out = prog(t, plan.end - 0.15, 0.7, "power2.inOut");
+  // the fade to the logo ends at full speed (sine.in out, a straight ramp in): an ease-out tail moves the picture
+  // by under one 8-bit level a frame, which rounds to a repeated frame between two changed ones (a judder)
+  const out = prog(t, plan.end - 0.15, 0.7, "sine.in");
   const word = plan.words.find((w) => t >= w.start && t < w.end);
   const ink = dark ? "#F4F2EF" : undefined;
   const sg = dark ? "#0B0A0A" : plan.brand.ground;
@@ -172,7 +176,7 @@ export const Journey: React.FC<{ plan: JourneyPlan; fams: Fams }> = ({ plan, fam
           </> : null}
         </AbsoluteFill>
       ) : null}
-      {t >= plan.end ? <AbsoluteFill style={{ background: plan.brand.ground, opacity: prog(t, plan.end, 0.5, "power2.out") }}>
+      {t >= plan.end ? <AbsoluteFill style={{ background: plan.brand.ground, opacity: prog(t, plan.end, 0.55, "none") }}>
         {/* the logo's own entrance starts as the canvas leaves, so no frame holds still between them */}
         <Logo plan={plan} t={t - plan.end + 0.2} fams={fams} W={W} H={H} />
       </AbsoluteFill> : null}

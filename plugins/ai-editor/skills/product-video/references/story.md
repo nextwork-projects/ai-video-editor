@@ -72,7 +72,14 @@ continuity, not a repeat). `plan` refuses a shot whose kind cannot do its job.
 `plan` computes every frame from the camera path and FAILs (after re-planning the camera, up to six
 widenings) when: the held focus leaves the safe frame (4.5% margin), the words sit over the focus, the
 cursor is partly cut by the frame (it is shown whole or hidden, faded in place), or a capture is shown past
-1:1 (3x captures, a third of the frame wide at most). `check` repeats it on the rendered frames: the focus
+1:1 (each state's own picture: desktop and phone states are taken at 3x, so the camera may push to 3
+frame px per page px; a frame past a state's own resolution FAILs). Sparse pages (a dark site's big
+headline on empty ground) are framed on what is there: every framing whose estimated product fill
+(edge cells of the states on screen, the same measure `check` uses) is under 50% is re-framed tighter
+and slid toward the busy part, its focus kept whole and above the words (`journey.fill_guard`). A flow
+whose first action is far down its page starts there, level with the last page, so the camera never
+falls thousands of px down a page in a second. After the plan, each state is cut to what the camera
+shows of it (`journey.crop_layers`), so a tall 3x still is never decoded whole. `check` repeats it on the rendered frames: the focus
 found by template match where the plan put it, the product filling the frame by detected content (edges,
 not colour: an empty dark panel is empty), and no logged-in name readable (OCR).
 

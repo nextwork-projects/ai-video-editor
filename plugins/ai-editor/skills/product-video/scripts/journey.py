@@ -278,6 +278,21 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
         if b.get("flow") and b["flow"] not in flows:
             flows[b["flow"]] = load_flow(d, b["flow"], vertical)
             order.append(b["flow"])
+    # a flow whose first beat begins far down its page (the hand's target was scrolled into view from the top)
+    # starts there: the page's top is not part of the story, and the camera would otherwise fall thousands of
+    # px down it in a second
+    for fid, f in flows.items():
+        b0 = next((b for b in beats if b.get("flow") == fid), None)
+        if not b0 or b0["job"] in ("hook", "reveal") or not b0.get("steps"):
+            continue
+        si = f["real"][b0["steps"][0]]
+        autos = []
+        for ai in range(si - 1, -1, -1):
+            if not f["steps"][ai].get("auto"):
+                break
+            autos.append(f["steps"][ai])
+        if autos and autos[-1]["from"] == 0 and sum(abs(a.get("dy", 0)) for a in autos) > 0.8 * f["viewport"][1]:
+            f["_start"] = autos[0]["to"]
     dsf = min(f["dsf"] for f in flows.values())
     vw = next(iter(flows.values()))["viewport"][0]
     wmin = W / dsf                       # never upscale a capture past 1.0 (3x captures: a third of the frame)
@@ -306,6 +321,8 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
             # a phone page is framed with a sliver of ground each side: the gap keeps the next page out of it
             x = plates[-1]["x"] + plates[-1]["w"] * (1 + (0.3 if vertical else GAP)) if plates else 0
             y = plates[-1]["endy"] if plates else 0
+            if pi == 0 and f.get("_start"):
+                y -= f["states"][f["_start"]]["y"]       # level with where the flow starts, not with its page's top
             plates.append({"x": x, "y": y, "w": f["viewport"][0], "h": hgt, "endy": y})
             where[(fid, pi)] = len(plates) - 1
         for pi in range(len(f["plates"])):
@@ -372,9 +389,9 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
         # the flow's first state, the first time it is shown
         if fid not in shown:
             shown.add(fid)
-            p, r = at(fid, 0)
+            p, r = at(fid, f.get("_start", 0))
             fresh = not any(L["plate"] == plates.index(p) for L in layers)
-            layer(fid, 0, t, "base" if not layers else ("plate-in" if fresh else "fade"), 0.0 if not layers else 0.6)
+            layer(fid, f.get("_start", 0), t, "base" if not layers else ("plate-in" if fresh else "fade"), 0.0 if not layers else 0.6)
             if layers[-1]["kind"] == "plate-in":
                 cues.append({"t": round(t, 3), "kind": "whoosh"})
                 t += 1.0          # the camera's travel to a new page takes its time (never paced down: smooth first)
@@ -410,6 +427,8 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
                 if not f["steps"][ai].get("auto"):
                     break
                 a = f["steps"][ai]
+                if a["to"] == f.get("_start"):
+                    break                 # the flow already starts here
                 layer(fid, a["to"], t, "fade", 0.35)
                 t += 0.4
             kind = s["kind"]
@@ -579,9 +598,13 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
     total = t
     who = d / "flows" / "whoami.json"
     toks = [x.lower() for x in json.loads(who.read_text()).get("tokens", []) if len(x) >= 4] if who.exists() else []
+    from PIL import Image
     for L in layers:
         L["src"] = redact(d, L["src"], toks)
+        with Image.open(d / L["src"]) as im:
+            L["res"] = round(im.size[0] / L["w"], 3)      # picture px per page px: the most it can be magnified
     n = int(round(total * fps))
+    fill_guard(d, keys, layers, plates, W, H, wmin)
     cam, hold_focus = camera(keys, n, fps, W, H, wmin)
     cursor = cursor_path(cursor_moves, presses, n, fps, vertical, out_beats)
     raw_cursor = [list(c) for c in cursor]
@@ -720,6 +743,91 @@ def cursor_path(moves, presses, n, fps, touch, beats):
 
 # ---------------------------------------------------------------- the framing guarantee
 
+FILL_AIM = 0.5     # a held framing whose estimated product fill is under this is re-framed tighter (check FAILs under 0.35)
+BLOCK = 24         # page px a fill cell covers (content_fill's 24 px blocks at about 1 frame px per page px)
+
+
+def fill_cells(d, layers, pi, plate, t, cache):
+    """The plate as it looks at time t, as cells of BLOCK page px: 1 where there is UI detail (edges), 0 on flat
+    ground of any colour, grown by a cell, the same way content_fill reads a rendered frame. Returns its integral."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    shown = [L for L in layers if L["plate"] == pi and L["t"] <= t and L["kind"] in ("base", "fade", "plate-in", "type", "sweep", "pop", "modal")]
+    key = (pi, tuple(L["src"] for L in shown))
+    if key in cache:
+        return cache[key]
+    gw, gh = int(math.ceil(plate["w"] / BLOCK)), int(math.ceil(plate["h"] / BLOCK))
+    cells = np.zeros((gh, gw), np.float32)
+    for L in shown:
+        with Image.open(Path(d) / L["src"]) as im:
+            g = np.asarray(im.convert("L").resize((max(1, int(L["w"] / 2)), max(1, int(L["h"] / 2))), Image.BILINEAR))
+        e = cv2.Canny(g, 30, 90) > 0
+        bs = BLOCK // 2
+        hh, ww = (e.shape[0] // bs) * bs, (e.shape[1] // bs) * bs
+        blk = (e[:hh, :ww].reshape(hh // bs, bs, ww // bs, bs).mean(axis=(1, 3)) > 0.015).astype(np.float32)
+        x0, y0 = int(round((L["x"] - plate["x"]) / BLOCK)), int(round((L["y"] - plate["y"]) / BLOCK))
+        bh, bw = min(blk.shape[0], gh - y0), min(blk.shape[1], gw - x0)
+        if bh > 0 and bw > 0 and x0 >= 0 and y0 >= 0:
+            cells[y0:y0 + bh, x0:x0 + bw] = blk[:bh, :bw]    # a later full state replaces what was there
+    cells = (cv2.dilate(cells, np.ones((3, 3), np.uint8)) > 0).astype(np.float64)
+    ii = np.pad(cells.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    cache[key] = ii
+    return ii
+
+
+def fill_of(ii, plate, cam, W, H):
+    """Estimated share of the frame that is UI detail for camera (cx, cy, w); off the plate counts as empty."""
+    cx, cy, w = cam
+    h = w * H / W
+    gh, gw = ii.shape[0] - 1, ii.shape[1] - 1
+    x0, x1 = (cx - w / 2 - plate["x"]) / BLOCK, (cx + w / 2 - plate["x"]) / BLOCK
+    y0, y1 = (cy - h / 2 - plate["y"]) / BLOCK, (cy + h / 2 - plate["y"]) / BLOCK
+    a, b = int(max(0, min(gw, round(x0)))), int(max(0, min(gw, round(x1))))
+    c, e = int(max(0, min(gh, round(y0)))), int(max(0, min(gh, round(y1))))
+    if b <= a or e <= c:
+        return 0.0
+    return float(ii[e, b] - ii[c, b] - ii[e, a] + ii[c, a]) / max(1.0, (x1 - x0) * (y1 - y0))
+
+
+def fill_guard(d, keys, layers, plates, W, H, wmin):
+    """Sparse pages (a dark site's big headline on empty ground): every framing whose estimated product fill is
+    under FILL_AIM is re-framed on the detected content, tighter (never past 1:1 on the capture) and slid toward
+    the busy part, keeping its focus whole inside the safe frame and above the words. Records "fill" on each key."""
+    import numpy as np
+    cache = {}
+    for k in keys:
+        cx, cy, w = k["cam"]
+        F = k["focus"]
+        pi = next((i for i, p in enumerate(plates) if p["x"] <= F[0] + F[2] / 2 <= p["x"] + p["w"] and p["y"] <= F[1] + F[3] / 2 <= p["y"] + p["h"]), None)
+        if pi is None:
+            continue
+        plate = plates[pi]
+        ii = fill_cells(d, layers, pi, plate, k["t"], cache)
+        f0 = fill_of(ii, plate, k["cam"], W, H)
+        k["fill"] = round(f0, 2)
+        if f0 >= FILL_AIM:
+            continue
+        best, score0 = None, f0
+        lo = max(wmin * 1.02, F[2] * 1.12, F[3] * 1.12 * W / H / (0.55 if k.get("words") else 0.88))
+        for w2 in np.geomspace(w, max(lo, w * 0.45), 9) if lo < w else [w]:
+            h2 = w2 * H / W
+            m = SAFE * min(W, H) * w2 / W * 1.4
+            band = 0.55 if k.get("words") else 1.0       # the focus sits in the top part when words are on
+            xs = (F[0] + F[2] + m - w2 / 2, F[0] - m + w2 / 2)
+            ys = (F[1] + F[3] + m + h2 / 2 - h2 * band, F[1] - m + h2 / 2)
+            if xs[0] > xs[1] or ys[0] > ys[1]:
+                continue
+            for x in np.linspace(*xs, 9):
+                for y in np.linspace(*ys, 9):
+                    f = fill_of(ii, plate, (x, y, w2), W, H)
+                    sc = f - 0.08 * abs(math.log(w2 / w)) - 0.05 * math.hypot(x - cx, y - cy) / w
+                    if sc > score0 + 0.06:
+                        best, score0 = ((float(x), float(y), float(w2)), f), sc
+        if best:
+            k["cam"], k["fill"] = [round(float(v), 2) for v in best[0]], round(float(best[1]), 2)
+
+
 def framing(plan, words_box=None):
     """Every frame, from the plan's own camera: the held focus inside the safe frame, never under the words,
     the cursor wholly in frame or not shown, no capture shown bigger than it was taken. [(t, problem, key i)]"""
@@ -729,6 +837,7 @@ def framing(plan, words_box=None):
     out = []
     S = min(W, H) / 1080 * 1.25
     words = plan.get("words", [])
+    layers = plan.get("canvas", {}).get("layers", [])
     wb = words_box or words_rect(W, H)
     for i, (cx, cy, w) in enumerate(plan["cam"]):
         t = i / fps
@@ -736,8 +845,11 @@ def framing(plan, words_box=None):
             break          # the canvas is fading into the logo card
         k = W / w
         tf = lambda x, y: ((x - cx) * k + W / 2, (y - cy) * k + H / 2)
-        if k > plan.get("dsf", 3) * 1.02:
-            out.append((t, f"zoomed past the capture ({k:.2f} frame px per page px, the capture has {plan.get('dsf', 3)})", None))
+        # no picture shown bigger than it was taken: frame px per page px against each visible state's own px
+        lim = min((L.get("res", plan.get("dsf", 3)) for L in layers if L["t"] <= t and L["x"] < cx + w / 2 and L["x"] + L["w"] > cx - w / 2
+                   and L["y"] < cy + w * H / W / 2 and L["y"] + L["h"] > cy - w * H / W / 2), default=plan.get("dsf", 3))
+        if k > lim * 1.02:
+            out.append((t, f"a capture shown past 1:1 ({k:.2f} frame px per page px, the picture has {lim:.2f})", None))
         # the key being held at t (after its arrival, before the next move starts)
         j = max((n for n, kk in enumerate(keys) if kk["t"] <= t), default=None)
         if j is not None and (j + 1 >= len(keys) or t < keys[j + 1]["t"] - keys[j + 1].get("D", 1.5) - 2 * SMOOTH_S):
@@ -796,6 +908,47 @@ def replan(plan, rounds=6):
             plan["cursor"] = [list(c) for c in plan["cursor_raw"]]
             gate_cursor(plan["cursor"], plan["cam"], W, H, fps, plan.get("touch"))
     return framing(plan)
+
+
+def crop_layers(d, plan, margin=120):
+    """Each state cut down to what the camera ever shows of it from its first frame on (plus a margin, for the
+    motion blur's look-ahead), so a 3x capture of a tall page is never decoded whole. Writes the cut picture
+    beside the state once; the layer keeps its page geometry and gains "crop", the canvas rect the picture
+    covers (Journey.tsx Pic). Returns (pixels before, pixels after)."""
+    import numpy as np
+    from PIL import Image
+    d = Path(d)
+    W, H, fps = plan["width"], plan["height"], plan["fps"]
+    cam = np.array(plan["cam"])
+    end = min(len(cam), int((plan.get("end", 1e9) + 0.6) * fps) + 1)
+    before = after = 0
+    layers = plan["canvas"]["layers"]
+    for i, L in enumerate(layers):
+        # shown until a later whole-page state on the same plate has finished arriving over it (Journey.tsx Canvas)
+        gone = min([M["t"] + M["dur"] for M in layers[i + 1:] if M["plate"] == L["plate"] and M["kind"] in ("base", "fade", "plate-in")
+                    and M["x"] <= L["x"] and M["y"] <= L["y"] and M["x"] + M["w"] >= L["x"] + L["w"] and M["y"] + M["h"] >= L["y"] + L["h"]],
+                   default=1e9)
+        c = cam[max(0, int(L["t"] * fps) - 1):min(end, int(gone * fps) + 2)]
+        if not len(c):
+            continue
+        hw, hh = c[:, 2] / 2 + margin, c[:, 2] * H / W / 2 + margin
+        x0, y0 = max(L["x"], float((c[:, 0] - hw).min())), max(L["y"], float((c[:, 1] - hh).min()))
+        x1, y1 = min(L["x"] + L["w"], float((c[:, 0] + hw).max())), min(L["y"] + L["h"], float((c[:, 1] + hh).max()))
+        with Image.open(d / L["src"]) as im:
+            sc = im.size[0] / L["w"]
+            before += im.size[0] * im.size[1]
+            if x1 <= x0 or y1 <= y0 or (x1 - x0) * (y1 - y0) > 0.85 * L["w"] * L["h"]:
+                after += im.size[0] * im.size[1]
+                continue
+            box = [int((x0 - L["x"]) * sc), int((y0 - L["y"]) * sc), int(math.ceil((x1 - L["x"]) * sc)), int(math.ceil((y1 - L["y"]) * sc))]
+            box = [max(0, box[0]), max(0, box[1]), min(im.size[0], box[2]), min(im.size[1], box[3])]
+            out = str(Path(L["src"]).with_suffix("")) + f".crop-{box[0]}-{box[1]}-{box[2]}-{box[3]}.jpg"
+            if not (d / out).exists():
+                im.convert("RGB").crop(box).save(d / out, quality=92)
+        after += (box[2] - box[0]) * (box[3] - box[1])
+        L["src"] = out
+        L["crop"] = [round(L["x"] + box[0] / sc, 2), round(L["y"] + box[1] / sc, 2), round((box[2] - box[0]) / sc, 2), round((box[3] - box[1]) / sc, 2)]
+    return before, after
 
 
 def plan_speed(plan):
@@ -915,8 +1068,9 @@ def check_render(d, plan, video):
         if t1 - k["t"] < 0.6 or t >= end:
             continue
         F = k["focus"]
-        L = next((L for L in reversed(layers) if L["t"] + L["dur"] <= t and L["x"] <= F[0] and L["y"] <= F[1]
-                  and L["x"] + L["w"] >= F[0] + F[2] and L["y"] + L["h"] >= F[1] + F[3]), None)
+        box_of = lambda L: L.get("crop") or [L["x"], L["y"], L["w"], L["h"]]
+        L = next((L for L in reversed(layers) if L["t"] + L["dur"] <= t and box_of(L)[0] <= F[0] and box_of(L)[1] <= F[1]
+                  and box_of(L)[0] + box_of(L)[2] >= F[0] + F[2] and box_of(L)[1] + box_of(L)[3] >= F[1] + F[3]), None)
         if not L or F[2] < 20 or F[3] < 12:
             continue
         fi = min(len(plan["cam"]) - 1, round(t * fps))
@@ -924,8 +1078,9 @@ def check_render(d, plan, video):
         kk = W / cw / 2                          # half-size frames
         from PIL import Image
         with Image.open(d / L["src"]) as im:
-            sc = im.size[0] / L["w"]
-            box = [(F[0] - L["x"]) * sc, (F[1] - L["y"]) * sc, (F[0] - L["x"] + F[2]) * sc, (F[1] - L["y"] + F[3]) * sc]
+            C = box_of(L)
+            sc = im.size[0] / C[2]
+            box = [(F[0] - C[0]) * sc, (F[1] - C[1]) * sc, (F[0] - C[0] + F[2]) * sc, (F[1] - C[1] + F[3]) * sc]
             tw, th = max(8, int(F[2] * kk)), max(8, int(F[3] * kk))
             tpl = np.asarray(im.convert("L").crop([int(v) for v in box]).resize((tw, th), Image.LANCZOS))
         fr = cv2.cvtColor(np.ascontiguousarray(frames[min(len(frames) - 1, int(round(t * 2)))]), cv2.COLOR_BGR2GRAY)
@@ -995,6 +1150,19 @@ def demo():
     assert any("cursor is cut" in m for _, m, _ in framing(plan))
     gate_cursor(plan["cursor"], plan["cam"], 1920, 1080, 60, False)
     assert not any("cursor" in m for _, m, _ in framing(plan)), framing(plan)[:3]
+    # no picture past 1:1: a state taken at 2x fails a frame that shows it at 2.5 frame px per page px
+    plan2 = {**plan, "keys": [], "words": [], "cursor": [[0, 0, 0, 0, 0]], "cam": [[720, 450, 1920 / 2.5]],
+             "canvas": {"layers": [{"t": 0, "x": 0, "y": 0, "w": 1440, "h": 900, "res": 2.0}]}}
+    assert any("past 1:1" in m for _, m, _ in framing(plan2))
+    plan2["canvas"]["layers"][0]["res"] = 3.0
+    assert not framing(plan2)
+    # the fill estimate: busy cells count, empty ones do not; a sparse framing is re-framed onto the busy part
+    import numpy as np
+    cells = np.zeros((40, 60))
+    cells[25:38, 35:58] = 1                                  # the product sits low right on a 1440 x 960 plate
+    ii = np.pad(cells.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    pl = {"x": 0, "y": 0, "w": 1440, "h": 960}
+    assert fill_of(ii, pl, [720, 480, 1440], 1920, 1080) < 0.3 and fill_of(ii, pl, [1110, 760, 520], 1920, 1080) > 0.9
     # the frame filled by product: an empty ground (any colour) counts as none of it, UI detail as all of it
     busy = (np.random.default_rng(0).random((540, 960, 3)) * 255).astype(np.uint8)
     assert content_fill(np.full((540, 960, 3), 40, np.uint8)) == 0 and content_fill(busy) > 0.9

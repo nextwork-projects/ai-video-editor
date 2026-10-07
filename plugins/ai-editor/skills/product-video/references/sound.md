@@ -47,6 +47,16 @@ envelope), band energy and transients, spectrograms read by eye.
 | plucks | 8ths from bar 3 | 8ths | 16ths, glassy | 8ths, major | 16ths |
 | ending | pulse stops, resolved chord rings out | button: stops dead | rings | rings | button |
 
+- **The score follows the cut** (2026-10-07). Each story beat is a section: the hook and reveal get the
+  pads alone, the actions and results the groove (sub pulse, bass line, brushed ticks under 3.5 kHz,
+  plucks), the payoff the fullest (brighter pads, a busier bass), the end the resolved chord. The chord
+  changes where a beat starts (snapped to the nearest beat) and every 2 bars inside a long one; the pads
+  are voice-led (each voice moves to the nearest note of the next chord); the bass plays the root on
+  the change, the fifth and octave in the bar and steps into the next chord's root; the pads dip 18%
+  after each sub and recover (they breathe with the pulse); a riser (air climbing in band, two tones
+  gliding up an octave) lands on the payoff with a sub; the last chord before the logo is the
+  progression's approach chord, and the end rings the tonic in major with a 9th over a low tonic and
+  one soft bell. Hi-hats only in the apple and raycast moods.
 - **Cuts land on the beat.** `product.py plan` snaps every shot end to the score's beat grid (the
   user's own track: its detected beats), and the pads lift slightly for half a second after each cut.
 - **Sound effects only where the UI acts**: a soft click on every recorded click and key press, a tick
@@ -68,6 +78,18 @@ envelope), band energy and transients, spectrograms read by eye.
 | nextwork v2 apple 16:9 | -14.1 LUFS | 1.9 LU | -1.6 dBTP |
 | typesafe linear 16:9 | -14.0 LUFS | 3.3 LU | -1.6 dBTP |
 
-Each effect's loudest 50 ms against the music's level around it (linear bed): click -4.8 dB, typing tick
--22.8 dB (felt more than heard, as in Linear's films), whoosh -15.1 dB, swell -5.8 dB, the logo hit
-+8.7 dB (the bed has stopped pulsing by then).
+Each effect's loudest 50 ms against the music's level around it (linear bed, 2026-10-06): click -4.8 dB,
+typing tick -22.8 dB, whoosh -15.1 dB, swell -5.8 dB, the logo hit +8.7 dB (the bed has stopped
+pulsing by then). The typing tick read too quiet on a laptop: raised 6 dB on 2026-10-07 (gain 0.22 to
+0.44), about -16.8 dB under the bed.
+
+## The score against Linear's trailer (2026-10-07, `sound.tonal`, energy share by band)
+
+| | under 90 Hz | 90-300 Hz | 300-3000 Hz | over 3 kHz |
+|---|---|---|---|---|
+| Linear, Releases trailer (music only) | 33% | 32% | 35% | 0.1% |
+| the score before (pads, sub, plucks) | 16% | 38% | 46% | 0% |
+| the score now (adds bass line, brushes, riser, sections) | 29% | 19% | 52% | 0% |
+
+Measured the same way (power spectrum of the whole mix), the trailer's centroid is 271 Hz, not the
+750-810 Hz above (that figure was magnitude-weighted per frame); the score's is 387 Hz.

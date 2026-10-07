@@ -4,6 +4,24 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Product films, v6 (backlog item 9). Sparse dark sites: the plan estimates how much of each framing
+  is product (edge cells of the states on screen, the measure `check` uses) and re-frames any under
+  50% tighter onto the busy part, its focus kept whole and above the words (`journey.fill_guard`); a
+  flow whose first action is far down its page starts there instead of the camera falling thousands
+  of px down it. linear.app, re-crawled and run end to end with the beats flow, passes the fill check
+  (0 FAIL; the old shot film filled 12-44%). Resolution: states were already 3x on desktop and phone;
+  every layer now records its picture's own px per page px and the per-frame framing FAILs any frame
+  that shows a state past it (`journey.py demo` covers it); after the plan each state is cut to what
+  the camera shows of it (`journey.crop_layers`, Journey.tsx draws the crop). The score follows the
+  cut: a section per story beat (pads on the hook, the groove on actions and results, the fullest on
+  the payoff), the chord changing where a beat starts, voice-led pads, a bass line that steps into
+  each change, brushed ticks under 3.5 kHz, pads breathing with the sub, a riser into the payoff and
+  the tonic ringing over a low tonic and a bell on the logo; typing ticks 6 dB louder (`sound.py demo`
+  checks the hook has no pulse, the groove arrives with the first action, the tone sits in Linear's
+  trailer's bands, and voice leading). The fade to the logo no longer repeats a frame: the ground
+  fades in on a straight ramp and the canvas out on sine.in, so no ease-out tail rounds to a held
+  frame (meter: judder 0).
+
 - Pinned everywhere. The matting image on Modal (`matte.py --modal`) installed numpy, opencv and
   onnxruntime unpinned; it now installs requirements.lock's lines for them and what they pull in,
   hash-checked (`--no-deps --require-hashes`), built by the new `lib/ai_editor/lock.py`

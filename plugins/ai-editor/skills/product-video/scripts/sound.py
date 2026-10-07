@@ -242,83 +242,227 @@ def sfx_hit(root=55.0, seed=0):
 
 # ---------------------------------------------------------------- the score
 
-def compose(mood, length, end_at=None, cuts=(), seed=0):
-    """A bed for `length` s: pads on the mood's progression, the sub pulse, plucks, the ending at end_at.
-    Returns (stereo array, beat times)."""
+def voice(chord, prev, lo=-3, hi=19):
+    """The chord's notes placed so each voice moves as little as it can from the last chord (voice leading),
+    kept within an octave and a bit, between lo and hi semitones over the pad's root."""
+    import itertools
+    opts = [[x + 12 * k for k in range(-2, 3) if lo <= x + 12 * k <= hi] for x in chord]
+    best = None
+    for combo in itertools.product(*opts):
+        s = sorted(combo)
+        if len(set(s)) < len(s) or s[-1] - s[0] > 15:
+            continue
+        cost = sum(abs(a - b) for a, b in zip(s, prev)) if prev else abs(sum(s) / len(s) - 7)
+        if best is None or cost < best[0]:
+            best = (cost, s)
+    return best[1] if best else sorted(chord)
+
+
+def bass_note(freq, dur, bright=1.0):
+    """A round synth bass: sine with a little 2nd and 3rd harmonic, quick attack, settling to a sustain."""
+    n = max(1, int(dur * SR))
+    t = t_axis(n)
+    x = np.sin(2 * math.pi * freq * t) + 0.22 * bright * np.sin(2 * math.pi * 2 * freq * t) \
+        + 0.07 * bright * np.sin(2 * math.pi * 3 * freq * t) * np.exp(-t * 6)
+    return x * np.clip(t / 0.008, 0, 1) * (0.6 + 0.4 * np.exp(-t / 0.2)) * np.clip((dur - t) / 0.05, 0, 1)
+
+
+_BRUSH = {}
+
+
+def brush(k):
+    """A soft brushed tick, 700-3500 Hz (no hi-hat air: Linear's films have nothing over 4 kHz)."""
+    k %= 6
+    if k not in _BRUSH:
+        n = int(0.12 * SR)
+        _BRUSH[k] = spectral(noise(n, 300 + k), band(700, 3500))[:n] * env_ad(n, 0.003, 0.03 + 0.004 * k)
+    return _BRUSH[k]
+
+
+def riser(dur, root, seed=0):
+    """Into the payoff: air whose band climbs, and two soft tones gliding up an octave, peaking at the end."""
+    n = int(dur * SR)
+    t = t_axis(n)
+    p = t / dur
+    lo = lambda tt: 160 + 1600 * (tt / dur) ** 2
+    air = spectral(noise(n, 900 + seed), lambda f, tt: band(lo(tt), lo(tt) * 2.2)(f, tt))[:n] * p ** 2.2
+    tone = sum(np.sin(2 * math.pi * np.cumsum(root * m * 2 ** p) / SR) for m in (4, 6)) * 0.1 * p ** 2.5
+    x = air * 0.8 + tone
+    k = int(0.03 * SR)
+    x[-k:] *= np.linspace(1, 0, k)
+    return x
+
+
+# what each story job asks of the music: 0 pads and air, 1 the groove (sub, bass line, brushes, plucks), 2 the
+# fullest (brighter pads, a busier bass), -1 the ending
+INTENSITY = {"hook": 0, "reveal": 0, "transition": 0, "action": 1, "result": 1, "comparison": 1, "feature-list": 1, "payoff": 2, "end": -1}
+
+
+def sections_of(sections, end_at):
+    """[(start, intensity)] from the story's beats [(start s, job)], or a default arc when there are none."""
+    if sections:
+        out = [(float(t), INTENSITY.get(j, 1)) for t, j in sorted(sections) if t < end_at - 0.2 and INTENSITY.get(j, 1) >= 0]
+        return out or [(0.0, 1)]
+    return [(0.0, 0), (min(4.4, end_at * 0.15), 1), (end_at * 0.75, 2)]
+
+
+def compose(mood, length, end_at=None, cuts=(), seed=0, sections=None):
+    """A score for `length` s that follows the cut: a section per story beat (pads alone on the hook, the groove
+    on the actions and results, the fullest on the payoff), the chord changing where the picture does (snapped
+    to the beat), voice-led pads, a bass line that walks into each change, a riser into the payoff, and the
+    ending at end_at (the pulse stops and the tonic rings, or a button). Returns (stereo array, beat times)."""
     m = MOODS[mood]
     beat = 60 / m["bpm"]
     bar = 4 * beat
     end_at = length if end_at is None else end_at
     n = int((length + 0.05) * SR)
-    pads = np.zeros((2, n))
-    rhythm = np.zeros((2, n))
+    pads, bass, rhythm, fxb = (np.zeros((2, n)) for _ in range(4))
     chords = m["chords"]
+    secs = sections_of(sections, end_at)
+    snap_b = lambda x: round(x / beat) * beat
+    # ---- the harmony: a change at every section (snapped to the beat), and every `bars_per_chord` bars inside one
     cpb = m["bars_per_chord"] * bar
-    n_chords = math.ceil(end_at / cpb)
-    for k in range(n_chords):
-        c0 = k * cpb
-        chord = chords[k % len(chords)]
-        prog = min(1, c0 / max(1, end_at))
-        cutoff = m["cutoff"][0] + (m["cutoff"][1] - m["cutoff"][0]) * prog
-        dur = min(cpb, end_at - c0) + 0.9
-        for j, st in enumerate(chord):
-            f = m["root"] * 4 * 2 ** (st / 12)     # pads two octaves up from the root: 250-700 Hz, where Linear's sit
-            x = pad_note(f, dur, cutoff, seed + k * 7 + j)
-            e = np.minimum(1, t_axis(len(x)) / 0.7) * np.minimum(1, (dur - t_axis(len(x))) / 0.9)
-            place(pads, x * e * 0.2, c0, pan=(j - 1.5) * 0.35)
-        # the low root under it, a sustained sine
-        place(pads, np.sin(2 * math.pi * m["root"] * 2 ** (chord[0] / 12) / 2 * t_axis(int(dur * SR)))
-              * np.minimum(1, t_axis(int(dur * SR)) / 0.4) * np.minimum(1, (dur - t_axis(int(dur * SR))) / 0.9) * 0.05, c0)
+    marks = sorted({0.0} | {snap_b(t) for t, _ in secs if beat < snap_b(t) < end_at - beat})
+    changes = []
+    for i, a in enumerate(marks):
+        b = marks[i + 1] if i + 1 < len(marks) else end_at
+        x = a
+        while x < b - 1e-6:
+            changes.append(x)
+            x = x + cpb if b - (x + cpb) >= bar * 0.99 else b
+    segs = []
+    prev = None
+    for i, a in enumerate(changes):
+        b = changes[i + 1] if i + 1 < len(changes) else end_at
+        last = i == len(changes) - 1 and len(changes) > 2
+        ch = chords[-1] if last else chords[i % (len(chords) - 1 if len(changes) > 2 else len(chords))]
+        prev = voice(ch, prev)
+        lvl = next((s for t, s in reversed(secs) if t <= a + 1e-6), secs[0][1])
+        segs.append({"t0": a, "t1": b, "chord": ch, "voicing": prev, "lvl": lvl})
+    level_at = lambda t: next((s for t0, s in reversed(secs) if t0 <= t + 1e-6), secs[0][1])
+    pad_root = m["root"] * 4
+    for k, sg in enumerate(segs):
+        dur = sg["t1"] - sg["t0"] + 0.9
+        prog = min(1, sg["t0"] / max(1, end_at))
+        cutoff = (m["cutoff"][0] + (m["cutoff"][1] - m["cutoff"][0]) * prog) * (1.25 if sg["lvl"] == 2 else 1.0)
+        gain = {0: 0.17, 1: 0.19, 2: 0.22}[max(0, sg["lvl"])]
+        for j, st in enumerate(sg["voicing"]):
+            x = pad_note(pad_root * 2 ** (st / 12), dur, cutoff, seed + k * 7 + j)
+            e = np.minimum(1, t_axis(len(x)) / 0.5) * np.minimum(1, (dur - t_axis(len(x))) / 0.9)
+            place(pads, x * e * gain, sg["t0"], pan=(j - 1.5) * 0.35)
+    # ---- the bass line: the root on the change, the fifth and octave in the bar, a step into the next chord
+    groot = m["root"] if m["root"] < 80 else m["root"] / 2
+    for k, sg in enumerate(segs):
+        r = sg["chord"][0] % 12
+        r = r - 12 if r > 6 else r
+        nxt = segs[k + 1]["chord"][0] % 12 if k + 1 < len(segs) else 0
+        nxt = nxt - 12 if nxt > 6 else nxt
+        b = sg["t0"]
+        while b < sg["t1"] - 1e-6:
+            lvl = level_at(b)
+            in_bar = round((b % bar) / beat) % 4
+            last_bar = b + bar >= sg["t1"] - 1e-6
+            if lvl <= 0:
+                notes = [(0, r, 4)] if in_bar == 0 or b == sg["t0"] else []
+            elif lvl == 1:
+                notes = [(0, r, 1.5), (1.5, r, 0.5), (2, r + 7, 1.5)] + ([(3.5, nxt + (1 if nxt < r else -1), 0.5)] if last_bar else [(3.5, r + 12, 0.5)])
+            else:
+                notes = [(q * 0.5, r + (12 if q % 2 else 0), 0.5) for q in range(7)] + [(3.5, nxt + (1 if nxt < r else -1) if last_bar else r + 7, 0.5)]
+            for off, semi, ln in notes:
+                at = b + off * beat
+                if at >= min(sg["t1"], end_at) - 0.02:
+                    continue
+                d = min(ln * beat * 0.92, sg["t1"] - at, end_at - at)
+                place(bass, bass_note(groot * 2 ** (semi / 12), d, 0.8 + 0.4 * (lvl == 2)), at, (0.35 if lvl <= 0 else 0.42) * (1.0 if off == 0 else 0.8))
+            b += bar
+    # ---- the pulse, the plucks and the brushes, only where the section has the groove
     n_beats = int(end_at / beat + 1e-6)
-    for b in range(n_beats):
-        tb = b * beat
-        bar_i, in_bar = divmod(b, 4)
-        chord = chords[int(tb // cpb) % len(chords)]
+    pump = np.ones(n)
+    for bi in range(n_beats):
+        tb = bi * beat
+        lvl = level_at(tb)
+        if lvl < 1:
+            continue
+        in_bar = bi % 4
+        sg = next(s for s in segs if s["t0"] <= tb + 1e-6 < s["t1"] + 1e-6) if any(s["t0"] <= tb + 1e-6 < s["t1"] + 1e-6 for s in segs) else segs[-1]
+        root_f = groot * 2 ** ((sg["chord"][0] % 12 - (12 if sg["chord"][0] % 12 > 6 else 0)) / 12)
         if in_bar in m["kick"]:
-            place(rhythm, sub_thump(m["root"] * 2 ** (chord[0] / 12) / 2 if m["root"] > 60 else m["root"]), tb, 0.42 if in_bar == 0 else 0.24)
-        if m["pluck"] and bar_i >= m["pluck_from_bar"]:
+            place(rhythm, sub_thump(root_f), tb, 0.36 if in_bar == 0 else 0.22)
+            i0 = int(tb * SR)
+            k = min(n - i0, int(0.35 * SR))
+            if k > 0:
+                pump[i0:i0 + k] = np.minimum(pump[i0:i0 + k], 1 - 0.18 * np.exp(-t_axis(k) / 0.12))   # the pads breathe with the pulse
+        if m["pluck"]:
             for s in range(m["pluck"]):
                 ts = tb + s * beat / m["pluck"]
-                step = b * m["pluck"] + s
-                note = chord[(step * 3 + step // 4) % len(chord)] + 12 * (1 + (step // 8) % 2)
-                place(rhythm, pluck(m["root"] * 2 * 2 ** (note / 12), seed + step, bright=1.2), ts, 0.07 + 0.02 * (s == 0),
-                      pan=0.4 * math.sin(step * 1.7))
+                step = bi * m["pluck"] + s
+                v = sg["voicing"]
+                note = v[(step * 3 + step // 4) % len(v)] + 12 * (step // 8 % 2)
+                place(rhythm, pluck(pad_root * 2 ** (note / 12), seed + step, bright=1.2 + 0.3 * (lvl == 2)), ts,
+                      (0.06 + 0.02 * (s == 0)) * (1.15 if lvl == 2 else 1.0), pan=0.4 * math.sin(step * 1.7))
         if m["hat"]:
             for s in range(2):
-                place(rhythm, hat(seed + b * 2 + s), tb + s * beat / 2, 0.05 if s else 0.03, pan=0.3)
+                place(rhythm, hat(seed + bi * 2 + s), tb + s * beat / 2, 0.05 if s else 0.03, pan=0.3)
+        else:
+            for s in range(2):
+                acc = (0.032 if s else 0.02) * (1.2 if lvl == 2 else 1.0)
+                place(rhythm, brush(bi * 2 + s), tb + s * beat / 2, acc, pan=-0.25 if s else 0.2)
+    # ---- a riser into the payoff (or into the logo when the story has no payoff)
+    pay = next((t for t, s in secs if s == 2), None)
+    hit_at = snap_b(pay) if pay and pay > 3 else None
+    if hit_at:
+        rd = max(1.2, min(2 * bar, hit_at - 1.0))
+        place(fxb, riser(rd, m["root"], seed), hit_at - rd, 0.16)
+        place(rhythm, sub_thump(groot * 2 ** ((segs[-1]["chord"][0] % 12 - (12 if segs[-1]["chord"][0] % 12 > 6 else 0)) / 12)), hit_at, 0.42)
     # every cut: the pads lift a touch for the half second after it (the music answers the picture)
     env = np.ones(n)
     for c in cuts:
         i0, i1 = int(c * SR), int((c + 0.6) * SR)
         if i0 < n:
-            env[i0:min(n, i1)] += 0.12 * np.exp(-t_axis(min(n, i1) - i0) * 6)
-    pads *= env
-    bed = wet(pads, 0.45, 2.6, seed + 3) + wet(rhythm, 0.22, 1.4, seed + 4)
-    # a little air on the light moods
+            env[i0:min(n, i1)] += 0.1 * np.exp(-t_axis(min(n, i1) - i0) * 6)
+    pads *= env * pump
+    # the groove and the bass stop on the end card (a 0.12 s release, no click)
+    i_end = int(end_at * SR)
+    rel = int(0.12 * SR)
+    for bus in (bass, rhythm):
+        bus[:, i_end:i_end + rel] *= np.linspace(1, 0, min(rel, max(0, n - i_end)))
+        bus[:, i_end + rel:] = 0
+    bed = wet(pads, 0.45, 2.6, seed + 3) + wet(rhythm, 0.2, 1.4, seed + 4) + bass + wet(fxb, 0.35, 2.0, seed + 6)
     if m["air"]:
         air = spectral(noise(n, seed + 9), band(5000, 12000))[:n] * 0.004 * m["air"] * 50
         bed += np.stack([air, np.roll(air, 900)])
-    # the ending
-    i_end = int(end_at * SR)
     root_end = m["root"]
+    tail = n - i_end
     if m["end"] == "button":
         bed[:, i_end:] = 0
         bed[:, max(0, i_end - 240):i_end] *= np.linspace(1, 0, min(240, i_end))
-    else:
-        # the pulse stops on the end card; the pads keep ringing and fade over what is left
-        tail = n - i_end
-        bed[:, i_end:] = wet(pads[:, i_end:], 0.45, 2.6, seed + 3)[:, :tail] * np.linspace(1, 0, tail) ** 1.6 if tail > 0 else bed[:, i_end:]
-        # the resolved chord: the key's tonic in major with a 9th, opening up
-        res = np.zeros((2, max(1, tail)))
-        for j, st in enumerate([0, 4, 7, 14]):
-            x = pad_note(root_end * 2 * 2 ** (st / 12), tail / SR, m["cutoff"][1] * 1.2, seed + 99 + j)
+    elif tail > 0:
+        # the pulse stops on the end card; the last pads ring and fade under the resolved chord: the tonic in
+        # major with a 9th, voiced next to the last chord, a low tonic under it and one soft bell on the root
+        bed[:, i_end:] = wet(pads[:, i_end:], 0.45, 2.6, seed + 3)[:, :tail] * np.linspace(1, 0, tail) ** 2
+        res = np.zeros((2, tail))
+        for j, st in enumerate(voice([0, 4, 7, 14], segs[-1]["voicing"] if segs else None)):
+            x = pad_note(pad_root * 2 ** (st / 12), tail / SR, m["cutoff"][1] * 1.2, seed + 99 + j)
             x *= np.minimum(1, t_axis(len(x)) / 0.25) * np.linspace(1, 0, len(x)) ** 1.3
             place(res, x * 0.16, 0, pan=(j - 1.5) * 0.4)
+        low = bass_note(groot, tail / SR, 0.5) * np.linspace(1, 0, tail) ** 1.5
+        place(res, low, 0, 0.35)
+        place(res, pluck(pad_root * 2, seed + 7, bright=0.8, dur=min(2.5, tail / SR)), 0.05, 0.08)
         bed[:, i_end:] += wet(res, 0.5, 3.0, seed + 5)[:, :tail]
     fade = int(0.08 * SR)
     bed[:, -fade:] *= np.linspace(1, 0, fade)
     beats = [round(b * beat, 4) for b in range(int(length / beat) + 1)]
     return bed, beats
+
+
+def tonal(x):
+    """(share of energy under 90 Hz, spectral centroid Hz, share over 4 kHz) of a stereo bed: the measures
+    references/sound.md gives for Linear's films (25-32% under 90 Hz, centroid 750-810 Hz, almost nothing over 4 kHz)."""
+    mono = x.mean(0)
+    P = np.abs(np.fft.rfft(mono)) ** 2
+    f = np.fft.rfftfreq(len(mono), 1 / SR)
+    tot = P[f > 20].sum()
+    return float(P[(f > 20) & (f < 90)].sum() / tot), float((P[f > 20] * f[f > 20]).sum() / tot), float(P[f > 4000].sum() / tot)
 
 
 def beat_grid(mood, length):
@@ -404,13 +548,13 @@ def master(x, out, target=TARGET_LUFS):
 
 
 def score(out, length, mood="linear", music="generated", sfx="subtle", cues=(), cuts=(), end_at=None, vo=None,
-          own=None, eleven_key=None, prompt=None, seed=0):
+          own=None, eleven_key=None, prompt=None, seed=0, sections=None):
     """The film's whole soundtrack as one file. cues: [{"t": s, "kind": click|tick|whoosh|swell|hit, "pan": -1..1}].
     Returns a report: loudness, true peak, the music-to-effects balance."""
     n = int((length + 0.05) * SR)
     bed = np.zeros((2, n))
     if music == "generated":
-        bed, _ = compose(mood, length, end_at, cuts, seed)
+        bed, _ = compose(mood, length, end_at, cuts, seed, sections)
         bed = bed[:, :n]
     elif music in ("own", "eleven") and own:
         if music == "eleven" and not Path(own).exists():
@@ -426,7 +570,7 @@ def score(out, length, mood="linear", music="generated", sfx="subtle", cues=(), 
         for c in cues:
             k += 1
             kind = c["kind"]
-            x, g = {"click": (lambda: sfx_click(k % 5), 0.55), "tick": (lambda: sfx_tick(k), 0.22),
+            x, g = {"click": (lambda: sfx_click(k % 5), 0.55), "tick": (lambda: sfx_tick(k), 0.44),
                     "whoosh": (lambda: sfx_whoosh(0.7, True, k % 3), 0.14), "swell": (lambda: sfx_swell(1.6, root), 0.22),
                     "hit": (lambda: sfx_hit(root), 0.5)}[kind]
             x = x()
@@ -474,6 +618,18 @@ def demo():
             after = np.abs(bed[:, int(9.1 * SR):]).max()
             assert (after < 1e-6) if MOODS[mood]["end"] == "button" else (after > 1e-3), (mood, after)   # button stops; ring rings
             print(f"{mood:8} {r['lufs']:.1f} LUFS  TP {r['true_peak']}  fx-bed {r['fx_minus_bed_db']} dB")
+    # the score follows the cut: the hook is pads alone, the groove arrives with the first action, the chord
+    # changes where a beat starts, the tone sits where Linear's trailer does (references/sound.md)
+    secs = [(0, "hook"), (3.0, "action"), (7.4, "result"), (10.0, "payoff"), (14.0, "end")]
+    bed, _ = compose("linear", 18, 14.0, [3.0, 7.4, 10.0], 0, secs)
+    # the groove's movement: how much the level swings 20 ms to 20 ms (a held pad barely moves, a pulse does)
+    def swing(a, b):
+        e = np.sqrt(np.convolve(bed[:, int(a * SR):int(b * SR)].mean(0) ** 2, np.ones(960) / 960, "valid")[::480])
+        return float(np.mean(np.abs(np.diff(e))) / np.mean(e))
+    assert swing(1.0, 2.8) < 0.5 * swing(4, 7), (swing(1.0, 2.8), swing(4, 7))     # no pulse on the hook, the groove after
+    sub, cen, hi = tonal(bed[:, :int(14 * SR)])
+    assert 0.18 < sub < 0.42 and hi < 0.01, (sub, cen, hi)
+    assert voice([0, 4, 7, 11], [0, 3, 7, 10]) == [0, 4, 7, 11]           # voice leading: the nearest voicing
     g = beat_grid("linear", 5)
     assert abs(g[1] - 60 / 110) < 1e-3
     print("demo ok")

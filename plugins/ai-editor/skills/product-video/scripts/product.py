@@ -605,6 +605,8 @@ def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_na
     print(f"length: {j['durationInFrames'] / fps:.1f} s (target {target:.0f} s for {cases} use cases, pace {pace}); "
           f"camera speed p95 {p95:.2f}, median {med:.2f} frame diagonals/s (bar {journey.SPEED_BAR[0]}, {journey.SPEED_BAR[1]})")
     j.pop("cursor_raw", None)
+    px0, px1 = journey.crop_layers(d, j)
+    print(f"states: cut to what the camera shows, {px0 / 1e6:.0f} -> {px1 / 1e6:.0f} megapixels to decode")
     total = j["durationInFrames"] / fps
     plan = {"composition": "ProductVideo", **{k: v for k, v in j.items() if k != "cues"}, "variant": variant, "story": story_name,
             "brand": brand_of(site), "url": site["domain"], "logo": logo_of(site, d), "shots": [],
@@ -616,6 +618,7 @@ def build_journey(d, site, story, variant, aspect, music, vo, sfx, own, story_na
         (d / "audio").mkdir(exist_ok=True)
         rel = f"audio/mix-{tag}.wav"
         rep = sound.score(d / rel, total, mood, music, sfx, cues=j["cues"], cuts=[b["start"] for b in j["beats"][1:]], end_at=j["end"],
+                          sections=[(b["start"], b["job"]) for b in j["beats"]],
                           vo=d / vo if vo else None, own=d / own if own else None, eleven_key=keys_get("elevenlabs"))
         if rep:
             plan["audio"] = {"mix": rel}

@@ -8,7 +8,7 @@ recording.
 
 | asset | source | licence | evidence | date |
 |---|---|---|---|---|
-| The score (pads, sub pulse, plucks, hi-hat ticks, the resolved end chord) | synthesised per video by `scripts/sound.py` `compose()`, from code in this plugin | original work of this plugin, MIT with the plugin | no samples, no downloads: every waveform is a sine, a sum of sines or seeded noise built in `sound.py` | 2026-10-06 |
+| The score (voice-led pads, bass line, sub pulse, plucks, brushed ticks, hi-hat ticks, the payoff riser, the resolved end chord) | synthesised per video by `scripts/sound.py` `compose()`, from code in this plugin | original work of this plugin, MIT with the plugin | no samples, no downloads: every waveform is a sine, a sum of sines or seeded noise built in `sound.py` | 2026-10-07 |
 | Sound effects: click, tick, whoosh, swell, hit | synthesised by `scripts/sound.py` `sfx_*()` | original work of this plugin, MIT with the plugin | same as above | 2026-10-06 |
 | Reverb | a decaying noise impulse built in `sound.py` `reverb_ir()` | original work | same | 2026-10-06 |
 

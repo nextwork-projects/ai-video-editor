@@ -16,7 +16,6 @@ Nothing. Take the top of Next.
 6. Measured cost per video on a real run (needs a TypeSafe key on the test machine).
 7. Modal render tested live (needs a Modal login on the test machine).
 8. Export opened in DaVinci Resolve (free) to confirm FCPXML positions.
-9. Product films: sparse dark sites (fill), desktop captures at 3x, the generated score richer.
 
 ## Needs a decision from the maintainer
 
