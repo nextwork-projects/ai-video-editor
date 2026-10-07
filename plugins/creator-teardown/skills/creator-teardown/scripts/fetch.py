@@ -99,12 +99,13 @@ def install_fixes(setup, os_name=None):
                 "update": f'claude plugin update ai-editor@nextwork, then {PY} "{setup}" repair',
                 "ocr": f'{PY} "{setup}" repair'}
     o = os_name or OS
-    if o == "Windows":
-        venv, pip = "py -m venv %USERPROFILE%\\.ai-video-editor\\venv", "%USERPROFILE%\\.ai-video-editor\\venv\\Scripts\\pip"
-    else:
-        venv, pip = "python3 -m venv ~/.ai-video-editor/venv", "~/.ai-video-editor/venv/bin/pip"
+    # The real folder (AI_EDITOR_HOME moves it), quoted: Git Bash does not expand %USERPROFILE%.
+    vdir = VENV_PY.parents[1]
+    py, pip = ("py", vdir / "Scripts" / "pip") if o == "Windows" else ("python3", vdir / "bin" / "pip")
+    venv = f'{py} -m venv "{vdir}"'
+    pip = f'"{pip}"'
     pin = f'{pip} install --no-deps --require-hashes -r "{LOCK}"'
-    tail = "   (needs: sudo apt install -y python3-venv)" if o == "Linux" else ""
+    tail = "   (needs: sudo apt install -y python3-venv)" if o == "Linux" and linux_pm() == "apt" else ""
     return {"venv": f"{venv} && {pin}{tail}",
             "update": f"claude plugin update creator-teardown@nextwork, then {pin}",
             "ocr": pin}
@@ -119,8 +120,14 @@ def slug(handle):
     return re.sub(r"[^a-z0-9._-]", "", handle.lstrip("@").lower())
 
 
-def fix(mac, win, linux):
-    return {"Darwin": mac, "Windows": win}.get(OS, linux)
+def linux_pm(which=shutil.which):
+    """apt, dnf or pacman: the first one this Linux has (apt when none is found)."""
+    return next((pm for pm, exe in (("apt", "apt-get"), ("dnf", "dnf"), ("pacman", "pacman")) if which(exe)), "apt")
+
+
+def fix(mac, win, linux, os_name=None, which=shutil.which):
+    """linux: {"apt": ..., "dnf": ..., "pacman": ...}, picked by the package manager this computer has."""
+    return {"Darwin": mac, "Windows": win}.get(os_name or OS) or linux[linux_pm(which)]
 
 
 def reach(v):
@@ -167,7 +174,8 @@ def cmd_doctor(args):
         required_missing += 1
         row("FIX", f"Python {v.major}.{v.minor} is too old (need 3.9+)",
             fix("brew install python", "winget install -e --id Python.Python.3.13",
-                "sudo apt install -y python3"))
+                {"apt": "sudo apt install -y python3", "dnf": "sudo dnf install -y python3",
+                 "pacman": "sudo pacman -S --needed --noconfirm python"}))
 
     fixes = install_fixes(ai_editor_setup())
     venv_fix = fixes["venv"]
@@ -205,7 +213,8 @@ def cmd_doctor(args):
         required_missing += 1
         row("FIX", "ffmpeg is not installed (it reads the audio and the frames)",
             fix("brew install ffmpeg", "winget install -e --id Gyan.FFmpeg",
-                "sudo apt install -y ffmpeg"))
+                {"apt": "sudo apt install -y ffmpeg", "dnf": "sudo dnf install -y ffmpeg-free",
+                 "pacman": "sudo pacman -S --needed --noconfirm ffmpeg"}))
 
     key, where = find_key()
     if key:
@@ -481,6 +490,11 @@ def demo():
     views = [100, 100, 100, 900]
     med = statistics.median(views)
     assert med == 100 and (900 >= 3 * med) and not (100 >= 3 * med)
+
+    # A Linux fix line uses the package manager this computer has
+    lin = {"apt": "A", "dnf": "D", "pacman": "P"}
+    assert fix("m", "w", lin, "Linux", lambda e: e == "dnf") == "D" and fix("m", "w", lin, "Linux", lambda e: False) == "A"
+    assert fix("m", "w", lin, "Darwin", lambda e: True) == "m"
 
     # Control group: the videos closest to the median, never a top pick again.
     vids = [{"id": str(i), "view_count": n}

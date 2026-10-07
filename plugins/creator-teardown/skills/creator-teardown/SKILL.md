@@ -35,17 +35,19 @@ the skill, follow `${CLAUDE_SKILL_DIR}/references/setup.md`. The ElevenLabs and
 Gemini keys are optional. Never ask for either in the chat: the user saves them with
 `setkey` (`setkey --gemini`) in their own terminal.
 
-`VPY` below is the tool venv's Python: `~/.ai-video-editor/venv/bin/python`
-(`%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe` on Windows).
+`$VPY` below is `python3 "${CLAUDE_SKILL_DIR}/scripts/run.py"` (`py` on Windows), which runs a script with
+the tool venv's Python wherever `AI_EDITOR_HOME` puts it.
 
 ## Pipeline
 
 ### Quick mode (called by ai-editor's start, setup or style-edit)
 
-When another skill needs only the style.json: Steps 1, 2 and 3b-3c with `--top 5` (5 plus 2 control
-videos: 7 downloaded and transcribed), the Step 3c
-parts question only if the caller has not asked it, then stop. Skip the Step 3 written passes and
-Steps 4-6. About a minute per creator plus transcription.
+When another skill needs only the style.json, run exactly: Step 1 `list`, Step 2's two commands with
+`--top 5` (5 plus 2 control videos), Step 3b's three, then Step 3c's four (a `gemini.py` that exits 2
+with no key is skipped), then stop. The Step 0 parts question only if the caller has not asked it. Skip
+`metrics.py`, the Step 3 written passes and Steps 4-6 (Step 3's "always run" is the visual pass, included).
+About 15 minutes per creator on a laptop, measured: download and transcription about a minute a video,
+`look.py` about 40 s a video, `graphics.py` about 20 s, `sound.py` 2 s, the page 15 s. Say so first.
 
 ### Step 0: Ask, once
 

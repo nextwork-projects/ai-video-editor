@@ -15,7 +15,8 @@ python3 <skill>/scripts/fetch.py doctor
 If `python3` itself is missing, install Python first:
 - Mac: `brew install python` if Homebrew exists. If it doesn't, see step 2.
 - Windows: `winget install -e --id Python.Python.3.13`, then open a new terminal.
-- Linux: `sudo apt install -y python3`.
+- Linux: `sudo apt install -y python3` (Fedora: `sudo dnf install -y python3`; Arch:
+  `sudo pacman -S --needed python`).
 
 ## 2. Fix each line marked FIX
 
