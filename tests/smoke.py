@@ -33,6 +33,15 @@ def run(*cmd, cwd):
 
 def main():
     work = Path(tempfile.mkdtemp(prefix="ave-smoke-"))
+    try:
+        steps(work)
+    except BaseException:
+        print(f"SMOKE: kept the work folder for a look: {work}", file=sys.stderr)
+        raise
+    shutil.rmtree(work, ignore_errors=True)
+
+
+def steps(work):
     edit = work / "edits" / "smoke"
     edit.mkdir(parents=True)
     # A 4 s vertical clip with a tone, the shape of a phone video.
@@ -78,9 +87,7 @@ def main():
     stills = list((edit / "stills").glob("*.png"))
     if not stills:
         sys.exit("SMOKE FAIL: no stills")
-    print(f"SMOKE OK on {platform.system()}: {len(stills)} stills, both renders 4 s ({work})")
-    if os.environ.get("CI"):
-        shutil.rmtree(work, ignore_errors=True)
+    print(f"SMOKE OK on {platform.system()}: {len(stills)} stills, both renders 4 s")
 
 
 def contrast(work):
