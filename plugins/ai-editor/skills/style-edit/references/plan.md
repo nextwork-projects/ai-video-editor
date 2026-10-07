@@ -36,10 +36,10 @@ as over a creator's style. Cards still come from visuals.json (step 3).
 - **Look** (motion.md): the profile's brand kit > the creator's measured palette and fonts >
   `editorial`. **Motion personality** from the creator's median shot (punchy, snappy, smooth, calm).
 - **Caption contrast:** each caption page is measured on the cut behind it. Where the creator's
-  look would read under 3.3:1 (`CONTRAST_TARGET`: the render check's 3:1 FAIL line plus 10%, since
+  look would read under 4.7:1 (`CONTRAST_TARGET`: the render check's 4.5:1 WARN line plus 0.2, since
   the plan's estimate runs a little above what the render check reads), that page gets a soft
-  shadow, then a thin stroke, then a backing, whichever is first to reach 3.3:1 (printed per
-  caption). After a render, `check.py render` lists the pages it read under 3.3:1 in `check.json`;
+  shadow, then a thin stroke, then a backing, whichever is first to reach 4.7:1 (printed per
+  caption). After a render, `check.py render` lists the pages it read under 4.7:1 in `check.json`;
   the next plan.py run gives each one the next step and keeps it in `contrast.json`.
 - **Layout per card:** overlay first: every card floats over the footage in the free space round
   the head; a beat asking for `"layout": "scene"` gets a full-frame cut-away with a designed
@@ -50,7 +50,10 @@ as over a creator's style. Cards still come from visuals.json (step 3).
   overlay starts `OVERLAY_LEAD_S` earlier, the time it takes to carry half its ink; both read it); every part, bar, item and capture mark lands on
   its own word (`word` / `at_word`); a caption_page gets the words said while it is up.
 - **Captions:** `words_per_caption` at a time, never held 0.3 s past the last word, the stressed
-  word of a line marked; the creator's effect, sizes and colours passed through.
+  word of a line marked (the renderer draws it in the emphasis colour and one weight heavier, never
+  bigger); each page one line at one size; the creator's effect, sizes and colours passed through.
+- **Pacing:** `card_gap_s` (SKILL.md step 3); inside a longer stretch with no card a zoom change at
+  least every 5 s, and a warning naming anything said there that could be shown.
 - **Zooms:** about `zoom.per_min` a minute, alternating in and out so the frame never creeps.
 - **Shape:** the cut's shape unless `--aspect` says otherwise (a wide cut made vertical is
   centre-cropped; a vertical cut made wide sits over a blurred copy). For a second shape or layout,
@@ -118,13 +121,16 @@ last 2 s. plan.py picks it up as plan.json `"music"`; run plan.py after it.
 the app's UI or on the head, an off-centre vertical card, captions outside the safe band or held
 too long, text-card text under 34 px, a behind card with no cutout, and a vertical `flow` or
 `logo_cluster` that would draw under 60% of the width or off centre (the renderer's layout, estimated
-from the plan, so the render check never FAILs what this passed). WARNs long stretches with
-nothing moving.
+from the plan, so the render check never FAILs what this passed), a sticker showing text under 28 px
+x-height beside its evidence, and a capture on the hook (first 3 s) with no `find` mark. WARNs long
+stretches with nothing moving, and a stretch with no card over `card_gap_s` that names something
+(beats.json) or holds still over 5 s (SKILL.md step 3 "Pacing").
 
 `check.py render` (runs `quality.py` too; results in `check.json`): FAILs a render older than its
 plan or inputs (never show one), a card on the face, a card off centre (a `flow` or `logo_cluster`
 also under 60% of the width; the fix is in the plan), a silence inside the speech,
-a tiny kept span, frozen frames, a first-frame flash, a card landing over 0.15 s late, text into a
+a tiny kept span, frozen frames, a first-frame flash, a caption page drawn on more lines than
+`max_lines` (1: one line at one size), a card landing over 0.15 s late, text into a
 card's edge, contrast under 3:1, a caption touching the frame's side, true peak over 0 dBTP, SFX
 louder than the voice. WARNs: early landings, one-frame pops, jitter, long static stretches, rhythm
 outside 0.5-2x the creator's, contrast under 4.5:1, loudness outside -23 to -9 LUFS, and the AI

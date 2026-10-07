@@ -331,6 +331,30 @@ def caption_fill(frame, colours, ys, font_px, text):
     return slice(r0, r1), fill, bool(xs.min() < CAP_EDGE * W or xs.max() > (1 - CAP_EDGE) * W)
 
 
+def caption_lines(frame, colours, y, font_px):
+    """How many lines of caption text sit round row y (the page's centre, Captions.tsx translateY -50%):
+    bands of caption-coloured glyphs (blobs a letter tall) within two font sizes of it."""
+    import cv2
+    import numpy as np
+    H, W = frame.shape[:2]
+    lo, hi = max(0, int(y - 2 * font_px)), min(H, int(y + 2 * font_px))
+    f = frame[lo:hi].astype(np.int16)
+    if not len(f):
+        return 0
+    typical = np.median(f.reshape(-1, 3), axis=0)
+    near = np.zeros(f.shape[:2], bool)
+    for c in colours:
+        near |= np.abs(f - c).max(axis=2) < min(60, max(8, 0.4 * float(np.abs(typical - c).max())))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(near.astype(np.uint8))
+    near = np.isin(lab, [i for i in range(1, n) if 0.3 * font_px <= stats[i, cv2.CC_STAT_HEIGHT] <= 1.3 * font_px])
+    # a line of words: glyphs joined across their gaps, running through the middle of the frame
+    merged = cv2.dilate(near.astype(np.uint8), np.ones((1, max(3, int(0.5 * font_px))), np.uint8))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(merged)
+    near &= np.isin(lab, [i for i in range(1, n) if stats[i, cv2.CC_STAT_LEFT] < 0.45 * W
+                          and stats[i, cv2.CC_STAT_LEFT] + stats[i, cv2.CC_STAT_WIDTH] > 0.55 * W])
+    return sum(1 for b in text_bands(near) if b[1] - b[0] >= 0.35 * font_px)
+
+
 def generic_pixels(bgr):
     """Palette tells of the AI-default look on a settled card crop: a list of short reasons."""
     import cv2
@@ -622,6 +646,11 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     chunks = plan["captions"]["chunks"]
     step = max(1, len(chunks) // 24)
     cap_frames = {round((ch_["start"] + ch_["end"]) / 2 * fps): ch_ for ch_ in chunks[::step]}
+    # every page, once settled: how many lines it is drawn on (Captions.tsx: one unless max_lines says more)
+    page_frames = {round((ch_["start"] + ch_["end"]) / 2 * fps): ch_ for ch_ in chunks}
+    cap_bgr = [np.array([int(h.lstrip("#")[k:k + 2], 16) for k in (4, 2, 0)], float)
+               for h in [cs.get("color") or "#FFFFFF"] + ([cs["highlight_color"]] if cs.get("highlight_color") else [])]
+    wrapped = []
     series = {i: {"area": [], "bbox": [], "d": [], "prev": None} for i in range(len(cards))}
     small_r, small_b, kept, caps = [], [], {}, []
     prev_r = prev_b = None
@@ -635,6 +664,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         small_r.append(sr_)
         small_b.append(sb_)
         up = [i for i in range(len(cards)) if first[i] - 3 <= n <= last[i]]
+        if n in page_frames:
+            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch) for y in cap_ys)
+            if nl > (cs.get("max_lines") or 1):
+                wrapped.append((t, page_frames[n]["text"], nl))
         need = up or n in sframes or n in cap_frames
         if not need:
             continue
@@ -918,6 +951,14 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                          f"captions read at {lo[0]}:1 against what is around them ({len(bad)} of {len(worst_cap)} samples under {CONTRAST_WARN}:1)",
                          f"plan again: plan.py reads this check and gives each page under {CONTRAST_TARGET}:1 the next treatment "
                          "(shadow, stroke, backing; contrast.json keeps it); then render"))
+    # pages under a landed scene draw in the scene's ink, not the caption colour: not read here
+    wrapped = [w for w in wrapped if not any(a <= w[0] < b for a, b in inked)]
+    meas["caption_lines"] = {"pages": len(page_frames), "over": [[round(t, 2), txt, nl] for t, txt, nl in wrapped]}
+    if wrapped:
+        t, txt, nl = wrapped[0]
+        out.append(F("FAIL", t, f"caption '{txt}' is drawn on {nl} lines ({len(wrapped)} page(s) over "
+                     f"{cs.get('max_lines') or 1}): one page is one line at one size",
+                     "render with the current Captions.tsx (one line, never wrapped); or fewer words_per_caption"))
     for t in edge_hits[:1]:
         out.append(F("FAIL", t, f"a caption touches the frame's side ({len(edge_hits)} sample(s)): cut off",
                      "fewer words_per_caption or a smaller size_pct in style.json, then plan again"))
@@ -1029,6 +1070,14 @@ def demo():
     assert rows.start < 600 < rows.stop and not touches and not fill[:, :40].any()
     assert worst_contrast(fr[rows], fill, 2) > 10                      # against its stroke
     assert worst_contrast(fr[rows], fill, 6) < CONTRAST_WARN            # reaching past it, into the grey
+    # caption_lines: one line at the caption's y reads 1; the same page wrapped to two lines reads 2
+    one = np.full((960, 540, 3), 90, np.uint8)
+    cv2.putText(one, "down competitor ads", (40, 612), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    two = np.full((960, 540, 3), 90, np.uint8)
+    cv2.putText(two, "down competitor", (90, 590), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    cv2.putText(two, "ads", (230, 650), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    white = [np.array([255, 255, 255.])]
+    assert caption_lines(one, white, 600, 40) == 1 and caption_lines(two, white, 600, 40) == 2
     # rhythm counter, measure_edit's synthetic clip
     f = np.full((120, 36, 64), 40, np.float32)
     base = np.random.default_rng(0).uniform(0, 80, (36, 64)).astype(np.float32)

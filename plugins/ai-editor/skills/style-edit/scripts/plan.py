@@ -106,6 +106,12 @@ STOCK = ("unsplash.com", "pexels.com", "shutterstock.com", "istockphoto.com", "g
 EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]")
 READ_XH = 28           # px: a capture's x-height on a 1080-wide frame under this is too small to read on a phone
 MIN_CARD_S = 0.5       # a card cut shorter than this by the next one is dropped
+# Pacing (SKILL.md step 3, one rule): a card where a sentence names something real, never two at once. The
+# longest stretch with no card is 2 x the copied creator's measured mean gap (120 / graphics.per_min), else
+# GAP_S; inside a longer one the frame still changes (a zoom) at least every QUIET_HOLD_S. check.py plan WARNs
+# a longer gap that holds a named thing or a stretch with no change.
+GAP_S = 10.0
+QUIET_HOLD_S = 5.0
 
 
 def clean(text):
@@ -180,7 +186,33 @@ def zoom_times(words, on, cuts):
     return out
 
 
-def place_zooms(zoom, words, duration, cuts, cut_kinds=None):
+def card_gap_s(style):
+    """The longest stretch with no card: 2 x the creator's measured mean gap between cards, else GAP_S."""
+    pm = graphics(style, "graphics").get("per_min")
+    return round(120 / pm, 1) if pm else GAP_S
+
+
+def named_beats(edit_dir):
+    """route.py's beats.json sentences that name one of the profile's things ([] when there is none)."""
+    bj = edit_dir and Path(edit_dir) / "beats.json"
+    return [x for x in json.loads(bj.read_text()) if x.get("names")] if bj and bj.exists() else []
+
+
+def card_gaps(cards, duration):
+    """[(start, end)] stretches of the video with no card up, the opening and the end included."""
+    out, t = [], 0.0
+    for c in sorted(cards, key=lambda c: c["start"]):
+        if c["start"] > t:
+            out.append((round(t, 3), round(c["start"], 3)))
+        t = max(t, c["end"])
+    if duration > t:
+        out.append((round(t, 3), round(duration, 3)))
+    return out
+
+
+def place_zooms(zoom, words, duration, cuts, cut_kinds=None, quiet=()):
+    """quiet: stretches with no card longer than card_gap_s; inside them a zoom change comes at least every
+    QUIET_HOLD_S, so the frame keeps changing while the speaker carries the line."""
     per_min = zoom.get("per_min") or 0
     if not per_min or not words:
         return []
@@ -197,10 +229,12 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None):
             picked.append(t)
     hold = zoom.get("max_hold_s")
     starts = [w["start"] for w in words]
-    while hold and picked:
-        # the default style: a long sentence still gets a zoom change, on the word start nearest its middle
+    longest = lambda a, b: min(hold or 1e9, QUIET_HOLD_S if any(qa < (a + b) / 2 < qb for qa, qb in quiet) else 1e9)
+    while (hold or quiet) and picked:
+        # the default style (and any stretch with no card): a long sentence still gets a zoom change, on the
+        # word start nearest its middle
         add = {min(mids, key=lambda t: abs(t - (a + b) / 2))
-               for a, b in zip(picked, picked[1:] + [duration]) if b - a > hold
+               for a, b in zip(picked, picked[1:] + [duration]) if b - a > longest(a, b)
                for mids in [[t for t in starts if a + 1 < t < b - 1]] if mids}
         if not add:
             break
@@ -567,7 +601,7 @@ def scene_parts(cards, words, edit_dir):
             elif "at_s" in mk:
                 mk["at"] = mk["at_s"]
             mk.setdefault("at", 0.8)
-            for k in ("at_word", "at_s", "nth", "find"):
+            for k in ("at_word", "at_s", "nth"):   # "find" stays: check.py plan reads it (a capture on the hook)
                 mk.pop(k, None)
     return cards
 
@@ -775,6 +809,17 @@ def capture_xh(c, aspect):
     return XH_PER_LINE * hl * capture_scale(c, aspect) * 1080 / min(SIZES[aspect])
 
 
+def small_lines(c, aspect):
+    """The text lines inside a sticker's crop (one cut from a shot: capture.mjs's own stickers carry "xh") that
+    render under READ_XH x-height: a kicker or footnote too small to read beside the evidence."""
+    if c.get("format") != "sticker" or c.get("xh") or not c.get("lines") or not c.get("size") or not c.get("box"):
+        return []
+    x, y, w, h = sticker_crop(c)
+    k = capture_scale(c, aspect) * 1080 / min(SIZES[aspect])
+    return [ln[:4] for ln in c["lines"] if ln[0] >= x - 1 and ln[1] >= y - 1 and ln[0] + ln[2] <= x + w + 1
+            and ln[1] + ln[3] <= y + h + 1 and XH_PER_LINE * ln[3] * k < READ_XH]
+
+
 def readable_captures(cards, aspect):
     """On vertical a capture whose evidence would render under READ_XH becomes a sticker cropped to that
     evidence: the crop takes the band's shape around the evidence's first lines (as many as still read) at the
@@ -812,9 +857,17 @@ def readable_captures(cards, aspect):
         cw, ch = min(iw, aw / f), min(ih, ah / f)
         cx = min(max((x0 + x1) / 2, cw / 2), iw - cw / 2)
         cy = min(max((y0 + y1) / 2, ch / 2), ih - ch / 2)
-        crop = whole_lines([cx - cw / 2, cy - ch / 2, cw, ch], c["lines"], c["size"])
         new = {**c, "format": "sticker", "props": {k: v for k, v in (c.get("props") or {}).items() if k != "url"}}
-        new["props"]["crop"] = crop
+        new["props"]["crop"] = whole_lines([cx - cw / 2, cy - ch / 2, cw, ch], c["lines"], c["size"])
+        # a kicker or footnote above or below the evidence that would read under READ_XH is left out of the
+        # crop (the card hugs it), never shown too small to read
+        ours = [ln[:4] for ln in group]
+        for ln in small_lines(new, aspect):
+            x, y, w, h = new["props"]["crop"]
+            if ln in ours:
+                continue
+            top, bot = (max(y, ln[1] + ln[3]), y + h) if ln[1] + ln[3] <= y0 else (y, min(y + h, ln[1]))
+            new["props"]["crop"] = [x, round(top), w, round(bot - top)]
         got = capture_xh(new, aspect)
         if got and got > xh:
             print(f"'{c['trigger_word']}' {c['src']}: {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height; "
@@ -1373,13 +1426,6 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             "look": pick_look(style, profile, prof_mod),
             "motion": pick_motion(style)}
     pace = (style.get("pace") or {}) if took(style, "pace") else {}
-    zooms = place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"))
-    for z in zooms if face else []:
-        # grow from the top of the head, centred on it: the face holds its place and the hair never rises
-        # into a card placed above the head (a zoom about the face's middle pushed the hair up into it)
-        hd = head_during(face["heads"], face.get("step_s", 0.5), z["start"], z["end"])
-        if hd:
-            z["origin"] = [round((hd[0] + hd[2]) / 2, 1), round(hd[1], 1)]
     # Explaining cards are scenes or sit in the split panel; the panel opens only when a card needs it,
     # unless the layout was set by hand (overlay: split cards become scenes).
     explicit = (layout or {}).get("mode") or (style.get("layout") or {}).get("mode")
@@ -1397,6 +1443,21 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards = place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect),
                         words, duration, style, aspect)
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
+    gap = card_gap_s(style)
+    quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
+    zooms = place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet)
+    for z in zooms if face else []:
+        # grow from the top of the head, centred on it: the face holds its place and the hair never rises
+        # into a card placed above the head (a zoom about the face's middle pushed the hair up into it)
+        hd = head_during(face["heads"], face.get("step_s", 0.5), z["start"], z["end"])
+        if hd:
+            z["origin"] = [round((hd[0] + hd[2]) / 2, 1), round(hd[1], 1)]
+    for a, b in quiet:
+        said = [f"'{n}' at {x['start']:.1f} s" for x in named_beats(edit_dir) if a <= x["start"] < b for n in x["names"]]
+        print(f"warning: no card for {b - a:.1f} s ({a:.1f}-{b:.1f} s, the rule is {gap:.0f} s): "
+              + (f"{', '.join(said)} is named there: show it (a capture, post or logo in visuals.json)" if said else
+                 f"nothing named there, so the speaker carries it with a zoom change every {QUIET_HOLD_S:.0f} s"),
+              file=sys.stderr)
     zooms = clear_entrances(zooms, cards)
     scenes = [c for c in cards if c["_f"] == "scene"]
     rest = [c for c in cards if c["_f"] != "scene"]
@@ -1448,7 +1509,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         # a soft rule, checked by check.py plan: the creator's winners show a graphic by then
         extra["targets"] = {"first_graphic_s": hook["first_graphic_s"],
                             "control_first_graphic_s": ((style.get("hook") or {}).get("control") or {}).get("first_graphic_s")}
-    return {**out, "captions": {"style": cap, "chunks": chunks}, "zooms": zooms,
+    return {**out, "captions": {"style": cap, "chunks": chunks}, "zooms": zooms, "card_gap_s": gap,
             "cards": scene_parts(cards, words, edit_dir), **extra}
 
 
@@ -1470,9 +1531,11 @@ def probe(video):
 
 # --- caption contrast: the footage behind each caption page, measured on the cut --------------------------
 CONTRAST_MIN = 3.0     # WCAG 1.4.3 for large text; quality.py fails a caption under it (its CONTRAST_FAIL)
-# What plan.py aims at: the FAIL line plus 10%. Plan estimates the footage in the caption's box at a quarter size;
-# the render check reads the ring round the real glyphs at full size, which came out 0.1-0.2 lower on the sample.
-CONTRAST_TARGET = 3.3
+# What plan.py aims at: the render check's 4.5:1 WARN line (quality.py CONTRAST_WARN) plus 0.2. Plan estimates the
+# footage in the caption's box at a quarter size; the render check reads the ring round the real glyphs at full
+# size, which came out 0.1-0.2 lower on the sample. Aiming at the FAIL line (3.3) left pages the render WARNed
+# that a new plan never touched (the sample's 4.36:1 at 20.77 s).
+CONTRAST_TARGET = 4.7
 # How far each step pulls the footage round the glyphs toward treat_color (alpha-composite in sRGB), as
 # quality.py's contrast check sees it: fitted to renders of white captions on a bright (#E6E1D8) and a
 # grey (#9A9A9A) desk, which agree to 0.04, rounded down. The renderer's default soft shadow, the
@@ -1868,6 +1931,17 @@ def demo():
     moves = sorted([x["start"] for x in z] + [x["end"] for x in z if x["end"] < t])
     assert len(z) >= t / 10 and max(b - a for a, b in zip([0.0] + moves, moves + [t])) <= 5.0 + 1e-6, (t, moves)
     assert place_zooms({}, words, t, []) == []
+    # a creator's sparse zooms (no max_hold_s) leave 12 s still; inside a stretch with no card (quiet) the frame
+    # changes at least every QUIET_HOLD_S, and outside it her rhythm is untouched
+    sparse = {"per_min": 2, "kind": "punch", "on": "sentence_start"}
+    mv = lambda zs, a, b: sorted(x for z in zs for x in (z["start"], z["end"]) if a < x < b)
+    hold_in = lambda zs, a, b: max(y - x for x, y in zip([a] + mv(zs, a, b), mv(zs, a, b) + [b]))
+    assert hold_in(place_zooms(sparse, words, t, []), 10, 22) > QUIET_HOLD_S
+    zq = place_zooms(sparse, words, t, [], quiet=[(10, 22)])
+    assert hold_in(zq, 10, 22) <= QUIET_HOLD_S + 1e-6, mv(zq, 10, 22)
+    assert mv(zq, 30, t) == mv(place_zooms(sparse, words, t, []), 30, t)
+    assert card_gaps([{"start": 1, "end": 3}, {"start": 2, "end": 4}, {"start": 9, "end": 10}], 12) == [(0.0, 1), (4, 9), (10, 12)]
+    assert card_gap_s({}) == GAP_S and card_gap_s({"graphics": {"per_min": 5.0}}) == 24.0
     demo_contrast()
     print("demo ok")
 
@@ -1878,11 +1952,13 @@ def demo_contrast():
     from pathlib import Path
     white = {"color": "#FFFFFF"}
     assert pick_treat([(38, 38, 38)] * 9, white)[0] is None                   # dark: the creator's look
-    assert pick_treat([(156, 156, 156)] * 9, white)[:2] == ("shadow", "#111111")
+    assert pick_treat([(126, 126, 126)] * 9, white)[:2] == ("shadow", "#111111")
     # a grey the shadow lifts only to 3.15:1 (over the FAIL line, under the margin the render needs) gets a stroke
     assert treat_for([(160, 160, 160)] * 9, (255, 255, 255), PULL["shadow"], (17, 17, 17)) > CONTRAST_MIN
     assert pick_treat([(160, 160, 160)] * 9, white)[0] == "stroke"
     assert all(pick_treat([(g, g, g)] * 9, white)[2] >= CONTRAST_TARGET for g in range(0, 256, 8))
+    # mid-grey footage reads 4.48:1 with the plain shadow: under the render check's 4.5 WARN, so it gets a step
+    assert pick_treat([(128, 128, 128)] * 9, white)[0] is not None
     # "plan again" after a render check read a page too low: that page gets the next step, once per check
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
@@ -1893,15 +1969,15 @@ def demo_contrast():
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
         pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
         assert treat_captions(pl, d, None, {"1.00": "stroke"}) == [(0, "stroke", None)]
-    assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("stroke", "#111111")  # a bright desk
+    assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
-    assert pick_treat([(20, 20, 20)] * 9, {"color": "#111111"})[:2] == ("stroke", "#F5F5F5")      # dark text
+    assert pick_treat([(20, 20, 20)] * 9, {"color": "#111111"})[:2] == ("backing", "#F5F5F5")     # dark text
     words = [{"text": t, "start": round(0.2 + i * 0.32, 2), "end": round(0.5 + i * 0.32, 2), "type": "word"}
              for i, t in enumerate("this desk is far too bright".split())]
     style = {"captions": {"words_per_caption": 3, "y_pct": 68, "size_pct": 5, "color": "#FFFFFF", "stroke": False}}
     with tempfile.TemporaryDirectory() as d:
-        for colour, want in (("0xE6E1D8", {"stroke"}), ("0x262626", {None})):
+        for colour, want in (("0xE6E1D8", {"backing"}), ("0x262626", {None})):
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=270x480:r=30:d=2.2",
                             "-f", "lavfi", "-i", "sine=d=2.2", "-vf", "noise=alls=12:allf=t", "-pix_fmt", "yuv420p",
                             f"{d}/cut.mp4"], check=True)

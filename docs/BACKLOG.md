@@ -21,20 +21,6 @@ Sources:
 
 ## Next
 
-Output quality (sample render, times in the cut):
-- Caption pages mix sizes inside one page and wrap to two lines: "that a lot" and "using right now"
-  (4-8 s), "down competitor ads" (16 s), "one-for-one substitute to" (20.5 s), "before a task"
-  (28.4 s), "then comment router" (42 s). The stressed-word mark changes the size mid-page.
-  Test: no caption page over one line at 3 words; stressed word changes colour or weight, not size.
-- The first card is the site's headline as a sticker ("The First (Public) System One Model; ...",
-  0.8-3.8 s): lines touch (leading under 1.0) and the kicker above it is unreadable. It is the
-  page's marketing line, not what is said, so it reads as a type card. Test: sticker leading 1.1 or
-  more, text under 28 px x-height dropped, `find` required for a sticker on the hook.
-- 11.6-22.9 s and 37.8-45.8 s have no card; the most showable lines (sorting emails, competitor ads,
-  11.4-18.2 s) get nothing. SKILL.md says "about one card every 4-6 s" and "most sentences get
-  nothing" in the same step. Pick one rule and have `check.py plan` WARN on a gap over 10 s.
-- Caption contrast WARN at 20.77 s (4.36:1) after plan.py's contrast pass.
-
 Cut:
 - Whisper can fold a whole spoken repeat into one stretched label: on the sample, "and to break down
   competitor ads and" (117.7-119.4 s) sits inside "content" (117.07-119.01 s), so no span can quote it and

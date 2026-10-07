@@ -234,6 +234,12 @@ const STICKER = (target, finds, fit, keepGround) => `(() => {
     box.style[k] = cs[k];
   Object.assign(box.style, { position: 'absolute', left: '0px', top: '0px', zIndex: 2147483647, background: ground, padding: pad + 'px',
     margin: '0', boxSizing: 'content-box', whiteSpace: 'normal', textAlign: 'left', visibility: 'visible' });
+  // leading 1.2 or more: a headline set tight (under 1.0) has its lines touch once it stands alone on a card
+  if (!(parseFloat(cs.lineHeight) >= fs * 1.2)) box.style.lineHeight = (fs * 1.2) + 'px';
+  // no emoji on a card (ai-tells.md): the page's decoration (a glyph or an emoji image) leaves the re-set sentence
+  box.querySelectorAll('img, svg, picture').forEach((e) => e.remove());
+  for (const tw = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); tw.nextNode();)
+    tw.currentNode.nodeValue = tw.currentNode.nodeValue.replace(/[\\p{Extended_Pictographic}\\u{1F1E6}-\\u{1F1FF}\\uFE0F\\u200D]/gu, '');
   document.body.appendChild(box);
   // x-height of the font, page px
   const cv = document.createElement('canvas').getContext('2d');
@@ -737,5 +743,5 @@ async function main() {
 }
 
 // Imported by product-video/scripts/crawl.mjs for the browser, banner and text-finding helpers.
-export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip, noSandbox, sandboxFlags, rankIcons };
+export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, STICKER, snapClip, noSandbox, sandboxFlags, rankIcons };
 if (path.basename(process.argv[1] || "") === "capture.mjs") await main();

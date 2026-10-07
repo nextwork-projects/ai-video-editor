@@ -377,8 +377,9 @@ boxed, fails.
    transitions as above.
 8. Captions: style.json `captions` may add `effect` (`pop`, `slide`, `word_highlight`, `karaoke`,
    `reveal`, `lift`, `none`; `animation` stays as the old name), `active_scale`, `active_lift` (% of
-   the font size), `emphasis_color`, `emphasis_scale`, `inactive_opacity`, `max_lines` (2),
-   `width_pct` (86). `caption_page` defaults to karaoke with the said word filling in the highlight colour at 1.12 x and unsaid words at 35% opacity. plan.py passes them through and may mark a chunk word `"emph": true` (the
+   the font size), `emphasis_color` (the stressed word's colour; it also draws one weight heavier, never bigger:
+   `emphasis_scale` is not read), `inactive_opacity`, `max_lines` (1: a page is one line at one size;
+   `check.py render` FAILs a page drawn on more), `width_pct` (86). `caption_page` defaults to karaoke with the said word filling in the highlight colour at 1.12 x and unsaid words at 35% opacity. plan.py passes them through and may mark a chunk word `"emph": true` (the
    stressed word of a line).
 9. `props.word_at` on every box card; `props.enter` / `exit` / `ambient`, `pans`, a zoom's `ease` and
    `targets` from the creator's measured fields when the blend took them (visuals.md "From the teardown").

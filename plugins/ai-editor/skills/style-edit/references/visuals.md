@@ -130,8 +130,9 @@ text cards become stickers of real sources.
 ## Beats
 
 Every beat anchors to a word as it appears in captions.json (the transcript may misspell a name:
-anchor on its spelling). Always set `nth`. About one card every 4-6 s, never two at once, none in
-the first second unless it is the hook's subject. Set `hold_s` so the card is still up on its last
+anchor on its spelling). Always set `nth`. Pacing is one rule (SKILL.md step 3, "Pacing"): a card
+where a sentence names something real, never two at once, none in the first second unless it is the
+hook's subject. Set `hold_s` so the card is still up on its last
 word (plan.py warns when it is not); leave it out to use the creator's measured hold. Leave the
 speaker alone for a few seconds between runs of scenes.
 

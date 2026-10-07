@@ -117,7 +117,7 @@ console.log("deny list ok");
   console.log("logo source order ok");
 }
 
-const { launch, findBinary, SHELLS, TEXT } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+const { launch, findBinary, SHELLS, TEXT, STICKER } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
 const bin = findBinary(SHELLS);
 if (!bin) {
   if (process.argv.includes("--require-chrome")) throw new Error(`no Chrome Headless Shell under ${SHELLS}`);
@@ -157,6 +157,16 @@ try {
   assert.ok(ls.every(([x, , w]) => x + w <= 341 || x >= 339), "a line never spans both columns: " + JSON.stringify(ls));
   assert.ok(ls.some(([x, y, w]) => y > 60 && w <= 120.5), "the overflow box clips its line: " + JSON.stringify(ls));
   console.log("text lines ok");
+  // STICKER: a headline set tight (line-height 0.85) with an emoji is re-set at leading 1.2 or more, emoji dropped
+  const page3 = `<!doctype html><html><body style="margin:0"><h1 style="font:700 40px/0.85 sans-serif;width:420px">
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" style="width:30px"> \u{1F389} TypeSafe announces System One models and Jev, a new model for quick decisions.</h1></body></html>`;
+  await cdp.send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: page3 }, sessionId);
+  const st = await ev(STICKER("System One", ["System One"], [900, 340], false));
+  const lead = await ev(`(() => { const b = document.body.lastElementChild; return parseFloat(getComputedStyle(b).lineHeight) / parseFloat(getComputedStyle(b).fontSize); })()`);
+  assert.ok(lead >= 1.1, `sticker leading ${lead}, under 1.1: its lines touch`);
+  assert.ok(!/\p{Extended_Pictographic}/u.test(st.sentence) && !(await ev(`document.body.lastElementChild.querySelector("img") !== null`)),
+    "sticker keeps the page's emoji: " + st.sentence);
+  console.log("sticker leading ok:", lead.toFixed(2));
 } finally {
   cdp.close();
 }

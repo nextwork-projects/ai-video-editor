@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import INK_MIN_W, OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
+from plan import GAP_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -45,6 +45,7 @@ LABEL_MIN = 34         # px, remotion/src/Anims.tsx LABEL_MIN
 SILENCE_S = 0.3        # a silence inside the speech longer than this
 SLIVER_S = 0.2         # a kept span shorter than this between two splices
 HOOK_TOL_S = 0.5       # a first graphic this much later than the creator's winners' median is a miss
+HOOK_S = 3.0           # the hook: a capture up in this opening shows what is said (a `find` mark), not the page's headline
 STILL_S = 1.5          # a card region unchanged for longer than this
 FPS = 4                # render samples a second
 ZOOM_ORIGIN = (50, 30)  # remotion/src/StyleEdit.tsx ZOOM_ORIGIN
@@ -166,7 +167,8 @@ def text_sizes(anim, w, h):
     return out
 
 
-def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None):
+def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=()):
+    """named: [(t, name)] the profile's things said (route.py beats.json)."""
     out = []
     aspect = aspect_of(plan)
     l, top, r, bottom = SAFE[aspect]
@@ -185,6 +187,17 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             if cut:
                 out.append(finding("FAIL", c["start"], f"{name} sticker's crop cuts {len(cut)} line(s) of text at its edge",
                                    "plan again (plan.py whole_lines grows the crop to whole lines), or drop props.crop"))
+        tiny = aspect == "9:16" and small_lines(c, aspect)
+        if tiny:
+            out.append(finding("FAIL", c["start"], f"{name} sticker shows {len(tiny)} line(s) of text under {READ_XH} px x-height "
+                               "beside its evidence (a kicker or footnote): unreadable on a phone",
+                               "plan again (plan.py leaves those lines out of the crop), or set a \"crop\" round the evidence lines"))
+        marks = c.get("marks") or ((c.get("anim") or {}).get("props") or {}).get("marks") or []
+        if (c.get("src") or "").startswith("images/capture-") and c["start"] < HOOK_S \
+                and not any(mk.get("find") for mk in marks) and not c.get("highlight"):
+            out.append(finding("FAIL", c["start"], f"{name} capture on the hook has no `find` mark: it shows the page's own "
+                               "headline, not what is said", "give the beat a mark whose \"find\" is the page's words for what "
+                               "the speaker says (visuals.json), capture again; or move the card past the hook"))
         xh = aspect == "9:16" and c.get("src") and c.get("layout") != "scene" and capture_xh(c, aspect)
         if xh and xh < READ_XH:
             out.append(finding("FAIL", c["start"], f"{name} capture text renders at {xh:.0f} px x-height, under {READ_XH}: "
@@ -246,6 +259,21 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         if b - a > static_s and not any(c["start"] <= a and c["end"] >= b for c in cards):
             out.append(finding("WARN", a, f"static for {b - a:.1f} s ({a:.1f}-{b:.1f} s): no card, zoom or cut",
                                "add a visual beat or a zoom in that stretch"))
+    # pacing (SKILL.md step 3): a stretch with no card longer than the plan's card_gap_s is fine only when nothing
+    # in it is named and the frame still changes (a zoom or a cut) at least every QUIET_HOLD_S
+    gap_s = plan.get("card_gap_s") or GAP_S
+    moves = sorted([z[k] for z in plan["zooms"] for k in ("start", "end")] + list(cuts))
+    for a, b in card_gaps(cards, dur):
+        if b - a <= gap_s + 0.01:
+            continue
+        said = [f"'{n}' at {t:.1f} s" for t, n in named if a <= t < b]
+        pts = [a] + [x for x in moves if a < x < b] + [b]
+        still = max(y - x for x, y in zip(pts, pts[1:]))
+        if said or still > QUIET_HOLD_S + 0.01:
+            out.append(finding("WARN", a, f"no card for {b - a:.1f} s ({a:.1f}-{b:.1f} s; the rule is {gap_s:.0f} s)"
+                               + (f": {', '.join(said)} is named there" if said else f" and the frame holds still for {still:.1f} s"),
+                               "show the named thing (a capture, post or logo in visuals.json)" if said else
+                               f"plan again (plan.py adds a zoom change every {QUIET_HOLD_S:.0f} s there); never a made-up visual"))
     main = [c for c in cards if c.get("lane") != "logo"]
     text = [c for c in main if (c.get("anim") or {}).get("type") in TEXT_ANIMS]
     if len(text) > len(main) - len(text):
@@ -663,10 +691,32 @@ def demo():
             "start": 3.0, "end": 5.0, "trigger_word": "claude", "box": [4, 10, 92, 21.7], "layout": "box"}
     small = {**band, "cards": [json.loads(json.dumps(cap1)), json.loads(json.dumps(cap2))]}
     assert sum("x-height" in f["what"] for f in check_plan(small, face) if f["level"] == "FAIL") == 2, check_plan(small, face)
+    hook = [f for f in check_plan(small, face) if "on the hook" in f["what"]]
+    assert len(hook) == 1 and "'jev'" in hook[0]["what"], hook          # cap1 is up at 0.5 s with no find; cap2 lands at 3.0 s
     small["cards"] = pl.readable_captures(small["cards"], "9:16")
+    # the jev page's kicker (58 px lines over 212 px headline lines) is left out of the sticker, not shrunk into it
+    tiny = [json.loads(json.dumps(small["cards"][0]))]
+    tiny[0]["props"]["crop"] = [196, 600, 1578, 600]
+    assert any("under 28 px x-height beside" in f["what"] for f in check_plan({**band, "cards": tiny}, face))
+    assert not pl.small_lines(small["cards"][0], "9:16"), (small["cards"][0]["props"], pl.small_lines(small["cards"][0], "9:16"))
+    withfind = {**band, "cards": [{**cap1, "marks": [{"kind": "highlight", "find": "System One", "rect": [310, 763, 900, 212]}]}]}
+    assert not any("on the hook" in f["what"] for f in check_plan(withfind, face))
+    # plan.py keeps a mark's "find" in the plan (it timed the mark and dropped it before, so this check never saw it)
+    planned = pl.scene_parts([{**cap1, "marks": [{"kind": "highlight", "find": "System One", "at_word": "jev"}]}],
+                             [{"text": "jev", "start": 0.6, "end": 0.9}], None)
+    assert not any("on the hook" in f["what"] for f in check_plan({**band, "cards": planned}, face))
     assert [c["format"] for c in small["cards"]] == ["sticker", "sticker"] and "url" not in small["cards"][0]["props"], small["cards"]
     assert all(pl.capture_xh(c, "9:16") >= READ_XH for c in small["cards"]), [pl.capture_xh(c, "9:16") for c in small["cards"]]
     assert not [f for f in check_plan(small, face) if "x-height" in f["what"] or "cuts" in f["what"]], check_plan(small, face)
+    # pacing: the sample's 11.5 s with no card (10.6-22.1 s). Named there ("Jev"): WARN. Nothing named but the
+    # frame changing every 3 s: fine. Nothing named and no change for 11 s: WARN
+    pc = {**plan, "durationInFrames": 30 * 30, "zooms": [{"start": t, "end": t + 3, "scale": 1.18, "kind": "punch", "ease_s": 0}
+                                                         for t in (10.6, 16.6)],
+          "cards": [{**plan["cards"][0], "start": 0.5, "end": 10.6}, {**plan["cards"][0], "start": 22.1, "end": 30}]}
+    gaps = lambda f: [x for x in f if "no card for" in x["what"]]
+    assert gaps(check_plan(pc, face, named=[(14.0, "Jev")])) and "'Jev' at 14.0 s" in gaps(check_plan(pc, face, named=[(14.0, "Jev")]))[0]["what"]
+    assert not gaps(check_plan(pc, face)), gaps(check_plan(pc, face))
+    assert gaps(check_plan({**pc, "zooms": []}, face))
     print("demo ok")
 
 
@@ -701,7 +751,8 @@ def main():
         static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
         if not face:
             print("note: no face.json, the head check is skipped (run face.py)")
-        found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand())
+        named = [(x["start"], n) for x in rd("beats.json") or [] for n in x.get("names") or []]
+        found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named)
         extra = {"static_s": static_s}
     else:
         video = edit / f"render{tag}.mp4"

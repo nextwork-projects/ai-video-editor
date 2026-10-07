@@ -109,7 +109,7 @@ def contrast(work):
         (ed / "captions.json").write_text(json.dumps(words))
         run(PY, SK / "style-edit/scripts/plan.py", work / "plain.json", ed / "captions.json", "--no-sfx", cwd=work)
         treats = {c.get("treat") for c in json.loads((ed / "plan.json").read_text())["captions"]["chunks"]}
-        if treats != ({None} if name == "dark" else {"stroke"}):
+        if treats != ({None} if name == "dark" else {"backing"}):   # aimed at the render WARN line (4.7:1)
             sys.exit(f"SMOKE FAIL: {name} desk captions treated {treats}")
         if name == "bright":
             run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)

@@ -13,11 +13,13 @@ visuals.json. More on each format and where it comes from: `visuals.md`; every f
 
 One beat per visual, in this order of preference: the user's own assets (images.json), the real
 thing captured (`capture`, `post`, `app`, `youtube`, `github`), UI rebuilt from real parts (`chat`,
-`terminal`, `toasts`), real logos (`logo`, `logo_cluster`, `flow`). Most sentences get nothing.
+`terminal`, `toasts`), real logos (`logo`, `logo_cluster`, `flow`).
 
 Every beat: `word` (as captions.json spells it), `nth`, `hold_s` so the card is still up on its last
 word (omit it for the creator's measured hold), a `word` on each part that lands on its own word.
-About one card every 4-6 s, never two at once, none in the first second unless it is the hook's subject.
+Pacing is one rule (SKILL.md step 3, "Pacing"): a card where a sentence names something real, never
+two at once, none in the first second unless it is the hook's subject. A capture on the hook (the first
+3 s) needs a mark with `find`: the page's words for what is said, never the page's own headline.
 
 | pick | beat |
 |---|---|

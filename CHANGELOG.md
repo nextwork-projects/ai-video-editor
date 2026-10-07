@@ -4,6 +4,36 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Caption pages wrapped to two lines and mixed sizes inside one page (the sample's "down competitor ads",
+  "for one substitute"): the stressed word was drawn 1.15x bigger and a page could wrap to two lines. Now a
+  page is one line at one size (`max_lines` defaults to 1, fitted at the stressed weight with room for the
+  active word's pop, never wrapped); the stressed word draws in the emphasis colour and one weight heavier,
+  never bigger (`emphasis_scale` is no longer read). `check.py render` counts the lines of every page and
+  FAILs one over `max_lines`. On the sample: 6 of 58 pages on two lines before, 0 of 57 after. Test:
+  `quality.py demo` (a page on one line reads 1, wrapped reads 2); `caption_lines` on the old sample
+  render finds the 6 pages.
+- The opening card was the site's headline as a sticker with its lines touching and a kicker too small to
+  read. capture.mjs re-sets a sticker sentence at leading 1.2 or more and drops the page's emoji; plan.py
+  leaves a line under 28 px x-height out of a sticker cut from a shot; `check.py plan` FAILs a sticker that
+  still shows one, and a capture on the hook (first 3 s) with no `find` mark. plan.py now keeps each mark's
+  `find` in the plan for that check. Test: `tests/test_record.mjs` (a 0.85 line-height headline with an
+  emoji: leading 1.20, no emoji), `check.py demo` (the sample page's 58 px kicker over its 212 px headline is
+  left out of the crop; a hook capture without `find` FAILs, with it passes, also after planning).
+- Two pacing rules contradicted each other in style-edit ("a card every 4-6 s", "most sentences get
+  nothing") and the sample had 11.5 s (10.6-22.1 s) with no card. One rule now: a card where a sentence names
+  something real, never two at once; no stretch without a card over `card_gap_s` (10 s, or twice a copied
+  creator's measured gap, `120 / graphics.per_min`). In a longer stretch that names nothing, plan.py adds a
+  zoom change at least every 5 s instead of a made-up visual, and prints what was named there from
+  beats.json; `check.py plan` WARNs a longer stretch that names something or holds still over 5 s. On the
+  sample the "decisions" and "40 to 200 times faster" lines now show the TypeSafe pages that say them:
+  longest stretch with no card 11.5 s before, 8.4 s after; 5.3 cards a minute before, 6.6 after. Test:
+  `plan.py demo` (a sparse creator's zooms get a change every 5 s inside a quiet stretch, untouched outside;
+  `card_gaps`, `card_gap_s`), `check.py demo` (a named thing in a long gap WARNs, a moving frame with nothing
+  named passes, a still one WARNs).
+- `check.py render` WARNed caption contrast (4.36:1 at 20.77 s) that "plan again" never fixed: plan.py aimed
+  at 3.3:1 (the FAIL line) while the render WARNs under 4.5:1. plan.py now aims at 4.7:1. On the sample the
+  worst caption reads 11.7:1, no WARN. Test: `plan.py demo` (mid-grey footage at 4.48:1 gets a treatment).
+
 - Explaining cards on vertical rendered small and off centre (backlog Now 1). plan.py placed a `flow` as a
   box in the 21%-tall band above the head (its cards pushed right, `check.py render` FAILed it at +5.6% while
   `check.py plan` passed), and a `logo_cluster`'s logos at about 6% of the width at the frame edges. Now on

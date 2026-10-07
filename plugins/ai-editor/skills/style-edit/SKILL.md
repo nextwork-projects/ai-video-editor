@@ -85,7 +85,7 @@ on screen and the rules plan.py enforces.
    marks the profile's named things, and with a TypeSafe key Jev picks one route per sentence
    (`none`, `capture:shot|browser|sticker`, `post`, `logo`, `logo_cluster`, `chat`, `terminal`,
    `toasts`, `side_by_side`, `video_card`) into beats.json. Without a key the picks are null: decide
-   them yourself from the same file. Most sentences get nothing.
+   them yourself from the same file.
 2. **Real things first:** write `visuals.json` (`references/shapes.md`): a named product
    or doc becomes a `capture` (with `marks` found by text), a quoted post a `post`, an app an `app`,
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`.
@@ -95,11 +95,11 @@ on screen and the rules plan.py enforces.
    and GitHub images into `images/`, hides cookie banners, measures marks. Do not open the images one
    by one: the stills sheet in step 5 shows every capture.
 
-Pacing: about one card every 4-6 s, never two at once, and leave the speaker alone between runs of
-cards. On vertical every explaining card is a full-frame scene (or sits in the split panel), never a
-small box over the face. A capture on vertical must read on a phone: plan.py cuts a shot or browser
-capture whose evidence text (the marked lines, else the headline) would render under 28 px x-height to
-a sticker of those lines that fills the band, and `check.py plan` FAILs one still under it.
+Pacing, one rule: a card where a sentence names something real (a product, site, post, person, or a
+figure on the page that published it), never two at once; otherwise the speaker carries it. No stretch
+without a card over `card_gap_s` (10 s, or twice a copied creator's measured gap); where a longer one names
+nothing, never make a visual up: plan.py adds zoom changes (`references/plan.md` "Pacing"). Vertical
+captures must read on a phone (`check.py plan` FAILs text under 28 px x-height, and a hook capture with no `find`).
 
 ## 4. Plan
 

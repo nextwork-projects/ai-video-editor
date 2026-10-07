@@ -30,11 +30,13 @@ export type CaptionStyle = {
   active_scale?: number;
   /** Active word lift, % of the font size. Default 8 for lift. */
   active_lift?: number;
-  /** Colour and scale of words marked "emph": true. */
+  /** Colour of words marked "emph": true (default highlight_color); they also draw one weight heavier.
+   *  Never a bigger size: one page keeps one type size, so emphasis_scale is no longer read. */
   emphasis_color?: string;
   emphasis_scale?: number;
   /** Opacity of words not yet said (karaoke, reveal). Default 0.45 karaoke. */
   inactive_opacity?: number;
+  /** Lines a page may take. Default 1: one line, never wrapped. */
   max_lines?: number;
   width_pct?: number;
   /** false: no drop shadow (set while a scene is up: dark ink on a flat ground). */
@@ -44,8 +46,9 @@ export type CaptionStyle = {
 export const useFamily = (name: string | undefined, weight: number) => {
   const [family, setFamily] = useState<string | null>(name ? null : "system-ui, sans-serif");
   const [handle] = useState(() => delayRender(`font ${name}`));
+  // the stressed word draws one weight heavier (CaptionLine), so that weight loads too
   useEffect(() => {
-    (name ? loadFamily(name, [weight]) : Promise.resolve("system-ui, sans-serif"))
+    (name ? loadFamily(name, [weight, Math.min(900, weight + 100)]) : Promise.resolve("system-ui, sans-serif"))
       .then(async (f) => { await document.fonts.ready; setFamily(f); })
       .finally(() => continueRender(handle));
   }, [name, weight, handle]);
@@ -67,14 +70,18 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
     const hi = style.highlight_color ?? color;
     const fx = style.effect ?? style.animation ?? "pop";
     const words = chunk.words.map((w) => ({ ...w, text: casing(w.text, style.case) }));
-    const { fontSize } = fitTextOnNLines({ text: words.map((w) => w.text).join(" "), maxLines: style.max_lines ?? 2, maxBoxWidth: boxW,
-      fontFamily: family, fontWeight: weight, maxFontSize: maxSize });
+    const lines = style.max_lines ?? 1;
+    const heavy = Math.min(900, weight + 100);
+    const activeScale = style.active_scale ?? (fx === "lift" || fx === "pop" ? 1.08 : fx === "karaoke" ? 1.12 : 1);
+    // one size per page, on one line unless the style asks for more: fitted at the stressed word's weight with
+    // room for the active word's scale, and never wrapped
+    const { fontSize } = fitTextOnNLines({ text: words.map((w) => w.text).join(" "), maxLines: lines, maxBoxWidth: boxW / activeScale,
+      fontFamily: family, fontWeight: heavy, maxFontSize: maxSize });
     const size = fontSize * 0.96;
     const lt = t - chunk.start;
     const enter = ease(m.pop)(Math.min(1, Math.max(0, lt / (0.38 * m.k))));
     const pageT = fx === "pop" ? `scale(${0.8 + 0.2 * enter})` : fx === "slide" ? `translateY(${(1 - prog(lt, 0, 0.35 * m.k, m.enter)) * size * 0.6}px)` : "none";
     const pageO = fx === "slide" ? prog(lt, 0, 0.2, "power1.out") : 1;
-    const activeScale = style.active_scale ?? (fx === "lift" || fx === "pop" ? 1.08 : fx === "karaoke" ? 1.12 : 1);
     const lift = ((style.active_lift ?? (fx === "lift" ? 8 : 0)) / 100) * size;
     const dimmed = style.inactive_opacity ?? (fx === "karaoke" ? 0.35 : fx === "reveal" ? 0 : 1);
     // contrast treatment (off while a scene is up: shadow false there), each step keeps the one before
@@ -86,15 +93,14 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
       : style.box || style.stroke ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)`;
     return (
       <div style={{ transform: pageT, opacity: pageO, textAlign: "center", fontFamily: family, fontWeight: weight, fontSize: size,
-        lineHeight: 1.14, color, padding: boxed ? `${size * 0.12}px ${size * 0.3}px` : 0, borderRadius: size * 0.2,
+        lineHeight: 1.14, color, whiteSpace: lines === 1 ? "nowrap" : undefined, padding: boxed ? `${size * 0.12}px ${size * 0.3}px` : 0, borderRadius: size * 0.2,
         background: style.box ? "rgba(0,0,0,0.72)" : boxed ? rgba(tc, 0.45) : "transparent", maxWidth: boxW }}>
         {words.map((w, i) => {
           const next = words[i + 1]?.start ?? chunk.end;
           const on = t >= w.start && t < next, said = t >= w.start;
           // active word: springs up on its start, eases back as the next word starts
           const a = prog(t, w.start - 0.03, 0.22 * m.k, m.pop) * (1 - prog(t, next - 0.03, 0.2, "power2.out"));
-          const em = w.emph ? (style.emphasis_scale ?? 1.15) : 1;
-          const sc = (1 + (activeScale - 1) * a) * em;
+          const sc = 1 + (activeScale - 1) * a;
           const fill = fx === "karaoke" ? Math.min(1, Math.max(0, (t - w.start) / Math.max(0.08, w.end - w.start))) : 0;
           const rev = fx === "reveal" ? prog(t, w.start - 0.04, 0.24 * m.k, m.enter) : 1;
           const op = fx === "karaoke" ? (said ? 1 : dimmed) : fx === "reveal" ? dimmed + (1 - dimmed) * rev : 1;
@@ -109,7 +115,7 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
               {i ? " " : null}
               <span style={{ display: "inline-block", position: "relative", transform: `translateY(${-lift * a + (1 - rev) * size * 0.35}px) scale(${sc})`,
                 margin: `0 ${(sc - 1) * 0.5 * size * Math.max(1, w.text.length * 0.5)}px`,
-                opacity: op, color: textColor ?? base, WebkitTextStroke: stroke, paintOrder: "stroke fill",
+                opacity: op, color: textColor ?? base, fontWeight: w.emph ? heavy : weight, WebkitTextStroke: stroke, paintOrder: "stroke fill",
                 textShadow: shadow }}>
                 {pill ? <span style={{ position: "absolute", left: -size * 0.12, right: -size * 0.12,
                   top: size * 0.02, bottom: 0, background: hi, borderRadius: size * 0.16, transform: `scale(${0.6 + 0.4 * pillP})`, opacity: pillP, zIndex: -1 }} /> : null}
@@ -150,7 +156,7 @@ export const CaptionPage: React.FC<{ p: Record<string, any>; w: number; h: numbe
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
-  const style: CaptionStyle = { effect: "karaoke", weight: 800, ...(p.style ?? {}) };
+  const style: CaptionStyle = { effect: "karaoke", weight: 800, max_lines: 2, ...(p.style ?? {}) };
   const family = useFamily(style.font_match ?? font, style.weight ?? 800);
   const words: Word[] = p.words ?? [];
   const { pages } = createTikTokStyleCaptions({ combineTokensWithinMilliseconds: Number(p.combine_ms ?? 1200),
