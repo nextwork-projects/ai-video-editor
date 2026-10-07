@@ -661,7 +661,7 @@ def demo():
         (up / "keep" / "A.tsx").write_text("a"), (mine / "Gone.tsx").write_text("x"), (mine / "old" / "B.tsx").write_text("b")
         (Path(t) / "outside.txt").write_text("user")
         mirror(up, mine)
-        assert sorted(str(p.relative_to(mine)) for p in mine.rglob("*")) == ["keep", "keep/A.tsx"], list(mine.rglob("*"))
+        assert sorted(p.relative_to(mine).as_posix() for p in mine.rglob("*")) == ["keep", "keep/A.tsx"], list(mine.rglob("*"))
         assert (Path(t) / "outside.txt").exists()
         wf = (repo / ".github/workflows/render.yml").read_text()
         assert "-p 'github-render-media.zip*'" in wf
