@@ -496,6 +496,19 @@ async function shoot(cdp, beat, out) {
   }
 }
 
+// Runs fn over items, at most n at a time (tabs in one Chrome, or fetches), results in input order.
+// AI_EDITOR_TABS sets n (default 4): pages wait seconds on the network, so four at once take about
+// the time of one on a laptop. 1 runs them one by one.
+const TABS = Math.max(1, Number(process.env.AI_EDITOR_TABS) || 4);
+async function pool(items, n, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); }
+  }));
+  return out;
+}
+
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "beat";
 
 // Logos: Simple Icons first (CC0, brand-coloured SVG, thousands of brands), then the site's own
@@ -526,10 +539,12 @@ async function siteIcons(domain) {
 const logoPath = (brand, ext) => `images/logo-${slug(brand)}.${ext}`;
 
 async function fetchLogos(edit, beats) {
-  let failed = 0;
-  for (const b of beats) {
+  // one fetch per brand, all brands at once
+  const seen = new Set();
+  beats = beats.filter((b) => !seen.has(slug(b.brand || b.word)) && seen.add(slug(b.brand || b.word)));
+  return (await pool(beats, 8, async (b) => {
     const brand = b.brand || b.word;
-    if (["svg", "png"].some((e) => fs.existsSync(path.join(edit, logoPath(brand, e))))) continue;
+    if (["svg", "png"].some((e) => fs.existsSync(path.join(edit, logoPath(brand, e))))) return 0;
     const si = slug(brand).replace(/-/g, "");
     // cdn.simpleicons.org serves the brand colour but refuses some networks (cloud machines, some
     // offices); the same icon set on jsDelivr always answers, in black.
@@ -553,31 +568,26 @@ async function fetchLogos(edit, beats) {
       ok = true;
       break;
     }
-    if (!ok) {
-      failed++;
-      console.error(`  no logo for '${brand}'${b.domain ? "" : ' (add "domain" to fall back to the site icon)'}`);
-    }
-  }
-  return failed;
+    if (!ok) console.error(`  no logo for '${brand}'${b.domain ? "" : ' (add "domain" to fall back to the site icon)'}`);
+    return ok ? 0 : 1;
+  })).reduce((a, b) => a + b, 0);
 }
 
 // Icons for scenes: Lucide (ISC licence), one SVG per name, into images/icon-<name>.svg.
 async function fetchIcons(edit, names) {
-  let failed = 0;
-  for (const name of new Set(names)) {
+  return (await pool([...new Set(names)], 8, async (name) => {
     const out = path.join(edit, `images/icon-${slug(name)}.svg`);
-    if (fs.existsSync(out)) continue;
+    if (fs.existsSync(out)) return 0;
     const url = `https://cdn.jsdelivr.net/npm/lucide-static@latest/icons/${slug(name)}.svg`;
     const r = await fetch(url).catch(() => null);
     if (!r || !r.ok) {
-      failed++;
       console.error(`  no icon '${name}' (names: lucide.dev/icons)`);
-      continue;
+      return 1;
     }
     fs.writeFileSync(out, Buffer.from(await r.arrayBuffer()));
     console.log(`images/icon-${slug(name)}.svg  <- ${url}`);
-  }
-  return failed;
+    return 0;
+  })).reduce((a, b) => a + b, 0);
 }
 
 // Every {"icon": ...} and {"logo": ..., "domain"?: ...} nested anywhere in the anim beats' props.
@@ -684,64 +694,68 @@ async function main() {
   const visuals = JSON.parse(fs.readFileSync(path.join(edit, "visuals.json"), "utf8"));
   fs.mkdirSync(path.join(edit, "images"), { recursive: true });
   const refs = sceneRefs(visuals.filter((v) => v.kind === "anim").map((v) => v.props));
-  let failed = await fetchLogos(edit, [...visuals.filter((v) => v.kind === "logo"), ...refs.logos]);
-  failed += await fetchIcons(edit, refs.icons);
   const listPath = path.join(edit, "images.json");
   // Keep the user's own images; replace captures from an earlier run.
   const images = (fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, "utf8")) : [])
     .filter((im) => !im.src.startsWith(PREFIX));
-  for (const b of visuals.filter((v) => SOURCES.includes(v.kind))) {
-    try {
-      const got = await source(edit, b);
-      if (!got) continue;
-      const im = { src: got.src, word: b.word, size: got.size };
-      for (const k of ["nth", "box", "hold_s", "entrance", "layout", "marks"]) if (b[k] !== undefined) im[k] = b[k];
-      images.push(im);
-      console.log(`${got.src}  <- ${got.from}`);
-    } catch (e) {
-      failed++;
-      console.error(`  failed ${b.kind} '${b.word}': ${e.message}`);
-    }
-  }
   const beats = visuals.filter((v) => v.kind === "capture");
-  if (!beats.length) {
-    fs.writeFileSync(listPath, JSON.stringify(images, null, 1));
-    process.exit(failed ? 1 : 0);
-  }
-  const bin = findBinary(SHELLS);
-  if (!bin) {
+  const bin = beats.length && findBinary(SHELLS);
+  if (beats.length && !bin) {
     console.error(`ERROR: no Chrome Headless Shell under ${SHELLS}. Run the setup skill (setup.py remotion) once.`);
     process.exit(1);
   }
-  const cdp = launch(bin);
-  try {
-    for (const [i, b] of beats.entries()) {
-      const src = `${PREFIX}${i + 1}-${slug(b.word)}.png`;
-      let shot;
-      try {
-        shot = await shoot(cdp, b, path.join(edit, src));
-      } catch (e) {
-        failed++;
-        console.error(`  failed ${b.url}: ${e.message}`);
-        continue;
-      }
-      const im = { src, word: b.word, size: shot.size };
-      for (const k of ["nth", "box", "hold_s", "entrance", "layout"]) if (b[k] !== undefined) im[k] = b[k];
-      if (shot.highlight) im.highlight = shot.highlight;
-      if (shot.marks.length) im.marks = shot.marks;
-      if (shot.xh) im.xh = shot.xh;
-      if (shot.lines?.length) im.lines = shot.lines;
-      images.push(im);
-      console.log(`${src}  <- ${b.url}`);
+  let failed = 0;
+  // Logos, icons, free sources and page captures all at once; images.json keeps the beats' order.
+  const sources = async () => (await pool(visuals.filter((v) => SOURCES.includes(v.kind)), 8, async (b) => {
+    try {
+      const got = await source(edit, b);
+      if (!got) return null;
+      const im = { src: got.src, word: b.word, size: got.size };
+      for (const k of ["nth", "box", "hold_s", "entrance", "layout", "marks"]) if (b[k] !== undefined) im[k] = b[k];
+      console.log(`${got.src}  <- ${got.from}`);
+      return im;
+    } catch (e) {
+      failed++;
+      console.error(`  failed ${b.kind} '${b.word}': ${e.message}`);
+      return null;
     }
-  } finally {
-    cdp.close();
-  }
+  })).filter(Boolean);
+  const captures = async () => {
+    if (!beats.length) return [];
+    const cdp = launch(bin);
+    try {
+      return (await pool(beats, TABS, async (b, i) => {
+        const src = `${PREFIX}${i + 1}-${slug(b.word)}.png`;
+        let shot;
+        try {
+          shot = await shoot(cdp, b, path.join(edit, src));
+        } catch (e) {
+          failed++;
+          console.error(`  failed ${b.url}: ${e.message}`);
+          return null;
+        }
+        const im = { src, word: b.word, size: shot.size };
+        for (const k of ["nth", "box", "hold_s", "entrance", "layout"]) if (b[k] !== undefined) im[k] = b[k];
+        if (shot.highlight) im.highlight = shot.highlight;
+        if (shot.marks.length) im.marks = shot.marks;
+        if (shot.xh) im.xh = shot.xh;
+        if (shot.lines?.length) im.lines = shot.lines;
+        console.log(`${src}  <- ${b.url}`);
+        return im;
+      })).filter(Boolean);
+    } finally {
+      cdp.close();
+    }
+  };
+  const [nLogos, nIcons, fromSources, shots] = await Promise.all([
+    fetchLogos(edit, [...visuals.filter((v) => v.kind === "logo"), ...refs.logos]), fetchIcons(edit, refs.icons), sources(), captures()]);
+  failed += nLogos + nIcons;
+  images.push(...fromSources, ...shots);
   fs.writeFileSync(listPath, JSON.stringify(images, null, 1));
   console.log(`${listPath}: captures and logos done, ${failed} failed`);
   if (failed) process.exit(1);
 }
 
 // Imported by product-video/scripts/crawl.mjs for the browser, banner and text-finding helpers.
-export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, STICKER, snapClip, noSandbox, sandboxFlags, rankIcons };
+export { pool, TABS, launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, STICKER, snapClip, noSandbox, sandboxFlags, rankIcons };
 if (path.basename(process.argv[1] || "") === "capture.mjs") await main();

@@ -70,6 +70,15 @@ prints `edits/<name>-hook<n>`; run cut steps 3-5 on it (build prints `lead ... p
 paper-edit lists words in recording order, so the hook reads last there), then style-edit on it with
 the same choices as the main edit.
 
+The variants share nothing, so build, render and verify them all at once, one shell job each, in one
+Bash call (no agents: the commands are fixed), then read each `paper-edit.md` and log tail. On
+Windows without bash, one after another:
+
+```bash
+for n in 1 2; do ( v=$(python3 "$S/retakes.py" hook edits/<name> $n) && python3 "$S/build_timeline.py" <source> "$v" \
+  && python3 "$S/render.py" <source> "$v" && $PY "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
+```
+
 Words that often come just before a retake: "wait", "sorry", "again", "let me do that again",
 "one more time", or a hard stop followed by a long pause.
 

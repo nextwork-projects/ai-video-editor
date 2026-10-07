@@ -4,6 +4,30 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- ai-editor ran its independent work one item at a time. Measured on a 14-core Mac, before -> after, same
+  inputs: style-edit `capture.mjs` (6 page captures, 3 logos, a repo card, a YouTube thumbnail) 28.5 s -> 8.9 s;
+  product-video `crawl.mjs` on a public site (home page and 17 inner pages) 150.5 s -> 48.1 s; `record.mjs
+  --states` (4 flows) 27.7 s -> 9.0 s. The pages share one headless Chrome, four tabs at a time
+  (`AI_EDITOR_TABS`, 1 turns it off); logos and free sources fetch at once; the crawl reads inner pages while
+  it shoots the home page. Same files out (same pages, line counts and state sizes). Screencasts stay one at a
+  time (a busy machine drops their real-time frames). No agents here: one Chrome is cheaper than one agent per
+  page. Test: `tests/test_record.mjs` (pool order and cap).
+- clips edits the chosen clips at once: one `clip-editor` agent (sonnet; Bash, Read, Write, Edit) per clip, all
+  launched in one message, each taking its clip through the cut and style-edit to the stills sheet and returning
+  a short JSON; then one `stills-critic` per sheet, also in one message. Without subagents the skill runs the
+  same steps one clip at a time. On three 23-27 s clips of the sample take (no TypeSafe key, Whisper): 924 s in
+  one session -> 112 s (the three agents took 83, 86 and 112 s); input tokens 1.70 M -> 2.00 M (+17%), and the
+  main session gets three JSON lines instead of three transcripts and paper edits (peak context 99 K in one
+  session, 85-89 K per agent). Test: `evals/clips-fan-out` (three clip-editor launches in one message).
+- Hook variants (cut, `references/retake-detection.md`): the variants build, render and verify as parallel shell
+  jobs in one call, not agents (the commands are fixed). Two hooks on the sample take: 125 s -> 87 s
+  (Whisper's verify is CPU-bound, so two at once is not twice as fast).
+- `edit.py` rewrote every renderer file on each stills or render run, so parallel runs could bundle a file
+  another run had just emptied. It now copies only changed files, through a temp name. Test: `edit.py demo`.
+- A SKILL.md that names an agent must ship it with `model` and `tools` set, and every agent needs `tools`
+  (`tests/check_plugins.py`). The unused `teardown-worker` agent is gone (creator-teardown ships its own).
+  PRINCIPLES.md "Speed": independent work runs at once, scripts first, agents return short JSON.
+
 - creator-teardown ran every video one after another. Transcription, downloads, the Gemini look calls and the
   visual, look and graphics measures now run several videos at once (a quarter of the cores, 1-4; `CT_JOBS=1`
   turns it off), and SKILL.md starts `gemini.py look --no-merge` beside `transcribe`. Measured on a 14-core

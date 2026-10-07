@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { findBinary, SHELLS, DISMISS, TEXT, sandboxFlags } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
+const { findBinary, SHELLS, DISMISS, TEXT, sandboxFlags, pool, TABS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 const { chromeBinary, hasProfile, profileFor, FLAGS } = await import(pathToFileURL(path.join(HERE, "login.mjs")).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const args = process.argv.slice(2);
@@ -458,7 +458,8 @@ async function main() {
       } else console.error("  WARN: could not read the logged-in account's name; add it to flows.json blur.text");
     }
     // a flow may carry "mobile": {...} for the phone layout (other steps where the controls differ)
-    for (const flow of spec.flows.filter((f) => !only || f.id === only).map((f) => (MOBILE && f.mobile ? { ...f, ...f.mobile } : f))) {
+    const flows = spec.flows.filter((f) => !only || f.id === only).map((f) => (MOBILE && f.mobile ? { ...f, ...f.mobile } : f));
+    const runFlow = async (flow) => {
       const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
       const s = (m, p) => cdp.send(m, p, sessionId);
@@ -466,6 +467,8 @@ async function main() {
       const waitFor = (method, ms) => new Promise((ok) => { const l = (m) => { if (m.method === method && m.sessionId === sessionId) fin(true); };
         const timer = setTimeout(() => fin(false), ms); const fin = (v) => { clearTimeout(timer); cdp.listeners.delete(l); ok(v); }; cdp.listeners.add(l); });
       await s("Page.enable");
+      // several flows run at once in --states: each tab behaves as the focused one (typing, :focus, carets)
+      if (STATES) await s("Emulation.setFocusEmulationEnabled", { enabled: true });
       await s("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: DSF, mobile: MOBILE });
       await s("Emulation.setUserAgentOverride", { userAgent: MOBILE
         ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
@@ -485,7 +488,7 @@ async function main() {
       if (STATES) {
         await captureStates(flow, s, ev, waitFor, settle, bcfg, out);
         await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
-        continue;
+        return;
       }
 
       // ---- the cursor starts low right, off the action, as a person's hand would be
@@ -614,7 +617,11 @@ async function main() {
       fs.writeFileSync(path.join(out, `${flow.id}${SUFFIX}.json`), JSON.stringify(meta));
       fs.rmSync(fdir, { recursive: true, force: true });
       console.log(`${mp4}: ${meta.duration.toFixed(1)} s, ${meta.frames} painted frames (${meta.measured_fps} fps where the page moved), ${meta.steps.length} steps`);
-    }
+    };
+    // Stills (--states): every flow opens its own page, so TABS run at once (AI_EDITOR_TABS, default 4).
+    // Screencasts stay one at a time: a busy machine drops their real-time frames.
+    if (STATES) await pool(flows, TABS, runFlow);
+    else for (const flow of flows) await runFlow(flow);
   } finally { cdp.close(); }
 }
 

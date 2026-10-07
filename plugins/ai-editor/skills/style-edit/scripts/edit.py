@@ -15,6 +15,7 @@ The renderer lives in ~/.ai-video-editor/remotion (the setup skill installs it; 
 refreshes its source from the plugin on every run).
 """
 import argparse
+import filecmp
 import inspect
 import json
 import math
@@ -40,9 +41,19 @@ def sync_renderer():
     same_deps = (REMOTION / lock).exists() and (REMOTION / lock).read_bytes() == (SRC / lock).read_bytes()
     if not (REMOTION / "node_modules" / "remotion").exists() or not same_deps:
         subprocess.run([sys.executable, str(SETUP), "remotion"], check=True)
-    shutil.copytree(SRC / "src", REMOTION / "src", dirs_exist_ok=True)
+    shutil.copytree(SRC / "src", REMOTION / "src", dirs_exist_ok=True, copy_function=copy_changed)
     for f in ("render.mjs", "tsconfig.json"):
-        shutil.copy2(SRC / f, REMOTION / f)
+        copy_changed(SRC / f, REMOTION / f)
+
+
+def copy_changed(src, dst):
+    """Copy only a changed file, through a temp name: several clips' stills run at once, and an
+    unchanged file rewritten in place is briefly empty while another run bundles it."""
+    if not (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)):
+        tmp = f"{dst}.{os.getpid()}.tmp"
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    return dst
 
 
 def proxy_filter(sw, sh, w, h):
@@ -627,6 +638,15 @@ def demo():
             assert (repo / f).exists(), f
         assert not list(repo.rglob("*.mp4")), "footage leaked into the git folder"
         assert set(zipfile.ZipFile(z).namelist()) >= {"cut.mp4", "images/a.png"}, zipfile.ZipFile(z).namelist()
+        # an unchanged renderer file is never rewritten (parallel stills bundle it); a changed one is
+        a, b = Path(t) / "a.ts", Path(t) / "b.ts"
+        a.write_text("same"), b.write_text("same")
+        ino = b.stat().st_ino
+        copy_changed(a, b)
+        assert b.stat().st_ino == ino, "an unchanged file was rewritten"
+        a.write_text("new")
+        copy_changed(a, b)
+        assert b.read_text() == "new" and not list(Path(t).glob("b.ts.*.tmp"))
         wf = (repo / ".github/workflows/render.yml").read_text()
         assert "-p 'github-render-media.zip*'" in wf
         for job in ("  plan:", "  render:", "  join:", "name: render\n", "render.mjs chunk", '"concat"'):

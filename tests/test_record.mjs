@@ -50,6 +50,22 @@ console.log("deny list ok");
   console.log("snapClip ok");
 }
 
+// pool: capture.mjs, crawl.mjs and record.mjs --states run pages a few at a time; results keep the input order
+{
+  const { pool } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+  let live = 0, peak = 0;
+  const got = await pool([30, 5, 20, 1, 10], 2, async (ms, i) => {
+    peak = Math.max(peak, ++live);
+    await new Promise((r) => setTimeout(r, ms));
+    live--;
+    return i;
+  });
+  assert.deepEqual(got, [0, 1, 2, 3, 4], "results out of order");
+  assert.equal(peak, 2, `ran ${peak} at once, asked for 2`);
+  assert.deepEqual(await pool([], 4, async () => 1), []);
+  console.log("pool ok");
+}
+
 // The captions keep the leaving scene's ink until its ground is gone from under them (ground.ts): halfway
 // through an iris out (the old switch, 0.31 s early) the paper still covers a caption at 75%, near the end it does not
 {

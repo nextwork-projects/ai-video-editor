@@ -26,6 +26,7 @@ EVALS = [("plugins/ai-editor/evals/setup-plan-first", "AskUserQuestion"),
          ("plugins/ai-editor/evals/render-unapproved", "Approve"),
          ("plugins/ai-editor/evals/captions-too-small", "help everyone"),
          ("plugins/ai-editor/evals/improve-from-feedback", "improve"),
+         ("plugins/ai-editor/evals/clips-fan-out", "clip-editor"),
          ("plugins/ai-editor/evals/paste-website-link", "product-video"),
          ("plugins/ai-editor/evals/paste-tiktok-profile", "creator-teardown"),
          ("plugins/ai-editor/evals/repo-no-plugin", "ai-editor@nextwork"),
@@ -95,11 +96,19 @@ def check_skill(path):
     for ref in re.findall(r"\$\{CLAUDE_SKILL_DIR\}/((?:references|scripts)/[\w./-]+)", body):
         if not (path.parent / ref).exists():
             errors.append(f"{path}: points at {ref}, which does not exist")
+    # PRINCIPLES.md "Speed": a skill that hands work to an agent names one that ships, with its model and tools set
+    agents = path.parents[2] / "agents"
+    for ref in set(re.findall(r"agents/([\w-]+)\.md", body) + re.findall(r"`([a-z]+(?:-[a-z]+)+)(?:\.md)?` agents?\b", body)):
+        fm_a = frontmatter(agents / f"{ref}.md")[0] if (agents / f"{ref}.md").exists() else None
+        if fm_a is None:
+            errors.append(f"{path}: names the agent {ref}, but {agents / (ref + '.md')} does not exist")
+        elif not (fm_a.get("model") and fm_a.get("tools")):
+            errors.append(f"{agents / (ref + '.md')}: {path.parent.name} launches it, so it needs model and tools set")
 
 
 def check_agent(path):
     fm, _ = frontmatter(path)
-    for key in ("name", "description", "model"):
+    for key in ("name", "description", "model", "tools"):
         if not fm.get(key):
             errors.append(f"{path}: no {key}")
     if fm.get("name") != path.stem:

@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // What the crawl line says about the logo: its file, else the wordmark it is drawn as (a text logo has no file).
 const logoNote = (l) => (!l ? "none" : l.src || (l.word ? `text "${l.word}"` : "none"));
-const { launch, findBinary, SHELLS, DISMISS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
+const { launch, findBinary, SHELLS, DISMISS, pool, TABS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 
 const W = 1440, H = 900, DSF = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -243,13 +243,14 @@ function rankPages(navLinks, mapLinks) {
   return out.filter((p) => (byKind[p.kind] = (byKind[p.kind] || 0) + 1) <= p.cap).slice(0, MAX_PAGES);
 }
 
-async function crawlPages(load, ev, shot, navLinks) {
+// The inner pages, TABS at a time (AI_EDITOR_TABS, default 4), each in its own tab of the one Chrome.
+async function crawlPages(openTab, navLinks) {
   // pages the user's brief names come first, whatever their path says
   const must = (flag("--include", "") || "").split(",").filter(Boolean).map((u) => ({ url: new URL(u, url).href, kind: "brief" }));
   const picked = [...must, ...rankPages(navLinks, await sitemapUrls().catch(() => [])).filter((p) => !must.some((m) => m.url === p.url))].slice(0, MAX_PAGES + must.length);
   fs.mkdirSync(path.join(outDir, "pages"), { recursive: true });
-  const out = [];
-  for (const [i, p] of picked.entries()) {
+  return (await pool(picked, TABS, async (p, i) => {
+    const { load, ev, shot, close } = await openTab();
     try {
       await load(p.url);
       for (let y = 0; y < H * 4; y += H * 0.7) { await ev(`scrollTo(0, ${y})`); await sleep(180); }
@@ -257,11 +258,11 @@ async function crawlPages(load, ev, shot, navLinks) {
       const info = await ev(PAGE);
       const rel = `pages/page-${i}.jpg`;
       await shot(rel, { x: 0, y: 0, width: W, height: H }, 0.75, true);
-      out.push({ id: `page-${i}`, url: await ev("location.href"), kind: p.kind, shot: rel, ...info });
       console.error(`  page ${i} ${p.kind.padEnd(9)} ${p.url}  ${info.lines.length} lines, ${info.controls.length} controls, ${info.media.length} media`);
-    } catch (err) { console.error(`  page ${p.url}: ${err.message}`); }
-  }
-  return out;
+      return { id: `page-${i}`, url: await ev("location.href"), kind: p.kind, shot: rel, ...info };
+    } catch (err) { console.error(`  page ${p.url}: ${err.message}`); return null; }
+    finally { await close(); }
+  })).filter(Boolean);
 }
 
 // ---------- node side ----------
@@ -322,29 +323,36 @@ async function main() {
   const bin = findBinary(SHELLS);
   if (!bin) { console.error(`ERROR: no Chrome Headless Shell under ${SHELLS}. Run the setup skill (setup.py remotion) once.`); process.exit(1); }
   const cdp = launch(bin);
-  const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-  const s = (m, p) => cdp.send(m, p, sessionId);
-  const ev = async (expression) => (await s("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result.value;
-  const shot = async (rel, clip, scale = 1, jpeg = false) => {
-    const { data } = await s("Page.captureScreenshot", { format: jpeg ? "jpeg" : "png", quality: jpeg ? 90 : undefined,
-      captureBeyondViewport: false, clip: { ...clip, scale } });
-    const buf = Buffer.from(data, "base64");
-    save(rel, buf);
-    return jpeg ? [Math.round(clip.width * DSF * scale), Math.round(clip.height * DSF * scale)] : pngSize(buf);
+  // One tab: its own session, loader and screenshot. The home page uses one; the inner pages one each.
+  const openTab = async () => {
+    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    const s = (m, p) => cdp.send(m, p, sessionId);
+    await s("Page.enable");
+    const ev = async (expression) => (await s("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result.value;
+    const shot = async (rel, clip, scale = 1, jpeg = false) => {
+      const { data } = await s("Page.captureScreenshot", { format: jpeg ? "jpeg" : "png", quality: jpeg ? 90 : undefined,
+        captureBeyondViewport: false, clip: { ...clip, scale } });
+      const buf = Buffer.from(data, "base64");
+      save(rel, buf);
+      return jpeg ? [Math.round(clip.width * DSF * scale), Math.round(clip.height * DSF * scale)] : pngSize(buf);
+    };
+    const load = async (u, w = W, h = H, mobile = false) => {
+      await s("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 3 : DSF, mobile });
+      await s("Emulation.setUserAgentOverride", { userAgent: mobile
+        ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36" });
+      const loaded = cdp.once("Page.loadEventFired", sessionId, 30000);
+      await s("Page.navigate", { url: u });
+      if (!(await loaded)) console.error(`  ${u}: no load event after 30 s, going on`);
+      await sleep(2500);
+      for (let i = 0; i < 2; i++) { await ev(DISMISS); await sleep(600); }
+      await ev("document.fonts.ready.then(() => true)");
+    };
+    const close = () => cdp.send("Target.closeTarget", { targetId }).catch(() => {});
+    return { s, ev, shot, load, close };
   };
-  const load = async (u, w = W, h = H, mobile = false) => {
-    await s("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 3 : DSF, mobile });
-    await s("Emulation.setUserAgentOverride", { userAgent: mobile
-      ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-      : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36" });
-    const loaded = cdp.once("Page.loadEventFired", sessionId, 30000);
-    await s("Page.navigate", { url: u });
-    if (!(await loaded)) console.error(`  ${u}: no load event after 30 s, going on`);
-    await sleep(2500);
-    for (let i = 0; i < 2; i++) { await ev(DISMISS); await sleep(600); }
-    await ev("document.fonts.ready.then(() => true)");
-  };
+  const { s, ev, shot, load, close } = await openTab();
   // Scroll the whole page once, a viewport at a time, so lazy images load and scroll-in animations
   // fire (a single full-page capture shows them blank), then come back to the top.
   const prime = async () => {
@@ -354,7 +362,6 @@ async function main() {
   };
 
   try {
-    await s("Page.enable");
     await s("Network.enable");
     const cookieFile = flag("--cookies");
     if (cookieFile) await s("Network.setCookies", { cookies: JSON.parse(fs.readFileSync(cookieFile, "utf8")) });
@@ -368,6 +375,8 @@ async function main() {
     const brand = await ev(BRAND);
     const els = await ev(ELEMENTS);
     const logo = await ev(LOGO);
+    // the rest of the site, in other tabs, while this one shoots the home page
+    const pagesP = MAX_PAGES > 0 ? crawlPages(openTab, els.links) : Promise.resolve([]);
 
     // ---- the page, as viewport tiles. Not one full-page capture: that stretches every 100vh section.
     // Fixed and sticky bars are hidden after the first tile so the header does not repeat.
@@ -453,7 +462,7 @@ async function main() {
     }
 
     // ---- the rest of the site: features, pricing, docs, changelog, customers, templates, launch posts
-    const pages = MAX_PAGES > 0 ? await crawlPages(load, ev, shot, els.links) : [];
+    const pages = await pagesP;
 
     const fontFiles = await fonts(brand);
     const accent = accentOf(brand);
@@ -476,7 +485,7 @@ async function main() {
       + `${fontFiles.length} font files (${site.brand.display.family} / ${site.brand.body.family}), logo ${logoNote(logoOut)}, `
       + `ground ${ground} ink ${site.brand.ink} accent ${accent}`);
   } finally {
-    await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
+    await close();
     cdp.close();
   }
 }

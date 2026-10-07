@@ -86,7 +86,7 @@ box) and blurs personal data; show the user the `flows/<id>-blurred.png` sheets 
 node "$S/crawl.mjs" <url> product/<name> [--include <brief urls>] [--pages 20] [--app <url> --cookies cookies.json]
 ```
 
-About 2-3 minutes. The home page as before (2x tiles, element crops, brand from computed styles, logo,
+About a minute (inner pages four at a time, beside the home page). The home page as before (2x tiles, element crops, brand from computed styles, logo,
 font files, the page's own videos), then up to 20 inner pages found from the site's own nav and
 sitemap.xml, ranked features > pricing > customers > templates > docs > changelog > blog, a few of each,
 the brief's URLs first. Each page: its headings and lines, its controls (tabs, buttons, inputs), its

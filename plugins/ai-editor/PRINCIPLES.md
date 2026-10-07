@@ -1,9 +1,8 @@
 # Principles
 
 The rules every skill in this plugin follows, for every user and video. Each names where it is
-enforced. Skills read this file before planning anything visual:
-`${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md`. What enforces each rule and the test that proves it:
-`docs/feedback-matrix.md` at the repo root.
+enforced. What enforces each rule and the test that proves it: the repo's
+`docs/feedback-matrix.md`.
 
 ## Asking
 
@@ -67,7 +66,7 @@ enforced. Skills read this file before planning anything visual:
   in the question box for that video. (`record.mjs` deny list)
 - Every music and sound file has a recorded licence; links ask who holds the rights.
   (`product-video/audio/LICENSES.md`, `MUSIC-LICENSE.md`)
-- Nothing personal ships in this repo: no names, handles or personal file names in public files.
+- Nothing personal ships in this repo: no names, handles or personal file names.
   (`tests/check_plugins.py`)
 
 ## Cost
@@ -76,11 +75,16 @@ enforced. Skills read this file before planning anything visual:
   transcripts or frame-by-frame images when a script can summarise them. (cut `retakes.py`,
   creator-teardown `look.py`, `sheet.py`)
 
+## Speed
+
+- Independent work runs at once: in the script first (Chrome tabs), an agent per item only where
+  it needs judgement, returning a short JSON. (`capture.mjs`, clips)
+
 ## Learning
 
 - Every correction becomes a rule for the next video, counted, with regressions shown.
   (`lib/ai_editor/taste.py`)
-- A correction about one video is first checked as a general rule: after every correction the
-  question box asks "this video, your style, or would it help everyone?". "Everyone" goes to
+- After every correction the question box asks "this video, your style, or would it help
+  everyone?". "Everyone" goes to
   `~/.ai-video-editor/suggestions.jsonl` (scrubbed) and, on a yes, a GitHub issue (`taste.py suggest`,
   `issue`). The `improve` skill turns those into a rule here, the check that enforces it and a test.

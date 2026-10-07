@@ -17,8 +17,6 @@ Sources:
 
 ## Now
 
-1. **Skills fan out to subagents where work is independent** (faster, smaller main context): per-video teardown analysis, per-flow product captures/recordings, per-capture style-edit captures, per-candidate clip scoring, per-hook variant renders. Each worker is a plugin agent (haiku where the job is mechanical) returning a short JSON summary. Test: an eval or a dry run that shows the skill launching the workers in one message, and wall time measured before/after on the sample.
-
 (empty: the next item comes from Next)
 
 ## Next

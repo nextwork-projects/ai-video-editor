@@ -118,7 +118,20 @@ python3 "$K" trim clips/<name> c12 c40 c7          # -> edits/<name>-clip1, -cli
 ```
 
 Each edit folder gets `source.mp4` (frame-accurate, padded without catching the next word) and
-`words.raw.json` re-timed to it. For each one, in order:
+`words.raw.json` re-timed to it. Before the clips run, ask the music question once for all of them
+(style-edit `references/plan.md` "Music"; skip it when the profile says `sound.music: false`).
+
+**All clips at once** (Claude Code, or any agent with subagents): launch one `clip-editor` agent
+(`ai-editor:clip-editor`) per clip, **all in one message** so they run at the same time. Give each
+`EDIT` (the clip's folder, absolute), `ROOT` (`${CLAUDE_PLUGIN_ROOT}`), the `$PY` line, and the answers:
+aspect, layout, music, the transcription engine, and reframe yes (a wide source, unless the platform is
+YouTube) or no, and whether the source has captions burned in. Each takes its clip through the cut and style-edit to the stills sheet and returns a
+short JSON: `status`, `cut_s`, `verify`, `cut_page`, `sheet`, `error`. Merge those; never open a clip's
+transcript or paper edit. Then run the `stills-critic` agent on every `ready` clip's sheet, again all in
+one message, and fix what they fail (plan and stills again for that clip). A `failed` clip: run it by
+hand as below.
+
+**One at a time** (no subagents), for each clip in order:
 
 1. **Vertical from a wide video:** `$PY "$K" reframe edits/<name>-clip<N>` crops to 9:16 with the
    crop following the speaker's head shot by shot (camera cuts found with ffmpeg). Skip it when the
@@ -130,8 +143,9 @@ Each edit folder gets `source.mp4` (frame-accurate, padded without catching the 
    then the style-edit skill from its step 2. If the source already has captions burned in, set
    `"captions": {"present": false}` in that edit's `style.json`, or the captions stack.
 
-Show all the clips' stills sheets together for one approval, ask the render question once for all
-of them, and render. Open every render and give the full paths.
+Either way, open every clip's `cut-check.html` and show all the stills sheets together for one
+approval, ask the render question once for all of them, and render. Open every render and give the
+full paths.
 
 ## If a script stops
 
@@ -172,3 +186,4 @@ python3 "$K" demo
 
 - `scripts/clips.py`: candidates, page, trim, reframe and the offline demo (synthetic transcript,
   canned Jev answers). Stdlib only, except `reframe` (OpenCV, through the venv).
+- `${CLAUDE_PLUGIN_ROOT}/agents/clip-editor.md`: one clip through the cut and style-edit to its stills sheet.
