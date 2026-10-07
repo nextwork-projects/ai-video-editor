@@ -35,10 +35,6 @@ Skill wording:
 - product-video brief: 11 questions over three calls; ask call 1, default the rest in one confirm.
 - `edit.py:43` copies the renderer with `dirs_exist_ok`, so deleted components stay in the user's copy.
 
-Privacy and safety:
-- `taste.py scrub` does not remove `profile.names` or bare domains before a public issue.
-- `setkey` from the clipboard sends any token-shaped text to the vendor; check the prefix first.
-
 Windows and Linux:
 - The apt Node fix line pipes NodeSource's remote script to `sudo bash` (Debian and Ubuntu ship a Node
   older than 20). Flatpak Chromium is not found (no plain binary).

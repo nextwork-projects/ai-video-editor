@@ -337,15 +337,37 @@ REPO = "nextwork-projects/ai-video-editor"
 MEDIA = r"[\w.-]+\.(?:mov|mp4|m4v|mkv|webm|avi|wav|mp3|m4a|aac|png|jpe?g|heic|gif)"
 
 
-def scrub(text):
+# a bare domain (acme.io); the extensions the plugin's own files use are not domains
+DOMAIN = (r"(?<![\w@.])(?:[a-z0-9-]+\.)+(?!(?:py|md|json|jsonl|js|mjs|ts|tsx|sh|txt|ya?ml|toml|css|html|csv|srt|vtt|lock)\b)"
+          r"[a-z]{2,24}\b")
+
+
+def profile_names():
+    """Every name, domain and creator handle in the user's profile (profile.py's file), longest first."""
+    p = HOME / "profile.json"
+    try:
+        prof = json.loads(p.read_text()) if p.exists() else {}
+    except (OSError, ValueError):
+        prof = {}
+    out = []
+    for n in prof.get("names") or []:
+        out += [n.get("name"), n.get("domain")] if isinstance(n, dict) else [n]
+    out += [c.get("handle") for c in prof.get("creators") or [] if isinstance(c, dict)]
+    return sorted({str(x).strip().lstrip("@") for x in out if x and str(x).strip()}, key=len, reverse=True)
+
+
+def scrub(text, names=None):
     """A suggestion leaves the computer only without the user's media or names: paths, file names, emails,
-    @handles and URLs become placeholders."""
+    @handles, URLs, bare domains and every name or handle in the profile become placeholders."""
     text = text.replace(str(Path.home()), "~")
     text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "<email>", text)
     text = re.sub(r"https?://\S+", "<link>", text)
+    for n in profile_names() if names is None else names:
+        text = re.sub(rf"(?<![\w]){re.escape(n)}(?![\w])", "<name>", text, flags=re.I)
     text = re.sub(r"(?<![\w])@[\w.]{2,}", "@creator", text)
     text = re.sub(r"(?<!\S)(?:~|\.{1,2})?(?:/[\w.-]+){2,}/?", "<path>", text)
-    return re.sub(MEDIA, "<file>", text, flags=re.I)
+    text = re.sub(MEDIA, "<file>", text, flags=re.I)
+    return re.sub(DOMAIN, "<domain>", text, flags=re.I)
 
 
 def suggestions_path():
@@ -354,7 +376,9 @@ def suggestions_path():
 
 def suggest(what, rule, owner, example=""):
     """A correction the user said would help everyone, as a general rule for the maintainers."""
-    row = {"at": now(), "what": scrub(what), "rule": scrub(rule), "owner": scrub(owner), "example": scrub(example)}
+    names = profile_names()
+    row = {"at": now(), **{k: scrub(v, names) for k, v in
+                           {"what": what, "rule": rule, "owner": owner, "example": example}.items()}}
     HOME.mkdir(parents=True, exist_ok=True)
     with open(suggestions_path(), "a") as f:
         f.write(json.dumps(row) + "\n")
@@ -444,6 +468,14 @@ def demo():
         assert "<email>" in r["example"] and "<link>" in r["example"] and r["rule"] == "Zooms ease over at least 0.5 s", r
         assert scrub("captions at 1/3 height") == "captions at 1/3 height"
         assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** style-edit quality.py" in issue()
+        # the profile's names, their domains and the creators' handles, and any bare domain, never leave
+        (HOME / "profile.json").write_text(json.dumps({"names": ["Example Product", {"name": "Example Tool",
+                                                       "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}))
+        r = suggest("Example Product logo too big, like example-creator does", "Logos under the caption", "plan.py",
+                    "example tool on example.com and example.org, see style.json")
+        assert "Example" not in json.dumps(r) and "example-creator" not in r["what"], r
+        assert r["what"] == "<name> logo too big, like <name> does" and r["owner"] == "plan.py", r
+        assert r["example"] == "<name> on <name> and <domain>, see style.json", r
     sys.argv = old_argv
     print("demo ok")
 

@@ -4,6 +4,15 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A suggestion sent as a public GitHub issue kept the names, domains and creator handles from the user's
+  profile, and any bare domain (`acme.io`): `taste.py scrub` only caught full URLs, emails, @handles,
+  paths and media files. Every `names` entry (name and domain) and every creator handle in profile.json
+  now becomes `<name>`, and any other bare domain `<domain>`. File names like `plan.json` stay. Test:
+  `taste.py demo`.
+- `setup.py setkey gemini` sent whatever token-shaped text was on the clipboard to Google to test it.
+  `keys.verify` now refuses a Gemini key that does not start with `AIza` before any request, and says a
+  Gemini key was expected. TypeSafe and ElevenLabs have no documented fixed prefix, so they are not
+  checked. Test: `keys.py`.
 - Blending creators dropped the pace creator's scene transitions: `profile.py` PARTS["pace"] did not list
   `transitions`, so the blend fell back to style-edit's default. It now comes with pace, as in
   creator-teardown's editplan. Test: `profile.py demo`.

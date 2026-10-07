@@ -27,6 +27,10 @@ def key_file():
     return Path(home) / ".env" if home else KEY_FILE
 VARS = {"typesafe": "TYPESAFE_API_KEY", "gemini": "GEMINI_API_KEY",
         "elevenlabs": "ELEVENLABS_API_KEY"}
+# The fixed start of each vendor's key, checked before any request. Google API keys start with AIza
+# (creator-teardown references/setup.md). TypeSafe documents none; ElevenLabs' older keys have none.
+PREFIX = {"gemini": "AIza"}
+NAMES = {"typesafe": "TypeSafe", "gemini": "Gemini", "elevenlabs": "ElevenLabs"}
 
 
 def get(name):
@@ -82,7 +86,10 @@ def _get(url, headers):
 
 
 def verify(name, key):
-    """(ok, message). Each check is a free listing call: nothing is billed."""
+    """(ok, message). Each check is a free listing call: nothing is billed. A key without its vendor's
+    fixed prefix is refused here, so text that is not that key never leaves the computer."""
+    if name in PREFIX and not key.startswith(PREFIX[name]):
+        return False, f"this is not a {NAMES[name]} key: {NAMES[name]} keys start with {PREFIX[name]}. Nothing was sent."
     if name == "typesafe":
         code, body = _get("https://api.typesafe.ai/v1/models", {"Authorization": f"Bearer {key}"})
     elif name == "gemini":
@@ -118,6 +125,16 @@ if __name__ == "__main__":   # self-check: saving one key keeps the others
         assert key_file() == f and get("typesafe") == ("c" * 24, str(f))
         assert save("gemini", "d" * 24) == f
         f.unlink()
+        # text without the vendor's prefix is refused before any request
+        real_get, sent = _get, []
+        globals()["_get"] = lambda *a: sent.append(a) or (200, "")
+        try:
+            ok, msg = verify("gemini", "x" * 39)
+            assert not ok and "Gemini" in msg and "AIza" in msg and not sent, (msg, sent)
+            assert verify("gemini", "AIza" + "x" * 35)[0] and len(sent) == 1
+            assert verify("typesafe", "x" * 30)[0] and verify("elevenlabs", "x" * 32)[0]   # no fixed prefix
+        finally:
+            globals()["_get"] = real_get
         cwd = os.getcwd()
         work = Path(d) / "another-project"
         work.mkdir()
