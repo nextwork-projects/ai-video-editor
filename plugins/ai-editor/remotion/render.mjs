@@ -42,7 +42,13 @@ const flags = Object.fromEntries(args.filter((a) => a.startsWith("--"))
 const pos = args.filter((a) => !a.startsWith("--"));
 // Measured on an M4 Pro (14 cores) rendering the sample take: see skills/style-edit/references/render.md.
 const CORES = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
-const concurrency = () => Number(flags.concurrency) || CORES;
+// A busy machine (load over 70% of the cores) gets half the tabs: a starved tab misses its
+// delayRender deadline while it fetches the video. Windows reports no load average (0).
+const concurrency = () => Number(flags.concurrency) ||
+  (os.loadavg()[0] > CORES * 0.7 ? Math.max(1, Math.floor(CORES / 2)) : CORES);
+// Every delayRender (the video frame, fonts, Lottie) may take this long; Remotion's default is 30 s,
+// which a still fetching cut.mp4 under heavy load once missed.
+const TIMEOUT_MS = 120000;
 // Drafts on a Mac encode with VideoToolbox (hardware). It takes a bitrate, not a quality level:
 // 12 Mbit/s at 1080p, scaled with the pixel count. Finals stay on x264, the encoder Modal and GitHub
 // use, so a final looks the same wherever it renders.
@@ -71,7 +77,15 @@ async function stills(publicDir, planPath, outDir, ...pairs) {
   for (const pair of pairs) {
     const [name, frame] = pair.split("=");
     const output = path.join(outDir, `${name}.png`);
-    await renderStill({ serveUrl, composition, inputProps, output, frame: Number(frame) });
+    const once = () => renderStill({ serveUrl, composition, inputProps, output, frame: Number(frame),
+      timeoutInMilliseconds: TIMEOUT_MS });
+    try {
+      await once();
+    } catch (e) {
+      if (!/timeout|timed out|delayRender/i.test(String(e?.message ?? e))) throw e;
+      console.error(`still ${name}: ${String(e?.message ?? e).split("\n")[0]}; trying once more`);
+      await once();
+    }
     console.log(output);
   }
 }
@@ -83,7 +97,7 @@ async function bench(publicDir, planPath) {
   const out = path.join(HERE, "out", "bench.mp4");
   const t0 = Date.now();
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out,
-    frameRange: [from, from + n - 1], concurrency: concurrency() });
+    frameRange: [from, from + n - 1], concurrency: concurrency(), timeoutInMilliseconds: TIMEOUT_MS });
   const s = (Date.now() - t0) / 1000;
   console.log(JSON.stringify({ bundle_s: bundleS, bench_frames: n, bench_s: s,
     s_per_frame: s / n, frames: composition.durationInFrames }));
@@ -99,7 +113,7 @@ async function local(publicDir, planPath, out) {
   // to the video: the same path the GitHub join takes, sample-aligned with the cut.
   const tmp = out.replace(/\.mp4$/i, "") + ".tmp.mkv";
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: tmp,
-    enforceAudioTrack: true, concurrency: concurrency(), scale, ...hwOpts(composition, scale),
+    enforceAudioTrack: true, concurrency: concurrency(), scale, ...hwOpts(composition, scale), timeoutInMilliseconds: TIMEOUT_MS,
     onProgress: ({ progress }) => {
       const p = Math.floor(progress * 10);
       if (p !== last) { last = p; process.stdout.write(`${p * 10}% `); }
@@ -118,7 +132,8 @@ async function chunk(publicDir, planPath, out, from, to) {
   // h264-mkv carries PCM audio: sample-exact to the frame, no AAC padding, so pieces join without a
   // gap. The join encodes the audio to AAC once.
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: out,
-    frameRange: [Number(from), Number(to)], enforceAudioTrack: true, concurrency: concurrency() });
+    frameRange: [Number(from), Number(to)], enforceAudioTrack: true, concurrency: concurrency(),
+    timeoutInMilliseconds: TIMEOUT_MS });
   console.log(`rendered ${out} (frames ${from}-${to}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 

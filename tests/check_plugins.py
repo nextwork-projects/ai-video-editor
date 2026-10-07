@@ -164,6 +164,13 @@ def main():
     if section(a) != section(b):
         errors.append(f"{b}: style.json section differs from {a}; copy it across")
 
+    # creator-teardown ships ai-editor's pins for what it installs, so its fix lines never go unpinned.
+    sys.path.insert(0, str(ROOT / "plugins/ai-editor/lib"))
+    from ai_editor import lock
+    if not lock.TEARDOWN_LOCK.exists() or lock.TEARDOWN_LOCK.read_text(encoding="utf-8") != lock.subset(lock.TEARDOWN_ROOTS):
+        errors.append(f"{lock.TEARDOWN_LOCK}: out of sync with requirements.lock; "
+                      "run python3 plugins/ai-editor/lib/ai_editor/lock.py teardown")
+
     for p in ROOT.rglob("*"):
         # Vendored third-party skills (their own LICENSE file next to SKILL.md) stay verbatim.
         vendored = any((q / "LICENSE").exists() and (q / "SKILL.md").exists() for q in p.parents)

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end smoke test: the whole editor on a made-up 4 s video, on whatever OS runs it.
 
-    python tests/smoke.py        (after setup.py venv, model and remotion)
+    python tests/smoke.py            (after setup.py venv, model and remotion)
+    python tests/smoke.py --load 8   the same with 8 busy loops pinning the CPU (stills and renders under load)
 
 Makes a vertical test video with ffmpeg, then runs every step a learner runs: transcribe,
 capture (an icon, a logo and a real page), face, sound, plan in both layouts, stills and a
@@ -107,4 +108,10 @@ def contrast(work):
 
 
 if __name__ == "__main__":
-    main()
+    n = int(sys.argv[sys.argv.index("--load") + 1]) if "--load" in sys.argv else 0
+    hogs = [subprocess.Popen([PY, "-c", "while True: pass"]) for _ in range(n)]
+    try:
+        main()
+    finally:
+        for h in hogs:
+            h.kill()

@@ -39,6 +39,7 @@ Exit codes: 0 ok - 1 error, or doctor found something to fix - 2 usage
 """
 import argparse
 import datetime
+import glob
 import json
 import platform
 import re
@@ -53,6 +54,7 @@ from transcribe import KEY_FILE, VENV_PY, find_key
 OUT_ROOT = Path.cwd() / "creator-teardowns"
 SELF = Path(__file__).resolve()
 TRANSCRIBE = SELF.with_name("transcribe.py")
+LOCK = SELF.parents[1] / "requirements.lock"   # ai-editor's pins for what this skill uses (check_plugins.py keeps it in sync)
 OS = platform.system()  # Darwin, Windows, Linux
 PY = "py" if OS == "Windows" else "python3"
 
@@ -72,12 +74,39 @@ def run(cmd, **kw):
 
 
 def ytdlp():
-    """yt-dlp on PATH, else the copy in the tool venv."""
-    if shutil.which("yt-dlp"):
-        return [shutil.which("yt-dlp")]
+    """The pinned yt-dlp in the tool venv (the version CI checks weekly), else one on PATH."""
     if VENV_PY.exists() and run([str(VENV_PY), "-m", "yt_dlp", "--version"]).returncode == 0:
         return [str(VENV_PY), "-m", "yt_dlp"]
+    if shutil.which("yt-dlp"):
+        return [shutil.which("yt-dlp")]
     return None
+
+
+def ai_editor_setup():
+    """ai-editor's setup.py when that plugin is installed (this repo's copy, or the plugin cache), else None."""
+    cands = [SELF.parents[4] / "ai-editor" / "skills" / "setup" / "scripts" / "setup.py"]
+    cands += [Path(p) for p in sorted(glob.glob(str(Path.home() / ".claude" / "plugins" / "**" / "skills" / "setup"
+                                                    / "scripts" / "setup.py"), recursive=True), reverse=True)]
+    return next((p for p in cands if p.is_file() and (p.parents[3] / "lib" / "ai_editor").is_dir()), None)
+
+
+def install_fixes(setup, os_name=None):
+    """The fix lines for the tool venv, all from pinned, hash-checked versions.
+    With ai-editor: its bootstrap (first install) and repair (drift). Without: this skill's lock."""
+    if setup:
+        return {"venv": f'{PY} "{setup}" bootstrap',
+                "update": f'claude plugin update ai-editor@nextwork, then {PY} "{setup}" repair',
+                "ocr": f'{PY} "{setup}" repair'}
+    o = os_name or OS
+    if o == "Windows":
+        venv, pip = "py -m venv %USERPROFILE%\\.ai-video-editor\\venv", "%USERPROFILE%\\.ai-video-editor\\venv\\Scripts\\pip"
+    else:
+        venv, pip = "python3 -m venv ~/.ai-video-editor/venv", "~/.ai-video-editor/venv/bin/pip"
+    pin = f'{pip} install --no-deps --require-hashes -r "{LOCK}"'
+    tail = "   (needs: sudo apt install -y python3-venv)" if o == "Linux" else ""
+    return {"venv": f"{venv} && {pin}{tail}",
+            "update": f"claude plugin update creator-teardown@nextwork, then {pin}",
+            "ocr": pin}
 
 
 def tool_python():
@@ -133,14 +162,8 @@ def cmd_doctor(args):
             fix("brew install python", "winget install -e --id Python.Python.3.13",
                 "sudo apt install -y python3"))
 
-    venv_fix = fix(
-        f"python3 -m venv ~/.ai-video-editor/venv && ~/.ai-video-editor/venv/bin/pip install "
-        f"faster-whisper numpy \"pillow>=10.1\" yt-dlp",
-        f"py -m venv %USERPROFILE%\\.ai-video-editor\\venv && "
-        f"%USERPROFILE%\\.ai-video-editor\\venv\\Scripts\\pip install faster-whisper numpy "
-        f"\"pillow>=10.1\" yt-dlp",
-        f"python3 -m venv ~/.ai-video-editor/venv && ~/.ai-video-editor/venv/bin/pip install "
-        f"faster-whisper numpy \"pillow>=10.1\" yt-dlp   (needs: sudo apt install -y python3-venv)")
+    fixes = install_fixes(ai_editor_setup())
+    venv_fix = fixes["venv"]
     if not VENV_PY.exists():
         required_missing += 1
         row("FIX", f"no tool venv at {VENV_PY.parent.parent} (it holds faster-whisper, numpy, pillow)",
@@ -162,16 +185,12 @@ def cmd_doctor(args):
         try:
             age = (datetime.date.today() - datetime.date(*map(int, ver.split(".")[:3]))).days
             if age > 90:
-                row("update", f"yt-dlp is {age} days old. TikTok changes often.",
-                    fix("brew upgrade yt-dlp", "winget upgrade yt-dlp.yt-dlp",
-                        "pipx upgrade yt-dlp"))
+                row("update", f"yt-dlp is {age} days old. TikTok changes often.", fixes["update"])
         except ValueError:
             pass
     else:
         required_missing += 1
-        row("FIX", "yt-dlp is not installed (it lists the videos)",
-            fix("brew install yt-dlp", "winget install -e --id yt-dlp.yt-dlp",
-                "pipx install yt-dlp"))
+        row("FIX", "yt-dlp is not installed (it lists the videos)", venv_fix)
 
     if shutil.which("ffmpeg"):
         row("ok", "ffmpeg")
@@ -195,12 +214,11 @@ def cmd_doctor(args):
         alt = "" if OS == "Darwin" else " or rapidocr"
         has = run([str(VENV_PY), "-c", f"import {ocr}"]).returncode == 0 or (
             OS != "Darwin" and run([str(VENV_PY), "-c", "import rapidocr"]).returncode == 0)
-        pkg = "ocrmac" if OS == "Darwin" else "rapidocr onnxruntime"
         if has:
             row("ok", f"{ocr}{alt}: captions are measured, not read off images")
         else:
             row("optional", f"no {ocr}{alt}. Without it captions fall back to frame sheets.",
-                f"\"{VENV_PY}\" -m pip install {pkg}")
+                fixes["ocr"])
     gkey, gwhere = find_key("GEMINI_API_KEY")
     if gkey:
         row("ok", f"Gemini key, from {gwhere}. The look pass runs on Gemini Flash-Lite.")
@@ -470,6 +488,18 @@ def demo():
     assert [v["id"] for v in top] == ["a"] and [v["id"] for v in control] == ["c"], (top, control)
     assert platform_of(["https://www.instagram.com/reel/X/", "https://instagram.com/p/Y"]) == "instagram"
     assert platform_of(["https://www.tiktok.com/@a/video/1", "https://youtu.be/x"]) == "mixed"
+
+    # Every install line is pinned: ai-editor's bootstrap / repair when it is there, else this
+    # skill's hash-checked lock, which holds ai-editor's exact pins for everything it lists.
+    for setup in (None, Path("/x/ai-editor/skills/setup/scripts/setup.py")):
+        for o in ("Darwin", "Windows", "Linux"):
+            for k, line in install_fixes(setup, o).items():
+                assert "brew" not in line and "pipx" not in line and "winget" not in line, line
+                assert "pip install" not in line or "--require-hashes" in line, line
+                assert (("bootstrap" if k == "venv" else "repair") in line) == bool(setup), (k, line)
+    pins = {m[1]: m[2] for m in re.finditer(r"^([a-z0-9._-]+)==(\S+)", LOCK.read_text(encoding="utf-8"), re.M)}
+    assert {"yt-dlp", "faster-whisper", "numpy", "pillow", "opencv-python-headless"} <= set(pins), pins
+    assert LOCK.read_text(encoding="utf-8").count("--hash=sha256:") > len(pins)
 
     # Saving one key keeps the other.
     import tempfile

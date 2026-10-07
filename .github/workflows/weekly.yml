@@ -1,0 +1,115 @@
+name: weekly
+
+# Every Monday, two early warnings (RELEASING.md "Refreshing the lock"):
+#   yt-dlp:     the pinned yt-dlp lists one TikTok and one YouTube video, and so does the newest
+#               yt-dlp (the lock re-resolved with only yt-dlp moved). A list the pin fails and the
+#               newest passes opens an issue (or comments on the open one) and fails the run: the
+#               lock needs a refresh. Both failing is GitHub's runners being blocked; a warning only.
+#   python-new: the lock installed on the newest released Python and every demo run on it. Allowed
+#               to fail; the summary says what broke (ctranslate2 and onnxruntime ship wheels late).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  yt-dlp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      T: plugins/creator-teardown/skills/creator-teardown/scripts
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - name: Re-resolve the lock with the newest yt-dlp
+        run: |
+          cp plugins/ai-editor/requirements/requirements.lock "$RUNNER_TEMP/newest.lock"
+          cd plugins/ai-editor/requirements
+          uv pip compile requirements.in --universal --python-version 3.10 --generate-hashes \
+            --no-emit-package opencv-python --upgrade-package yt-dlp -o "$RUNNER_TEMP/newest.lock" -q
+      - name: Two venvs, pinned and newest (yt-dlp only)
+        run: |
+          for v in pinned newest; do
+            lock=plugins/ai-editor/requirements/requirements.lock
+            [ $v = newest ] && lock="$RUNNER_TEMP/newest.lock"
+            python -m venv "$RUNNER_TEMP/$v/venv"
+            "$RUNNER_TEMP/$v/venv/bin/pip" install -q --no-deps --require-hashes -r "$lock"
+            echo "$v: yt-dlp $("$RUNNER_TEMP/$v/venv/bin/python" -m yt_dlp --version)"
+          done
+      - name: List one video per platform with each
+        id: list
+        run: |
+          # stable public accounts: the platforms' own
+          broken=""
+          {
+            echo "| platform | pinned | newest |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for p in tiktok youtube; do
+            res=""
+            for v in pinned newest; do
+              if (cd "$RUNNER_TEMP" && AI_EDITOR_HOME="$RUNNER_TEMP/$v" python "$GITHUB_WORKSPACE/$T/fetch.py" list "$p" --platform "$p" --limit 1); then
+                eval "$v=ok"
+              else
+                eval "$v=FAIL"
+              fi
+            done
+            echo "| $p | $pinned | $newest |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$pinned" = FAIL ] && [ "$newest" = ok ]; then broken="$broken $p"; fi
+            if [ "$pinned" = FAIL ] && [ "$newest" = FAIL ]; then echo "::warning::$p: both yt-dlp versions failed (the runner may be blocked)"; fi
+          done
+          echo "broken=${broken# }" >> "$GITHUB_OUTPUT"
+      - name: Link checks (a /channel/ link, a Spotify show)
+        continue-on-error: true
+        run: AI_EDITOR_HOME="$RUNNER_TEMP/pinned" python plugins/ai-editor/lib/ai_editor/links.py live
+      - name: Open an issue when the pinned yt-dlp broke
+        if: steps.list.outputs.broken != ''
+        run: |
+          title="Refresh requirements.lock: pinned yt-dlp fails on ${{ steps.list.outputs.broken }}"
+          body="The pinned yt-dlp could not list ${{ steps.list.outputs.broken }}; the newest yt-dlp could. Refresh the lock (RELEASING.md, Refreshing the lock). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          n=$(gh issue list --state open --search "in:title Refresh requirements.lock" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
+          echo "::error::pinned yt-dlp broken on ${{ steps.list.outputs.broken }}; refresh requirements.lock"
+          exit 1
+
+  python-new:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        id: py
+        with:
+          python-version: "3.x"
+          check-latest: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install the lock
+        id: install
+        run: python -m pip install --no-deps --require-hashes -r plugins/ai-editor/requirements/requirements.lock 2>&1 | tee "$RUNNER_TEMP/install.log"
+      - name: Demos
+        id: demos
+        run: tests/demos.sh 2>&1 | tee "$RUNNER_TEMP/demos.log"
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "### Python ${{ steps.py.outputs.python-version }}"
+            echo "install: ${{ steps.install.outcome }}, demos: ${{ steps.demos.outcome }}"
+            if [ "${{ steps.install.outcome }}" != success ]; then echo '```'; tail -30 "$RUNNER_TEMP/install.log"; echo '```'; fi
+            if [ "${{ steps.demos.outcome }}" = failure ]; then echo '```'; tail -30 "$RUNNER_TEMP/demos.log"; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.install.outcome }}${{ steps.demos.outcome }}" != successsuccess ]; then
+            echo "::warning::Python ${{ steps.py.outputs.python-version }}: install ${{ steps.install.outcome }}, demos ${{ steps.demos.outcome }}"
+          fi

@@ -246,15 +246,26 @@ def verify(plan, edit, w, h):
 
 
 # ---------- Modal ----------
+def matte_image(modal, model_path, req=HOME / "modal-matte.lock"):
+    """The container: numpy, opencv and onnxruntime at requirements.lock's pins, hash-checked, the
+    lock's lines for them and what they pull in (lib/ai_editor/lock.py)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import lock
+    req.parent.mkdir(parents=True, exist_ok=True)
+    text = lock.subset(lock.MATTE_ROOTS)
+    if not req.exists() or req.read_text(encoding="utf-8") != text:   # unchanged file: Modal reuses the image
+        req.write_text(text, encoding="utf-8")
+    return (modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg")
+            .pip_install_from_requirements(str(req), extra_options="--no-deps --require-hashes")
+            .add_local_file(model_path, "/m/rvm.onnx", copy=True)
+            .add_local_file(str(Path(__file__).resolve()), "/m/matte.py"))
+
+
 def run_modal(video, jobs, model_path):
     """Each range on its own Modal container (CPU: RVM mobilenet is small, and the refine and the
     PNG encode are CPU work that a GPU would not speed up). The cut goes up once."""
     import modal
-    here = Path(__file__).resolve()
-    image = (modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg")
-             .pip_install("numpy", "opencv-python-headless>=4.8", "onnxruntime")
-             .add_local_file(model_path, "/m/rvm.onnx", copy=True)
-             .add_local_file(str(here), "/m/matte.py"))
+    image = matte_image(modal, model_path)
     vol = modal.Volume.from_name("ai-video-editor-renders", create_if_missing=True)
     app = modal.App("ai-video-editor-matte")
     job = f"matte-{os.getpid()}-{int(time.time())}"
@@ -373,6 +384,25 @@ def demo():
     assert abs(stabilise(cams, alphas, 2, cv2, np)[5, 5] - 0.8) < 1e-6
     cams[0] = np.full((10, 10, 3), 200, np.uint8)
     assert abs(stabilise(cams, alphas, 2, cv2, np)[5, 5] - 0.1) < 1e-6
+    # The Modal image installs the lock's pins (hashes and all), never an unpinned package.
+    import re
+    import tempfile
+    calls = []
+
+    class Rec:
+        def __getattr__(self, name):
+            return lambda *a, **k: (calls.append((name, a, k)), self)[1]
+    with tempfile.TemporaryDirectory() as t:
+        matte_image(type("M", (), {"Image": Rec()}), "rvm.onnx", Path(t) / "req.lock")
+        names = [c[0] for c in calls]
+        assert "pip_install" not in names and "pip_install_from_requirements" in names, names
+        c = calls[names.index("pip_install_from_requirements")]
+        assert "--require-hashes" in c[2]["extra_options"] and "--no-deps" in c[2]["extra_options"]
+        req = Path(c[1][0]).read_text(encoding="utf-8")
+    lock = (Path(__file__).resolve().parents[3] / "requirements" / "requirements.lock").read_text(encoding="utf-8")
+    pin = lambda txt, n: set(re.findall(rf"^{re.escape(n)}==(\S+)", txt, re.M))
+    for n in ("numpy", "opencv-python-headless", "onnxruntime"):
+        assert pin(req, n) and pin(req, n) == pin(lock, n), (n, pin(req, n), pin(lock, n))
     print("demo ok")
 
 

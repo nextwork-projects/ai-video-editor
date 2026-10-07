@@ -4,6 +4,42 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Pinned everywhere. The matting image on Modal (`matte.py --modal`) installed numpy, opencv and
+  onnxruntime unpinned; it now installs requirements.lock's lines for them and what they pull in,
+  hash-checked (`--no-deps --require-hashes`), built by the new `lib/ai_editor/lock.py`
+  (`matte.py demo` records the image spec and fails on an unpinned package or a version off the
+  lock). `modal_render.py` installs no Python packages (npm ci from package-lock.json), so it was
+  already pinned. creator-teardown on its own printed `pip install faster-whisper numpy ...
+  yt-dlp` and, past 90 days, `brew upgrade yt-dlp`: its doctor now points at ai-editor's
+  `setup.py bootstrap` / `repair` when that plugin is installed, and otherwise at its own
+  `requirements.lock`, ai-editor's exact pins for what it uses (yt-dlp, faster-whisper, numpy,
+  pillow, opencv, the OCR engines) with hashes. `tests/check_plugins.py` fails when that copy
+  drifts (`python3 plugins/ai-editor/lib/ai_editor/lock.py teardown` rewrites it); `fetch.py demo`
+  fails on any unpinned, brew, pipx or winget install line. fetch.py now uses the venv's pinned
+  yt-dlp before one on PATH.
+- Weekly CI (`.github/workflows/weekly.yml`, Mondays). `yt-dlp`: lists one TikTok and one YouTube
+  video with the pinned yt-dlp and with the lock re-resolved to the newest yt-dlp; a list the pin
+  fails and the newest passes opens (or comments on) a "Refresh requirements.lock" issue and fails
+  the run. `python-new`: the lock and every demo on the newest released Python, allowed to fail,
+  reported in the run summary. The demo list moved into `tests/demos.sh` (check.yml and weekly.yml
+  both run it; it gained `lock.py demo` and `matte.py demo`). RELEASING.md "Refreshing the lock":
+  the monthly refresh and what to run after it.
+- Links. A YouTube `/channel/UC...` (or `/c/`, `/user/`) link now routes to the creator's @handle:
+  `links.py route` asks yt-dlp for the channel page alone (`--dump-single-json --flat-playlist
+  --playlist-items 0`, under a second) and drops the "read the @name off the channel" note. A
+  Spotify episode or show link routes to clips with the same episode's audio from the show's own
+  RSS feed: the episode and show names from Spotify's embed page (its oEmbed carries only the
+  episode title, and for a show the latest episode's), the feed from the free iTunes Search API
+  (exact show-name match), the episode by title; `fetch` does the same. Offline, the old note
+  stays. `links.py demo` covers both with canned responses; `links.py live` checks the YouTube
+  channel and a long-running public podcast (weekly CI runs it).
+- Renders under load (backlog item 10). Once, under heavy load, an `edit.py stills` frame timed
+  out in delayRender while fetching cut.mp4 (Remotion's 30 s default). render.mjs now gives every
+  delayRender 120 s (stills, renders, chunks, the benchmark), retries a still once on a timeout,
+  and renders with half the cores' tabs when the 1-minute load average is over 70% of the cores.
+  `tests/smoke.py --load N` runs the smoke test beside N busy loops; it passes at `--load 112` on a
+  14-core Mac (load average 130).
+
 - Start in the repo (backlog item 10). Opening a clone or the zip download in Claude Code and
   trusting the folder now loads ai-editor and creator-teardown from that folder: a committed
   `.claude/settings.json` registers the repo as the `nextwork` marketplace by local path (`./`) and

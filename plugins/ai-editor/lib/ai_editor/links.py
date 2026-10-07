@@ -6,6 +6,7 @@
     python3 links.py classify <url>... [--own]              offline: kind, normalised url, action
     python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4]
     python3 links.py demo                                   self-check on 40+ real URL shapes
+    python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
 Kinds: own (the user's footage: cut + style-edit), creator (creator-teardown), long (clips),
 product (product-video), music (the music question with rights), video (a single video whose
@@ -13,7 +14,9 @@ kind depends on its length and whose it is: `decide`), ask (one question in the 
 unsupported (a sentence to say to the user).
 
 classify() and decide() are pure: no network. `route` runs yt-dlp --dump-json --skip-download
-on single videos to read their length; `fetch` downloads. Neither uses cookies unless the user
+on single videos to read their length, resolves a YouTube /channel/ link to its @handle (yt-dlp, no
+videos read) and a Spotify episode or show to the same episode's audio in the show's own RSS feed
+(Spotify's embed page for the names, the free iTunes Search API for the feed); `fetch` downloads. Neither uses cookies unless the user
 said yes in the question box (--cookies-from-browser).
 
 fetch exit codes: 0 ok (prints the file path) - 1 error (a sentence for the user) - 3 the site
@@ -21,6 +24,7 @@ wants a login: ask the cookie question, then re-run with --cookies-from-browser.
 """
 import base64
 import json
+import xml.etree.ElementTree as ET
 import os
 import platform
 import re
@@ -30,7 +34,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 LONG_S = 8 * 60          # a video at least this long goes to clips
 CLIPS_MIN_S = 3 * 60     # shorter than this, "make clips" is not offered
@@ -331,10 +335,86 @@ def probe(url, cookies=None):
     return d.get("duration"), h
 
 
+def channel_handle(url):
+    """A YouTube /channel/UC..., /c/ or /user/ link -> its @handle (lowercase, no @), or None.
+    One yt-dlp call that reads the channel's page and no videos."""
+    if not ytdlp():
+        return None
+    try:
+        r = subprocess.run(ytdlp() + ["--dump-single-json", "--flat-playlist", "--playlist-items", "0",
+                                      "--no-warnings", url], capture_output=True, text=True, timeout=60)
+        return handle_of(json.loads(r.stdout))
+    except (subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def handle_of(d):
+    """yt-dlp's channel JSON -> the @handle, or None. Pure."""
+    for k in ("uploader_id", "uploader_url", "channel_url"):
+        m = re.search(r"(?:^|/)@([\w.-]+)", str(d.get(k) or ""))
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 ai-video-editor"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read()
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def spotify_audio(url, get=_get):
+    """A Spotify episode or show link -> {audio, feed, title, show} from the show's own RSS feed, or None.
+    Spotify's embed page names the episode and its show (a show link: its latest episode; Spotify's oEmbed
+    carries the episode title only); the iTunes Search API (free, no key) finds the show's feed; the
+    feed's item with the same title has the audio file."""
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(parts) < 2 or parts[-2] not in ("episode", "show"):
+        return None
+    try:
+        page = get(f"https://open.spotify.com/embed/{parts[-2]}/{parts[-1]}").decode("utf-8", "replace")
+        m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', page, re.S)
+        e = json.loads(m.group(1))["props"]["pageProps"]["state"]["data"]["entity"]
+        title, show = e.get("title") or e.get("name"), e.get("subtitle")
+        found = json.loads(get("https://itunes.apple.com/search?media=podcast&entity=podcast&limit=10&term="
+                               + quote(show)))["results"]
+        feed = next(r["feedUrl"] for r in found if r.get("feedUrl") and _norm(r.get("collectionName")) == _norm(show))
+        root = ET.fromstring(get(feed))
+    except (AttributeError, KeyError, TypeError, ValueError, StopIteration, ET.ParseError, OSError):
+        return None
+    for item in root.iter("item"):
+        enc = item.find("enclosure")
+        if enc is not None and enc.get("url") and _norm(item.findtext("title")) == _norm(title):
+            return {"audio": enc.get("url"), "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show"}
+    return None
+
+
+def resolve(it):
+    """route's network step for creator and podcast links: a /channel/ link gets its @handle, a
+    Spotify link its episode's audio from the show's feed. Returns the item, changed or not."""
+    if it["kind"] == "creator" and it.get("platform") == "youtube" and "/@" not in it["url"]:
+        h = channel_handle(it["url"])
+        if h:
+            it = dict(it, url=f"https://www.youtube.com/@{h}", handle=h, source=it["url"])
+            it.pop("note", None)
+    if it.get("platform") == "spotify":
+        a = spotify_audio(it["url"])
+        if a:
+            it = dict(it, url=a["audio"], source=it["url"], feed=a["feed"], name=_slug(a["title"]),
+                      note=f"{a['show']}: {a['title']}, from the show's RSS feed" +
+                           (" (a show link: its latest episode; paste an episode's link for another)" if a["latest"] else ""))
+    return it
+
+
 def route(text, own=False):
     items = [classify(t, own) for t in extract(text)]
     out = []
     for it in items:
+        it = resolve(it)
         if it["kind"] == "video":
             dur, h = (None, None) if it.get("short") and own else probe(it["url"])
             if h and not it.get("handle") and it.get("platform") in TEARDOWN_PLATFORMS:
@@ -352,6 +432,8 @@ def fetch(url, edit_dir, cookies=None, max_gb=4.0):
     it = classify(url, own=True)
     if it["kind"] == "video":
         it = decide(it, None, own=True)
+    if it.get("platform") == "spotify":
+        it = resolve(it)    # the episode's audio from the show's feed: Spotify's own stream is DRM
     edit = Path(edit_dir)
     if it.get("local"):
         p = Path(it["url"])
@@ -530,13 +612,68 @@ def demo():
                  "ERROR: [youtube] x: Private video", "Sign in to confirm your age"):
         assert LOGIN.search(line), line
     assert not LOGIN.search("ERROR: [youtube] x: This video is unavailable")
+    # a /channel/ link: the @handle out of yt-dlp's channel JSON (canned, as --flat-playlist prints it)
+    canned = {"id": "UCabcdefghijklmnopqrstuv", "channel_id": "UCabcdefghijklmnopqrstuv", "uploader_id": "@SomeCreator",
+              "uploader_url": "https://www.youtube.com/@SomeCreator", "_type": "playlist"}
+    assert handle_of(canned) == "somecreator"
+    assert handle_of({"uploader_id": None, "channel_url": "https://www.youtube.com/@Other.One"}) == "other.one"
+    assert handle_of({"uploader_id": "UCabc", "channel_url": "https://www.youtube.com/channel/UCabc"}) is None
+    g = globals()
+    saved = g["channel_handle"]
+    try:
+        g["channel_handle"] = lambda u: handle_of(canned)
+        it = resolve(classify("https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv"))
+        assert it["url"] == "https://www.youtube.com/@somecreator" and it["handle"] == "somecreator" and "note" not in it, it
+        g["channel_handle"] = lambda u: None       # yt-dlp missing or offline: the note stays
+        assert "note" in resolve(classify("https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv"))
+    finally:
+        g["channel_handle"] = saved
+    # Spotify: embed page -> show name -> iTunes Search -> RSS feed -> the same episode's audio
+    nd = {"props": {"pageProps": {"state": {"data": {"entity": {
+        "type": "episode", "title": "#12 \u2013 Sleep, Light & Coffee", "subtitle": "Some Science Show"}}}}}}
+    web = {
+        "https://open.spotify.com/embed/episode/4rOoJ6Egrf8K2IrywzwOMk":
+            f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(nd)}</script></html>'.encode(),
+        "https://itunes.apple.com/search?media=podcast&entity=podcast&limit=10&term=Some%20Science%20Show": json.dumps(
+            {"results": [{"collectionName": "Some Science Show | Summaries", "feedUrl": "https://wrong.example/rss"},
+                         {"collectionName": "Some Science Show", "feedUrl": "https://feeds.example.com/sss"}]}).encode(),
+        "https://feeds.example.com/sss": b"""<?xml version="1.0"?><rss><channel><title>Some Science Show</title>
+            <item><title>#13 - Next One</title><enclosure url="https://cdn.example.com/13.mp3" type="audio/mpeg"/></item>
+            <item><title>#12 - Sleep, Light &amp; Coffee</title><enclosure url="https://cdn.example.com/12.mp3" type="audio/mpeg"/></item>
+            </channel></rss>""",
+    }
+    a = spotify_audio("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk?si=x", get=lambda u: web[u])
+    assert a and a["audio"] == "https://cdn.example.com/12.mp3" and a["feed"] == "https://feeds.example.com/sss", a
+    assert spotify_audio("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", get=lambda u: web.get(u, b"")) == a
+    assert spotify_audio("https://open.spotify.com/episode/missing", get=lambda u: web.get(u, b"")) is None
+    def offline(u):
+        raise urllib.error.URLError("offline")
+    assert spotify_audio("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", get=offline) is None
+    saved = g["spotify_audio"]
+    try:
+        g["spotify_audio"] = lambda u: a
+        it = resolve(classify("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk"))
+        assert it["kind"] == "long" and it["url"] == "https://cdn.example.com/12.mp3" and "RSS" in it["note"], it
+    finally:
+        g["spotify_audio"] = saved
     print(f"demo ok ({len(CASES)} URL shapes)")
+
+
+def live():
+    """Network: one /channel/ link and one well-known podcast on Spotify, end to end."""
+    h = channel_handle("https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ")
+    assert h == "youtube", h
+    a = spotify_audio("https://open.spotify.com/show/2MAi0BvDc6GTFvKFPXnkCL")   # a long-running public interview podcast
+    assert a and a["audio"].startswith("http") and a["feed"], a
+    print(f"live ok: @{h}; {a['show']}: {a['title']} -> {a['audio']}")
 
 
 def main():
     a = sys.argv[1:]
     if a[:1] == ["demo"]:
         return demo()
+    if a[:1] == ["live"]:
+        return live()
     if a[:1] in (["classify"], ["route"]) and len(a) > 1:
         own = "--own" in a
         args = [x for x in a[1:] if x != "--own"]

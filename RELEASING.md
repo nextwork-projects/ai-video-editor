@@ -9,6 +9,32 @@ python3 tests/check_plugins.py
 for p in . plugins/ai-editor plugins/creator-teardown; do claude plugin validate --strict "$p"; done
 ```
 
+## Refreshing the lock
+
+`plugins/ai-editor/requirements/requirements.lock` pins every Python package, yt-dlp included, so a
+TikTok or YouTube change breaks listing until the lock moves. Refresh it on the first Monday of
+each month, and whenever the `weekly` workflow opens a "Refresh requirements.lock" issue (the
+pinned yt-dlp failed a list that the newest one passed):
+
+```bash
+cd plugins/ai-editor/requirements
+uv pip compile requirements.in --universal --python-version 3.10 --generate-hashes \
+  --no-emit-package opencv-python --upgrade -o requirements.lock
+cd ../../..
+python3 plugins/ai-editor/lib/ai_editor/lock.py teardown   # creator-teardown's copy of its share
+python3 tests/check_plugins.py
+PY=~/.ai-video-editor/venv/bin/python tests/demos.sh        # after setup.py repair installs the new lock
+python3 tests/smoke.py
+```
+
+`--upgrade` moves every package; `--upgrade-package yt-dlp` moves yt-dlp alone when the rest must
+stay. Close the issue with the commit. Users pick up the new pins with `setup.py repair` (doctor
+reports the drift). The matte image on Modal takes the same pins from the lock on its next run.
+
+The `weekly` workflow's `python-new` job installs the lock on the newest released Python and runs
+every demo. It is allowed to fail; when it does, its summary names the package without wheels, and
+the lock's `--python-version` floor or `requirements.in` needs a look before users meet it.
+
 ## Version tags
 
 Dependency ranges such as ai-editor's `creator-teardown ^2.0.0` resolve against git tags named
