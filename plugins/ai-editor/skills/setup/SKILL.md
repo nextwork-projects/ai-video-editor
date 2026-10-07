@@ -2,7 +2,7 @@
 name: setup
 description: Installs and checks everything the AI video editor needs on Mac, Windows or Linux (Python, ffmpeg, Node, git, the Python packages, the free transcription model and the Remotion renderer), one step at a time with a check after each. Use when the user says "set up the editor", "install ai-editor", "setup", "get started", when they have just installed the plugin, or when any other ai-editor or creator-teardown step fails because a tool is missing. Also walks the user through the API keys (TypeSafe for cheaper cuts, Gemini for reading a creator's look, ElevenLabs optional), the optional CrisperWhisper model, cloud renders on Modal (offered: $30 free credit a month), the optional GitHub CLI for free GitHub Actions renders and the optional AWS Lambda setup. Also when the user says "set up Modal", "cloud renders", "finish setup", "add my TypeSafe/Gemini/ElevenLabs key", or wants to do a skipped step.
 license: MIT
-compatibility: Claude Code or any agent with a shell, on Mac, Windows or Linux. Installs Python 3.9+, ffmpeg, Node 20+, git and the Remotion renderer; needs internet. Runs from the full ai-editor plugin folder.
+compatibility: Claude Code or any agent with a shell, on Mac, Windows or Linux. Installs Python 3.10+, ffmpeg 4.4+, Node 20+, git and the Remotion renderer; needs internet. Runs from the full ai-editor plugin folder.
 ---
 
 # Setup
@@ -46,7 +46,9 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doctor
 ```
 
 Every line reads `ok` or `FIX` with the exact command for this computer. `Ready.` at the end means
-done: skip to step 5 (keys).
+done: skip to step 5 (keys). A `FIX ... run: setup.py repair` line means something moved off the
+pinned versions (an update, or a package changed by hand): run `repair`, it puts back the exact
+pinned set. What is installed is recorded in `~/.ai-video-editor/env.json`.
 
 If `python3` itself is missing:
 - Mac: `brew install python`. No Homebrew? See step 2.
@@ -73,13 +75,18 @@ Claude Code after installing, then run doctor again.
 
 ## 3. Python packages and the transcription model
 
+Steps 3 and 4 are the steps of `setup.py bootstrap`, run one at a time so the user sees each.
+Every step is safe to re-run: done work prints `up to date` and downloads nothing. Without the
+user watching (CI, a re-install), `setup.py bootstrap` runs all of them and ends with doctor.
+
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" venv
 python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" model
 ```
 
 `venv` installs faster-whisper (free transcription on this computer), numpy, pillow and yt-dlp
-into `~/.ai-video-editor/venv`. `model` downloads the transcription model once, about 500 MB.
+into `~/.ai-video-editor/venv`, at the exact versions in `requirements/requirements.lock` (about
+1 minute). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
 
 ## 4. The renderer
 
@@ -87,8 +94,8 @@ into `~/.ai-video-editor/venv`. `model` downloads the transcription model once, 
 python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" remotion
 ```
 
-Copies the renderer to `~/.ai-video-editor/remotion` and installs it (about 700 MB, a few
-minutes). This is the biggest download. If the user wants to start a creator teardown while it
+Copies the renderer to `~/.ai-video-editor/remotion` and installs exactly its
+`package-lock.json` with `npm ci` (about 700 MB, under a minute on a fast line). This is the biggest download. If the user wants to start a creator teardown while it
 runs, run it in the background and carry on: the teardown does not need it.
 
 Remotion is free for individuals and companies of up to 3 people. Bigger companies need a

@@ -34,9 +34,9 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
-from ai_editor import keys  # noqa: E402
+from ai_editor import keys, models  # noqa: E402
 
-HOME = Path.home() / ".ai-video-editor"
+HOME = models.HOME
 # Whisper tidies speech by default. A prompt full of hesitations makes it keep
 # more of them, and the fillers are the evidence the cut acts on.
 FILLER_PROMPT = "Umm, uh, so, like, you know, I mean, uh, so, um, wait, sorry, let me start again."
@@ -72,7 +72,8 @@ def run_whisper(wav, lang):
                  "(the setup skill installs it).")
     name = os.environ.get("AI_EDITOR_WHISPER_MODEL", "small")
     print(f"whisper model {name} (cpu, int8)", flush=True)
-    model = WhisperModel(name, device="cpu", compute_type="int8",
+    # The pinned model (setup.py model); a size with no pin downloads from the Hub as before.
+    model = WhisperModel(str(models.whisper(name, check=False) or name), device="cpu", compute_type="int8",
                          download_root=str(HOME / "models"))
     # condition_on_previous_text=False: with it on, whisper tends to collapse a
     # repeated line into one, and repeated lines are exactly the retakes.

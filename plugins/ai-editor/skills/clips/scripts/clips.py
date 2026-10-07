@@ -41,6 +41,7 @@ import base64
 import html
 import json
 import math
+import os
 import re
 import statistics
 import subprocess
@@ -636,7 +637,7 @@ def main():
         ap.error("clips_dir is required")
     if a.cmd == "candidates":
         style = json.loads(Path(a.style).read_text()) if a.style else None
-        prof = Path.home() / ".ai-video-editor" / "profile.json"
+        prof = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor")) / "profile.json"
         names = name_list(json.loads(prof.read_text()).get("names")) if prof.exists() else []
         return candidates(a.clips_dir, a.min, a.max, a.speakers, style, a.top, keys.get("typesafe")[0], names=names)
     if a.cmd == "page":

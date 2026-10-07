@@ -41,11 +41,9 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
-MODEL_URL = "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx"
 MODEL = HOME / "models" / "rvm_mobilenetv3_fp32.onnx"
 HANDLE_S = 0.5      # cut this much before and after each behind card
 WARM_S = 1.0        # RVM runs this long before a range so its recurrent state has settled
@@ -59,13 +57,10 @@ MODAL_CPU, MODAL_MEM_GB = 8, 8
 MODAL_CPU_USD_S, MODAL_MEM_USD_S = 0.0000131, 0.00000222
 
 
-def model():
-    if not MODEL.exists():
-        MODEL.parent.mkdir(parents=True, exist_ok=True)
-        print(f"downloading the matting model (15 MB) to {MODEL}", flush=True)
-        urllib.request.urlretrieve(MODEL_URL, MODEL.with_suffix(".part"))
-        MODEL.with_suffix(".part").rename(MODEL)
-    return str(MODEL)
+def model(check=False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import models   # pinned URL + sha256
+    return str(models.fetch(MODEL.name, check))
 
 
 def behind_ranges(plan):
@@ -302,7 +297,7 @@ def main():
     if args == ["demo"]:
         return demo()
     if args == ["fetch"]:
-        print(model())
+        print(model(check=True))
         return
     if not args or args[0].startswith("-"):
         sys.exit(__doc__)

@@ -48,7 +48,7 @@ MODEL = "scribe_v2"
 # One key for every folder. Outside the skill folder, so git pull and plugin
 # updates never touch it.
 KEY_FILE = Path.home() / ".config" / "creator-teardown" / ".env"
-HOME = Path.home() / ".ai-video-editor"
+HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
 VENV_PY = HOME / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 FILLER_PROMPT = "Umm, uh, so, like, you know, I mean... uh, okay, um, right."
 
@@ -201,7 +201,9 @@ def whisper(media, lang, keyterms):
         print("ERROR: faster-whisper is not installed. Run fetch.py doctor for the fix.",
               file=sys.stderr)
         sys.exit(2)
-    model = WhisperModel(os.environ.get("AI_EDITOR_WHISPER_MODEL", "small"), device="cpu",
+    name = os.environ.get("AI_EDITOR_WHISPER_MODEL", "small")
+    pinned = HOME / "models" / f"faster-whisper-{name}"   # the ai-editor setup's pinned copy
+    model = WhisperModel(str(pinned) if (pinned / "model.bin").exists() else name, device="cpu",
                          compute_type="int8", download_root=str(HOME / "models"))
     prompt = FILLER_PROMPT + (" " + ", ".join(keyterms) + "." if keyterms else "")
     segs, info = model.transcribe(str(media), language=lang or None, word_timestamps=True,

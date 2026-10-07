@@ -58,6 +58,15 @@ asking before each step. Works on Mac, Windows and Linux.
 
 The full install is about 1.5 GB, most of it the renderer.
 
+Every install gets the same versions: Python packages from a hashed lock file
+(`plugins/ai-editor/requirements/requirements.lock`), Node packages from `package-lock.json` with
+`npm ci`, and each model checked against its sha256. Without Claude, one command does the whole
+install and is safe to re-run (`py` instead of `python3` on Windows):
+
+```
+python3 plugins/ai-editor/skills/setup/scripts/setup.py bootstrap
+```
+
 ### Other agents (Codex, Cursor, Gemini CLI, Copilot)
 
 ```
@@ -161,6 +170,7 @@ the repo. The footage stays private to you.
 
 Say **"run the editor doctor"**. Every line reads `ok`, or `FIX` with the exact command for your
 computer.
+If doctor says something drifted from the pinned versions, `setup.py repair` puts the exact set back.
 
 ## License
 

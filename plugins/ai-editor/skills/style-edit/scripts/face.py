@@ -17,11 +17,8 @@ import json
 import os
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
-MODEL_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/"
-             "face_detection_yunet/face_detection_yunet_2023mar.onnx")
 MODEL = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor")) / "models" / "yunet.onnx"
 STEP_S = 0.5
 SCAN_W = 360            # detection width; YuNet is built for small inputs
@@ -29,10 +26,9 @@ HAIR, SIDE, CHIN = 0.35, 0.2, 0.15  # head = face box grown by these fractions (
 
 
 def model():
-    if not MODEL.exists():
-        MODEL.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(MODEL_URL, MODEL)
-    return str(MODEL)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import models   # pinned URL + sha256
+    return str(models.fetch(MODEL.name, check=False))
 
 
 def head_box(face, w, h):

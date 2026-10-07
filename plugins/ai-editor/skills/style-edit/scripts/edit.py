@@ -36,8 +36,8 @@ SETUP = PLUGIN / "skills" / "setup" / "scripts" / "setup.py"
 
 def sync_renderer():
     """Install on first use; afterwards copy the source over so plugin updates take effect."""
-    same_deps = (REMOTION / "package.json").exists() and \
-        (REMOTION / "package.json").read_bytes() == (SRC / "package.json").read_bytes()
+    lock = "package-lock.json"     # the pinned set: a changed lock means npm ci again
+    same_deps = (REMOTION / lock).exists() and (REMOTION / lock).read_bytes() == (SRC / lock).read_bytes()
     if not (REMOTION / "node_modules" / "remotion").exists() or not same_deps:
         subprocess.run([sys.executable, str(SETUP), "remotion"], check=True)
     shutil.copytree(SRC / "src", REMOTION / "src", dirs_exist_ok=True)
