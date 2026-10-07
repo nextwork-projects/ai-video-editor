@@ -19,7 +19,7 @@ def venv_python(home=None, windows=os.name == "nt"):
 
 
 def demo():
-    assert venv_python("/x") == Path("/x/venv/bin/python")
+    assert venv_python("/x", windows=False) == Path("/x/venv/bin/python")
     assert venv_python("/x", windows=True) == Path("/x/venv/Scripts/python.exe")
     os.environ["AI_EDITOR_HOME"] = "/elsewhere"
     assert venv_python(windows=False) == Path("/elsewhere/venv/bin/python")
