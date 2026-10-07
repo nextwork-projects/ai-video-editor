@@ -108,7 +108,8 @@ def worst_contrast(rgb, text, ring_px):
     import numpy as np
     if text.sum() < 20:
         return None
-    grow = lambda r: cv2.dilate(text.astype(np.uint8), np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0
+    # a round kernel: a square one reaches 1.4x as far on every curve and diagonal, past a stroke
+    grow = lambda r: cv2.dilate(text.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
     ring = grow(ring_px + 1) & ~grow(1)       # skip the 1 px anti-aliased edge of the glyphs
     if ring.sum() < 20:
         return None
@@ -297,11 +298,15 @@ def caption_fill(frame, colours, ys, font_px, text):
     xa, xb = int(W / 2 - half), int(W / 2 + half)
     near = np.zeros((H, W), bool)
     f = frame.astype(np.int16)
-    for c in colours:
-        near |= np.abs(f - c).max(axis=2) < 60
     lo, hi = max(0, int(min(ys) - font_px)), min(H, int(max(ys) + font_px))
     if hi <= lo:
         return None
+    # footage close to the fill colour (white captions on a bright desk) is not the fill: the
+    # tolerance shrinks to under half the distance between the fill and the band's typical colour
+    typical = np.median(f[lo:hi, xa:xb].reshape(-1, 3), axis=0)
+    for c in colours:
+        tol = min(60, max(8, 0.4 * float(np.abs(typical - c).max())))
+        near |= np.abs(f - c).max(axis=2) < tol
     per_row = near[lo:hi, xa:xb].sum(axis=1).astype(float)
     k = max(1, int(font_px * 0.7))
     score = np.convolve(per_row, np.ones(k), "same")
@@ -589,7 +594,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     sframes = {v: k for k, v in still_frames(plan).items() if k in settle}
     chunks = plan["captions"]["chunks"]
     step = max(1, len(chunks) // 24)
-    cap_frames = {round((ch_["start"] + ch_["end"]) / 2 * fps): ch_["text"] for ch_ in chunks[::step]}
+    cap_frames = {round((ch_["start"] + ch_["end"]) / 2 * fps): ch_ for ch_ in chunks[::step]}
     series = {i: {"area": [], "bbox": [], "d": [], "prev": None} for i in range(len(cards))}
     small_r, small_b, kept, caps = [], [], {}, []
     prev_r = prev_b = None
@@ -848,7 +853,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     rgbs = [np.array([int(h.lstrip("#")[k:k + 2], 16) for k in (4, 2, 0)], float) for h in cols]   # BGR
     worst_cap, edge_hits = [], []
     FW, FH = plan["width"], plan["height"]
-    for t, text in caps:
+    for t, chunk in caps:
+        text = chunk["text"]
         # full size: the stroke is 0.05 em outside the fill, about one pixel at half size
         frame = grab(video, t, FW, FH)
         if frame is None:
@@ -860,8 +866,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if touches:
             edge_hits.append(t)
         # the ring is what is drawn right around the glyph: the stroke when there is one
-        # (Captions.tsx: 0.1 em, half of it outside the fill), else the footage
-        cr = worst_contrast(frame[rows], fill, max(2, round((0.08 if cs.get("stroke") else 0.12) * ch)))
+        # (Captions.tsx: 0.1 em, half of it outside the fill; plan.py's contrast "treat" draws one too),
+        # else the footage
+        stroked = cs.get("stroke") or chunk.get("treat") in ("stroke", "backing")
+        cr = worst_contrast(frame[rows], fill, max(2, round((0.08 if stroked else 0.12) * ch)))
         if cr is not None:
             worst_cap.append((cr, t))
     if worst_cap:
@@ -872,7 +880,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if bad:
             out.append(F("FAIL" if lo[0] < CONTRAST_FAIL else "WARN", lo[1],
                          f"captions read at {lo[0]}:1 against what is around them ({len(bad)} of {len(worst_cap)} samples under {CONTRAST_WARN}:1)",
-                         "captions.stroke true or captions.box true in style.json, then plan again"))
+                         "plan again (plan.py adds a shadow, stroke or backing to each caption the footage drowns); "
+                         "for more, captions.stroke or captions.box true in style.json"))
     for t in edge_hits[:1]:
         out.append(F("FAIL", t, f"a caption touches the frame's side ({len(edge_hits)} sample(s)): cut off",
                      "fewer words_per_caption or a smaller size_pct in style.json, then plan again"))

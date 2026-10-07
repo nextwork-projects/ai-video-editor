@@ -4,6 +4,31 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Captions never fail contrast (backlog item 1): plan.py measures the cut behind every caption page
+  (at the caption box, through the zooms and pans, 4 samples a second) and, where the creator's look
+  would read under 3:1, adds the first step that reaches it: a denser soft shadow, then a 0.1 em stroke
+  in the darkest colour of her palette that stands 4.5:1 off the fill (else near-black), then a 0.45
+  backing. Per chunk, in plan.json `treat` / `treat_color`; a dark background keeps her plain look,
+  and a style with its own stroke or box is left alone. Fixed in check.py render on the way: on a
+  bright desk the caption finder took the desk for white text (now its colour tolerance shrinks when
+  the footage is close to the fill), and the ring round the glyphs used a square kernel that reached
+  past a stroke on every curve (now round). plan.py demo checks the steps on flat colours and on
+  bright and dark clips; smoke renders white unstroked captions on a bright desk and check.py
+  render passes
+- Cut bugs (backlog item 2). render.py "span N: X frames, wanted X+1": build_timeline sized the last
+  span from the file's duration, which is the audio's when it outlasts the video (a phone's often
+  does), so it asked for frames that do not exist; now the frame count is the video stream's own
+  (ffprobe -count_packets). And render.py trimmed on exact frame times, so a container timestamp
+  rounded a hair either side of the boundary (a 1/600 s timescale at 29.97 fps) kept or dropped
+  that frame, and a video stream starting a frame or two in lost frames from span 0; now it trims
+  half a frame early on both edges from the video stream's own start, and the audio follows the
+  same offset. Music under the voice: build_timeline used to stop ("only 18 dB apart") and the
+  fix it suggested, a fixed `--noise`, found no silence or cut into quiet words. Now a speech-to-
+  background gap of 10-20 dB is a music bed: the threshold is the quietest 10% of the take plus a
+  third of the way to speech, and only the gaps between transcript words are trimmed, never inside
+  a word. `cut/scripts/test_media.py` (in CI): 4000 random span / frame rate / timescale / start
+  offset combinations, real renders at 29.97, 25 and 60 fps with audio past the video and a late
+  video start, and a synthetic music bed where no word loses a frame
 - Evals load the plugin: every ai-editor eval case lists `plugins: ["../..",
   "../../../creator-teardown"]`, so `claude plugin eval` loads creator-teardown beside ai-editor
   and the dependency resolves (before, every ai-editor case ran without the plugin and scored 0).

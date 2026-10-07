@@ -1170,6 +1170,131 @@ def probe(video):
             "fps": int(num) / int(den or 1), "duration": float(d["format"]["duration"])}
 
 
+# --- caption contrast: the footage behind each caption page, measured on the cut --------------------------
+CONTRAST_MIN = 3.0     # WCAG 1.4.3 for large text; quality.py fails a caption under it
+# How far each step pulls the footage round the glyphs toward treat_color (alpha-composite in sRGB), as
+# quality.py's contrast check sees it: fitted to renders of white captions on a bright (#E6E1D8) and a
+# grey (#9A9A9A) desk, which agree to 0.04, rounded down. The renderer's default soft shadow, the
+# treatment's denser shadow, that plus a 0.1 em stroke, and all of it on a 0.45 backing (Captions.tsx).
+PULL = {"plain": 0.07, "shadow": 0.12, "stroke": 0.45, "backing": 0.7}
+TREATS = ("shadow", "stroke", "backing")
+LUM = [((v / 255) / 12.92 if v / 255 <= 0.04045 else ((v / 255 + 0.055) / 1.055) ** 2.4) for v in range(256)]
+
+
+def hex_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[k:k + 2], 16) for k in (0, 2, 4))
+
+
+def lum(rgb):
+    return 0.2126 * LUM[rgb[0]] + 0.7152 * LUM[rgb[1]] + 0.0722 * LUM[rgb[2]]
+
+
+def contrast(a, b):
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+def treat_for(pixels, fill, pull, tc):
+    """The footage pixels round a caption pulled toward tc by `pull` -> contrast with the fill at the worst
+    spot: the 90th percentile toward the fill's own luminance (quality.py worst_contrast)."""
+    lf = lum(fill)
+    ls = sorted(lum([round(v + (t - v) * pull) for v, t in zip(px, tc)]) for px in pixels)
+    worst = ls[int(0.9 * (len(ls) - 1))] if lf > 0.18 else ls[int(0.1 * (len(ls) - 1))]
+    return contrast(lf, worst)
+
+
+def pick_treat(pixels, style):
+    """(treat or None, treat colour, contrast it reaches) for one caption page over these footage pixels.
+    The creator's look first; then the smallest step that reaches CONTRAST_MIN."""
+    fill = hex_rgb(style.get("color") or "#FFFFFF")
+    light = lum(fill) > 0.18
+    # the treatment colour: the darkest (or lightest, for dark text) of the creator's palette that
+    # stands 4.5:1 off the fill, else near-black (near-white)
+    pal = [hex_rgb(style[k]) for k in ("stroke_color", "box_color", "highlight_color", "emphasis_color")
+           if re.fullmatch(r"#?[0-9a-fA-F]{6}", str(style.get(k) or ""))]
+    pal = [c for c in pal if contrast(lum(c), lum(fill)) >= 4.5]
+    tc = (min if light else max)(pal, key=lum, default=(17, 17, 17) if light else (245, 245, 245))
+    hexc = "#%02X%02X%02X" % tc
+    plain = 0.0 if style.get("shadow") is False else PULL["plain"]
+    if light:     # the renderer's default shadow is black
+        got = treat_for(pixels, fill, plain, (0, 0, 0))
+    else:
+        got = treat_for(pixels, fill, 0.0, tc)
+    if got >= CONTRAST_MIN:
+        return None, hexc, got
+    for t in TREATS:
+        got = treat_for(pixels, fill, PULL[t], tc)
+        if got >= CONTRAST_MIN:
+            break
+    return t, hexc, got
+
+
+def caption_backdrops(plan, edit_dir, meta):
+    """{chunk index: [RGB pixels]}: the footage behind each caption page as the render draws it (zoom and
+    pan on the cut, check.py footage_affine), at a quarter of the output size, 4 samples a second.
+    ponytail: split layout is measured as if the panel were closed (full-frame footage under the
+    caption's y); check.py render measures the real frames either way."""
+    from check import footage_affine
+    from edit import proxy_filter
+    W, H = plan["width"] // 4, plan["height"] // 4
+    cs, chunks = plan["captions"]["style"], plan["captions"]["chunks"]
+    y = (plan.get("layout") or {}).get("caption_full_y") or cs.get("y_pct", 70)
+    font = (cs.get("size_pct") or 6) / 100 * max(W, H)
+    box_w = (cs.get("width_pct") or 86) / 100 * W
+    scenes = [c for c in plan["cards"] if c.get("layout") == "scene"]
+    want = {}
+    for i, c in enumerate(chunks):
+        if any(sc["start"] < c["end"] and c["start"] < sc["end"] for sc in scenes):
+            continue    # a scene's ground is behind it, drawn in the scene's ink
+        for t in (c["start"] + 0.05, (c["start"] + c["end"]) / 2, c["end"] - 0.05):
+            want.setdefault(max(0, round(t * 4)), []).append(i)
+    out = {}
+    if not want:
+        return out
+    vf = proxy_filter(meta["width"], meta["height"], plan["width"], plan["height"]) + f",fps=4,scale={W}:{H}"
+    p = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(Path(edit_dir) / plan["video"]), "-vf", vf,
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    n = 0
+    while True:
+        buf = p.stdout.read(W * H * 3)
+        if len(buf) < W * H * 3:
+            break
+        for i in want.get(n, ()):
+            c = chunks[i]
+            half = min(box_w / 2, 0.28 * font * len(c["text"]) + font / 2)
+            rows = 1.3 if 0.55 * font * len(c["text"]) > box_w else 0.75     # two lines when it wraps
+            (s, _, tx), (_, _, ty) = footage_affine(n / 4, plan, W, H)
+            px = out.setdefault(i, [])
+            for yy in range(max(0, int(y / 100 * H - rows * font)), min(H, int(y / 100 * H + rows * font) + 1), 2):
+                for xx in range(max(0, int(W / 2 - half)), min(W, int(W / 2 + half) + 1), 2):
+                    sx, sy = int((xx - tx) / s), int((yy - ty) / s)
+                    if 0 <= sx < W and 0 <= sy < H:
+                        k = 3 * (sy * W + sx)
+                        px.append(tuple(buf[k:k + 3]))
+        n += 1
+    p.stdout.close()
+    p.wait()
+    return out
+
+
+def treat_captions(plan, edit_dir, meta):
+    """Every caption page that would read under CONTRAST_MIN on the footage behind it gets the smallest
+    treatment that fixes it, in "treat" (Captions.tsx). The creator's own stroke or box already is one.
+    Returns [(chunk index, treat, contrast)] for the pages it changed."""
+    cs = plan["captions"]["style"]
+    if not plan["captions"]["chunks"] or cs.get("stroke") or cs.get("box"):
+        return []
+    done = []
+    for i, px in caption_backdrops(plan, edit_dir, meta).items():
+        if not px:
+            continue
+        t, colour, got = pick_treat(px, cs)
+        if t:
+            plan["captions"]["chunks"][i].update(treat=t, treat_color=colour)
+            done.append((i, t, round(got, 2)))
+    return done
+
+
 def cut_points(edit_dir):
     """Where the jump cuts fall on cut.mp4, from the cut skill's decisions.json."""
     p = edit_dir / "decisions.json"
@@ -1374,7 +1499,33 @@ def demo():
     # her sound: none a minute -> no cues; impact only -> no whooshes
     assert place_sfx(sp, sw, kit, {"sfx_per_min": 0}) == []
     assert all("whoosh" not in c["src"] for c in place_sfx(sp, sw, kit, {"kinds": {"impact": 100}}))
+    demo_contrast()
     print("demo ok")
+
+
+def demo_contrast():
+    """Caption contrast: the ladder on flat colours, then measured on real clips (ffmpeg)."""
+    import tempfile
+    white = {"color": "#FFFFFF"}
+    assert pick_treat([(38, 38, 38)] * 9, white)[0] is None                   # dark: the creator's look
+    assert pick_treat([(160, 160, 160)] * 9, white)[:2] == ("shadow", "#111111")
+    assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("stroke", "#111111")  # a bright desk
+    assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
+    assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
+    assert pick_treat([(20, 20, 20)] * 9, {"color": "#111111"})[:2] == ("stroke", "#F5F5F5")      # dark text
+    words = [{"text": t, "start": round(0.2 + i * 0.32, 2), "end": round(0.5 + i * 0.32, 2), "type": "word"}
+             for i, t in enumerate("this desk is far too bright".split())]
+    style = {"captions": {"words_per_caption": 3, "y_pct": 68, "size_pct": 5, "color": "#FFFFFF", "stroke": False}}
+    with tempfile.TemporaryDirectory() as d:
+        for colour, want in (("0xE6E1D8", {"stroke"}), ("0x262626", {None})):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=270x480:r=30:d=2.2",
+                            "-f", "lavfi", "-i", "sine=d=2.2", "-vf", "noise=alls=12:allf=t", "-pix_fmt", "yuv420p",
+                            f"{d}/cut.mp4"], check=True)
+            meta = probe(Path(d) / "cut.mp4")
+            pl = build(style, words, meta, edit_dir=d)
+            treat_captions(pl, d, meta)
+            got = {c.get("treat") for c in pl["captions"]["chunks"]}
+            assert got == want, (colour, pl["captions"]["chunks"])
 
 
 def main():
@@ -1407,6 +1558,9 @@ def main():
     plan = build(style, json.loads(Path(a.words).read_text()),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
+    for i, t, got in treat_captions(plan, edit_dir, probe(video)):
+        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast (reaches {got}:1 "
+              "on the footage behind it)", file=sys.stderr)
     if a.no_sfx or (prof.get("sound") or {}).get("sfx") is False:
         plan["sfx"] = []
     if (edit_dir / ".sfx" / "music.wav").exists() and (prof.get("sound") or {}).get("music") is not False:

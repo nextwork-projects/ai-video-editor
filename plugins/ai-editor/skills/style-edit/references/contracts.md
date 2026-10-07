@@ -232,6 +232,12 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 }
 ```
 
+A caption chunk may carry `treat` (`"shadow"` | `"stroke"` | `"backing"`) and `treat_color`: plan.py measured the
+cut behind that page (at the caption box, through the zooms) and the creator's look would read under 3:1 there,
+so it adds the first step that reaches 3:1. Each step keeps the one before. The colour is the darkest of the
+creator's palette that stands 4.5:1 off the fill, else near-black (near-white for dark text). A style with its
+own stroke or box gets none.
+
 A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. Optional per card:
 `lane` (`"logo"` for the logo tiles' lane), `size` and `highlight` (from images.json, for an image), and:
 

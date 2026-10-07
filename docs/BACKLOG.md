@@ -5,12 +5,7 @@ and passes after. Done items move to CHANGELOG.md.
 
 ## Now
 
-1. **Captions never fail contrast.** When the copied creator's caption style (e.g. white, no
-   stroke) drops under 3:1 on the real footage, add a stroke or soft shadow automatically. Test:
-   check.py render passes on a bright background.
-2. **Cut bugs.** `render.py` "span 0: N frames, wanted N+1" with custom pause settings; the silence
-   threshold clipping words over a music bed. Tests on synthetic audio.
-3. **Skill quality pass.** Every SKILL.md read against PRINCIPLES.md: one decision path, under 250
+1. **Skill quality pass.** Every SKILL.md read against PRINCIPLES.md: one decision path, under 250
    lines, references for detail, trigger phrases that fire (claude plugin eval, 3 runs each), no
    step that makes Claude read raw data a script can summarise.
 

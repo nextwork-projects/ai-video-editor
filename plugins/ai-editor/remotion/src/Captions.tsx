@@ -8,7 +8,9 @@ import { Motion, ease, prog } from "./motion";
 import { loadFamily } from "./look";
 
 export type Word = { text: string; start: number; end: number; emph?: boolean };
-export type Chunk = { text: string; start: number; end: number; words: Word[] };
+/** treat: what plan.py added to this page because the footage behind it would drop the creator's look under
+ *  3:1 (a stronger soft shadow; then a thin stroke; then a subtle backing), in treat_color. */
+export type Chunk = { text: string; start: number; end: number; words: Word[]; treat?: "shadow" | "stroke" | "backing"; treat_color?: string };
 export type CaptionStyle = {
   present?: boolean;
   y_pct?: number;
@@ -50,6 +52,11 @@ export const useFamily = (name: string | undefined, weight: number) => {
   return family;
 };
 
+const rgba = (hex: string, a: number) => {
+  const h = hex.replace("#", "");
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
+};
+
 const casing = (s: string, c?: string) => (c === "lower" ? s.toLowerCase() : c === "upper" ? s.toUpperCase() : s);
 
 /** One caption page at time t (seconds on the same clock as the chunk). */
@@ -70,10 +77,17 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
     const activeScale = style.active_scale ?? (fx === "lift" || fx === "pop" ? 1.08 : fx === "karaoke" ? 1.12 : 1);
     const lift = ((style.active_lift ?? (fx === "lift" ? 8 : 0)) / 100) * size;
     const dimmed = style.inactive_opacity ?? (fx === "karaoke" ? 0.35 : fx === "reveal" ? 0 : 1);
+    // contrast treatment (off while a scene is up: shadow false there), each step keeps the one before
+    const tr = style.shadow === false ? undefined : chunk.treat;
+    const tc = chunk.treat_color ?? "#111111";
+    const boxed = style.box || tr === "backing";
+    const shadow = style.shadow === false ? undefined
+      : tr ? `0 0 ${size * 0.02}px ${rgba(tc, 1)}, 0 0 ${size * 0.06}px ${rgba(tc, 0.9)}, 0 ${size * 0.04}px ${size * 0.18}px ${rgba(tc, 0.6)}`
+      : style.box || style.stroke ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)`;
     return (
       <div style={{ transform: pageT, opacity: pageO, textAlign: "center", fontFamily: family, fontWeight: weight, fontSize: size,
-        lineHeight: 1.14, color, padding: style.box ? `${size * 0.12}px ${size * 0.3}px` : 0, borderRadius: size * 0.2,
-        background: style.box ? "rgba(0,0,0,0.72)" : "transparent", maxWidth: boxW }}>
+        lineHeight: 1.14, color, padding: boxed ? `${size * 0.12}px ${size * 0.3}px` : 0, borderRadius: size * 0.2,
+        background: style.box ? "rgba(0,0,0,0.72)" : boxed ? rgba(tc, 0.45) : "transparent", maxWidth: boxW }}>
         {words.map((w, i) => {
           const next = words[i + 1]?.start ?? chunk.end;
           const on = t >= w.start && t < next, said = t >= w.start;
@@ -88,14 +102,15 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
           const pillP = pill ? ease("back.out(2)")(Math.min(1, (t - w.start) / 0.18)) : 0;
           const base = w.emph ? style.emphasis_color ?? hi : color;
           const textColor = fx === "karaoke" ? undefined : on && !pill && fx !== "reveal" ? hi : base;
-          const stroke = style.stroke && !pill ? `${Math.max(2, size * 0.1)}px #000` : undefined;
+          const stroke = pill ? undefined : style.stroke ? `${Math.max(2, size * 0.1)}px #000`
+            : tr === "stroke" || tr === "backing" ? `${Math.max(2, size * 0.1)}px ${tc}` : undefined;
           return (
             <React.Fragment key={i}>
               {i ? " " : null}
               <span style={{ display: "inline-block", position: "relative", transform: `translateY(${-lift * a + (1 - rev) * size * 0.35}px) scale(${sc})`,
                 margin: `0 ${(sc - 1) * 0.5 * size * Math.max(1, w.text.length * 0.5)}px`,
                 opacity: op, color: textColor ?? base, WebkitTextStroke: stroke, paintOrder: "stroke fill",
-                textShadow: style.box || style.stroke || style.shadow === false ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)` }}>
+                textShadow: shadow }}>
                 {pill ? <span style={{ position: "absolute", left: -size * 0.12, right: -size * 0.12,
                   top: size * 0.02, bottom: 0, background: hi, borderRadius: size * 0.16, transform: `scale(${0.6 + 0.4 * pillP})`, opacity: pillP, zIndex: -1 }} /> : null}
                 <span style={{ position: "relative", color: pill ? "#111" : undefined, WebkitTextStroke: pill ? "0px" : undefined }}>{w.text}</span>

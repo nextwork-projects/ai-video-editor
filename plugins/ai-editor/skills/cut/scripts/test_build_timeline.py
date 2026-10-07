@@ -20,10 +20,10 @@ def levels(speech_db, floor_db, n_speech=200, n_floor=800):
 def test_derive():
     assert B.derive_noise_db(levels(-14, -64))[0] == -40.0      # quiet room: speech - 26
     assert B.derive_noise_db(levels(-21, -65))[0] == -47.0      # quieter speaker moves it
-    noise, d = B.derive_noise_db(levels(-13, -28))              # no separation: refuse
-    assert noise is None and "15 dB apart" in d["reason"], d
+    noise, d = B.derive_noise_db(levels(-13, -28))              # music bed: quietest 10% + 1/3
+    assert d["bed"] == -27.6 and noise == round(-27.6 + 14.6 / 3, 1), d
     noise, d = B.derive_noise_db(levels(-13, -28, n_speech=50, n_floor=4000))
-    assert noise is None, d                                     # busy floor is not speech
+    assert d["speech"] == -13 and d["bed"] == -27.6, d           # busy floor is not speech
     assert B.derive_noise_db(levels(-11, -38))[0] == -32.0      # never under floor + 6
 
 

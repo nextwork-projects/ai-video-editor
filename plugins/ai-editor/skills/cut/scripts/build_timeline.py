@@ -67,7 +67,12 @@ def probe(src):
     fps = float(n) / float(d or 1)
     dur = float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                      "-of", "default=nw=1:nk=1", str(src)]))
-    return fps, dur
+    # The frame count comes from the video stream, never duration * fps: a phone's audio often
+    # runs a frame or two past its video, and a last span sized from the format duration asks
+    # render.py for frames that do not exist ("span N: 179 frames, wanted 180").
+    n = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+             "stream=nb_read_packets", "-of", "default=nw=1:nk=1", str(src)])
+    return fps, dur, int(n) if n.isdigit() else int(round(dur * fps))
 
 
 # --- 1. quoted spans -> cuts on token edges ----------------------------------
@@ -169,11 +174,16 @@ def snap_and_pad(cuts, words, pad):
 # A fixed dB threshold is wrong: what it has to separate is a DISTANCE (this
 # speaker's speech vs this room's floor), and both move from take to take. So:
 # speech = p99 of 20 ms window levels, threshold = speech - 26 dB, never closer
-# than 6 dB above the room floor. Under 20 dB between speech and floor no single
-# threshold separates them, and the run stops rather than guess: a wrong
-# threshold does not error, it ships a cut with every pause still in it.
+# than 6 dB above the room floor.
+# Under 20 dB between speech and floor there is a music bed (or a loud room) under
+# the voice. Measured silence cannot see a pause there, and a threshold high enough
+# to see one also sees the quiet ends of words. So the transcript becomes the
+# authority: only gaps BETWEEN words are trimmed, and only where the audio stays
+# near the bed, measured per file from the quietest 10% of the take (the bed level)
+# plus a third of the speech-to-bed distance. Under 10 dB the run stops rather than guess.
 SPEECH_OFFSET_DB = 26.0
 MIN_SEPARATION_DB = 20.0
+BED_PERCENTILE = 0.10
 FLOOR_SEARCH_DB = 10
 FLOOR_HEADROOM_DB = 6.0
 RMS_WIN_S = 0.020
@@ -232,9 +242,9 @@ def derive_noise_db(lvl):
     sep = speech - floor
     diag = {"speech": float(speech), "floor": float(floor), "sep": float(sep)}
     if sep < MIN_SEPARATION_DB:
-        diag["reason"] = (f"speech {speech} dB and floor {floor} dB are only {sep:.0f} dB apart "
-                          f"(need {MIN_SEPARATION_DB:.0f})")
-        return None, diag
+        bed = srt[int(BED_PERCENTILE * (len(srt) - 1))]
+        diag.update(bed=round(bed, 1), noise=round(bed + (speech - bed) / 3, 1))
+        return diag["noise"], diag
     diag["noise"] = noise = max(speech - SPEECH_OFFSET_DB, floor + FLOOR_HEADROOM_DB)
     return noise, diag
 
@@ -259,17 +269,18 @@ def detect_silence(src, noise_db, min_dur):
     return [tuple(s) for s in spans]
 
 
-def quiet_word_gaps(words, gap_max, lvl, speech_db):
-    """Gaps between words that the audio confirms are not speech. Breaths sit
-    above the silence threshold, so measured silence alone leaves every breath
-    in. A gap Whisper left by dropping a word is loud, so the level check keeps it."""
+def quiet_word_gaps(words, gap_max, lvl, quiet_db):
+    """Gaps between words that the audio confirms are not speech (90% of the gap's
+    windows under quiet_db). Breaths sit above the silence threshold, so measured
+    silence alone leaves every breath in. A gap Whisper left by dropping a word is
+    loud, so the level check keeps it."""
     out = []
     for p, n in zip(words, words[1:]):
         a, b = p["end"], n["start"]
         if b - a <= gap_max or not lvl:
             continue
         win = sorted(lvl[int(a / RMS_WIN_S):int(b / RMS_WIN_S)])
-        if win and win[int(0.9 * (len(win) - 1))] < speech_db - GAP_QUIET_DB:
+        if win and win[int(0.9 * (len(win) - 1))] < quiet_db:
             out.append((a, b))
     return out
 
@@ -402,12 +413,12 @@ MIN_KEPT_S = 0.2
 END_TAIL_S = 0.4   # room after the final word, so the video does not stop mid-release
 
 
-def kept_frames(cuts, fps, dur):
+def kept_frames(cuts, fps, dur, total=None):
     """Cuts -> kept [start_frame, end_frame) pairs. Cut start floored (a flub's
     onset starts before its label; rounding later re-admits it), cut end ceiled
     but clamped to the frame the next kept word starts in (ceiling into it
-    deletes the word)."""
-    total = int(round(dur * fps))
+    deletes the word). total: the video stream's real frame count."""
+    total = int(round(dur * fps)) if total is None else total
     kept, cursor = [], 0
     for c in cuts:
         a = max(0, min(total, math.floor(c["start"] * fps)))
@@ -478,36 +489,41 @@ def main():
     max_pause = a.max_pause or taste.load_json().get("cut", {}).get("max_pause") or DEFAULT_MAX_PAUSE
     gap_max, gap_keep, splice_max = max_pause, round(2 / 3 * max_pause, 3), max_pause
 
-    fps, dur = probe(a.source)
+    fps, dur, nframes = probe(a.source)
     lvl = window_rms_db(a.source)
-    noise = a.noise
+    derived, diag = derive_noise_db(lvl)
+    bed = "bed" in diag      # music under the voice: word gaps only, never inside a word
+    noise = a.noise if a.noise is not None else derived
     if noise is None:
-        noise, diag = derive_noise_db(lvl)
-        if noise is None:
-            sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
-                     "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
-                     "pass --noise <dB> (about 10 dB above the mean volume).")
+        sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
+                 "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
+                 "pass --noise <dB> (about 10 dB above the mean volume).")
+    if a.noise is None:
         print(f"noise      {noise:.0f} dB derived (speech {diag['speech']:.0f}, "
-              f"floor {diag['floor']:.0f})")
-    heard = detect_silence(a.source, noise, gap_max)
-    if not heard:
-        sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
-
-    speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
+              + (f"music bed {diag['bed']:.0f}: trimming only between words)" if bed
+                 else f"floor {diag['floor']:.0f})"))
     kept_words = [w for w in words if not covered_by(w, model_cuts)]
-    heard = merge_spans(heard + quiet_word_gaps(kept_words, gap_max, lvl, speech_db))
+    if bed:
+        heard = quiet_word_gaps(kept_words, gap_max, lvl, noise)
+    else:
+        heard = detect_silence(a.source, noise, gap_max)
+        if not heard:
+            sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
+        speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
+        heard = merge_spans(heard + quiet_word_gaps(kept_words, gap_max, lvl, speech_db - GAP_QUIET_DB))
+    splice_noise = None if bed else noise    # over a bed, word labels bound the splices
     allcuts = merge(snap_and_pad(model_cuts, words, a.pad)
                     + silence_cuts(words, gap_max, gap_keep, heard)
                     + lead_trail_cuts(kept_words, dur, gap_keep))
-    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, noise)
+    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, splice_noise)
     if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out
         last = max(w["end"] for w in kept_words)
         allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
-    frames = kept_frames(allcuts, fps, dur)
+    frames = kept_frames(allcuts, fps, dur, nframes)
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)
 
-    gaps = sorted(splice_gaps(allcuts, words, model_cuts, lvl, noise))
+    gaps = sorted(splice_gaps(allcuts, words, model_cuts, lvl, splice_noise))
     print(f"pause      target {max_pause:.2f}s (tighten over {gap_max:.2f}s to {gap_keep:.2f}s)")
     print(f"source     {dur:.2f}s at {fps:.3f} fps")
     print(f"cuts       {len(model_cuts)} from spans.json, {len(allcuts)} after merging with pauses")

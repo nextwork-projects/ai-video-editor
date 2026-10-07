@@ -73,12 +73,37 @@ def main():
                               str(edit / f)], capture_output=True, text=True).stdout.strip()
         if not out or abs(float(out) - 4) > 0.3:
             sys.exit(f"SMOKE FAIL: {f} duration {out!r}, expected about 4 s")
+    contrast(work)
     stills = list((edit / "stills").glob("*.png"))
     if not stills:
         sys.exit("SMOKE FAIL: no stills")
     print(f"SMOKE OK on {platform.system()}: {len(stills)} stills, both renders 4 s ({work})")
     if os.environ.get("CI"):
         shutil.rmtree(work, ignore_errors=True)
+
+
+def contrast(work):
+    """White captions with no stroke (the creator's look) on a bright desk: plan.py adds the treatment
+    and check.py render passes; on a dark desk the plan keeps her plain look."""
+    words = [{"text": t, "start": round(0.2 + i * 0.32, 2), "end": round(0.48 + i * 0.32, 2), "type": "word"}
+             for i, t in enumerate("this desk is far too bright for white words".split())]
+    style = {"handle": "plain", "captions": {"present": True, "words_per_caption": 3, "y_pct": 68, "size_pct": 5,
+             "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": False}}
+    (work / "plain.json").write_text(json.dumps(style))
+    for name, colour in (("bright", "0xE6E1D8"), ("dark", "0x262626")):
+        ed = work / "edits" / name
+        ed.mkdir(parents=True)
+        run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=540x960:r=30:d=3", "-f", "lavfi",
+            "-i", "sine=f=220:d=3", "-vf", "noise=alls=12:allf=t", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", ed / "cut.mp4", cwd=work)
+        (ed / "captions.json").write_text(json.dumps(words))
+        run(PY, SK / "style-edit/scripts/plan.py", work / "plain.json", ed / "captions.json", "--no-sfx", cwd=work)
+        treats = {c.get("treat") for c in json.loads((ed / "plan.json").read_text())["captions"]["chunks"]}
+        if treats != ({None} if name == "dark" else {"stroke"}):
+            sys.exit(f"SMOKE FAIL: {name} desk captions treated {treats}")
+        if name == "bright":
+            run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
+            run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on a contrast FAIL
 
 
 if __name__ == "__main__":

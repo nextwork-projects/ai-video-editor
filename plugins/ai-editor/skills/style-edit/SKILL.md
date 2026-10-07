@@ -95,6 +95,9 @@ What the plan does:
   default look (purple-blue, glass with neon, Inter) replaced. Read every warning.
 - **Look** (motion.md): the profile's brand kit > the creator's measured palette and fonts >
   `editorial`. **Motion personality** from the creator's median shot (punchy, snappy, smooth, calm).
+- **Caption contrast:** each caption page is measured on the cut behind it. Where the creator's
+  look would read under 3:1, that page gets a soft shadow, then a thin stroke, then a backing,
+  whichever is first to reach 3:1 (printed per caption).
 - **Layout per card:** overlay first: every card floats over the footage in the free space round
   the head; a beat asking for `"layout": "scene"` gets a full-frame cut-away with a designed
   transition; logos, arrow callouts and caption pages stay boxes. There are no type cards. A beat's `layout` overrides, except that an

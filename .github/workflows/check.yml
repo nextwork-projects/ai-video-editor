@@ -64,6 +64,7 @@ jobs:
           python $T/gemini.py demo
           python $A/cut/scripts/test_build_timeline.py
           python $A/cut/scripts/test_retakes.py
+          python $A/cut/scripts/test_media.py
           python plugins/ai-editor/lib/ai_editor/keys.py
           python plugins/ai-editor/lib/ai_editor/jev.py
           python plugins/ai-editor/lib/ai_editor/links.py demo

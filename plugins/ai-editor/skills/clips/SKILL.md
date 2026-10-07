@@ -119,8 +119,8 @@ Each edit folder gets `source.mp4` (frame-accurate, padded without catching the 
    crop following the speaker's head shot by shot (camera cuts found with ffmpeg). Skip it when the
    profile's platform is YouTube or the source is already vertical.
 2. **Cut:** the cut skill from its step 2 (`retakes.py propose`): the transcript is already there.
-   Then build, render, verify and the cut page, as that skill says. A published video often has
-   music under the voice: when `build_timeline.py` stops on the silence threshold, pass `--noise`.
+   Then build, render, verify and the cut page, as that skill says. Music under the voice is
+   measured per file: `build_timeline.py` trims only between words there.
 3. **Style:** `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" style edits/<name>-clip<N>`,
    then the style-edit skill from its step 2. If the source already has captions burned in, set
    `"captions": {"present": false}` in that edit's `style.json`, or the captions stack.

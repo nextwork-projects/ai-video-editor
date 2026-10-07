@@ -144,7 +144,9 @@ pauses: a gap between words is cut when the audio in it stays well under speech 
 Fix any `ERROR` it prints (a quote that does not match, or a phrase that appears twice without
 `occurrence`), then run it for real.
 
-If it stops with "cannot derive a silence threshold", the room is noisy. Measure with
+Music under the voice is handled: it prints "music bed" and trims only the gaps between
+transcript words, never inside one. If it stops with "cannot derive a silence threshold", speech
+and background are under 10 dB apart. Measure with
 `ffmpeg -i <source> -af volumedetect -vn -f null -` and pass `--noise <dB>` about 10 dB above the
 mean volume.
 
@@ -221,4 +223,5 @@ the style when they're ready. Never start style-edit on your own.
 ```bash
 python3 "$S/test_build_timeline.py"
 python3 "$S/test_retakes.py"
+python3 "$S/test_media.py"      # needs ffmpeg: render frame counts, music bed
 ```
