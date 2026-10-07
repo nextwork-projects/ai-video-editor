@@ -51,3 +51,6 @@ single skill folders.
 - Work in the folder the user started in: `creator-teardowns/<handle>/` and `edits/<name>/`.
 - Self-checks: `python3 tests/check_plugins.py`, plus each script's `demo` (see
   `.github/workflows/check.yml`).
+
+
+The rules every video follows, for every user: [plugins/ai-editor/PRINCIPLES.md](plugins/ai-editor/PRINCIPLES.md).

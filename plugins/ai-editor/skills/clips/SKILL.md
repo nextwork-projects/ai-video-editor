@@ -9,6 +9,8 @@ compatibility: Python 3.9+, ffmpeg, yt-dlp for links, and the venv, Node and ren
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+
 One long video in. The best few short clips out, each a finished vertical edit in the user's style.
 
 ```

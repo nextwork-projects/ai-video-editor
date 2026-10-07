@@ -9,6 +9,8 @@ compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+
 Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
 
 One raw take in. A clean jump cut out, with nothing on a timeline for the user to touch.

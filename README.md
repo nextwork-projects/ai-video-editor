@@ -176,3 +176,6 @@ The tools it runs have their own licences:
 
 Assets fetched while editing: brand logos from [Simple Icons](https://simpleicons.org) (CC0), icons
 from [Lucide](https://lucide.dev) ([ISC licence](https://lucide.dev/license)).
+
+
+The rules every video follows, for every user: [plugins/ai-editor/PRINCIPLES.md](plugins/ai-editor/PRINCIPLES.md).

@@ -9,6 +9,8 @@ compatibility: Python 3.9+, standard library only for the intake. The steps it r
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+
 The user's whole job: drop a video, answer a few questions, approve the cut, approve the stills.
 Everything else is this skill's job.
 

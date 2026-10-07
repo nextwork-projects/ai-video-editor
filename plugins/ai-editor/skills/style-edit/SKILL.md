@@ -9,6 +9,8 @@ compatibility: Python 3.9+, ffmpeg, Node 20+ and the Remotion renderer the setup
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+
 A cut video and a creator's style in. The finished edit out: captions, zooms, real captures and
 motion scenes timed to the words, in that creator's look and the user's brand.
 
