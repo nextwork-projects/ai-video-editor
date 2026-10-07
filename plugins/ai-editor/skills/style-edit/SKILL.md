@@ -192,6 +192,17 @@ FAILs go back to the plan or the cut; at most two fix rounds, then show the rend
 still listed. A caption contrast FAIL: plan again, then render (plan.py reads the check and steps
 those pages up). The full list: `references/plan.md`.
 
+A `loudness ... LUFS` WARN is the take's own level, not a fault in the edit. Ask once in the question box:
+
+> Your video plays at <N> LUFS; the apps play speech at about -14, so it will sound <quieter|louder>
+> than the videos around it. Change the volume?
+> - **Leave my audio as it is (Recommended).** Nothing is touched.
+> - **Make it one level louder/quieter.** One gain on the whole track to -14 LUFS, never past a -1 dB
+>   peak. No compression, no noise removal: the voice sounds the same, only louder or quieter.
+
+Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/render.mp4`. It writes
+`render-normalized.mp4` beside the render and leaves `render.mp4` as it is; hand over the new file.
+
 ## 8. Hand over
 
 Open the render (`open` on Mac, `start ""` on Windows, `xdg-open` on Linux) and give its full path.

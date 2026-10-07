@@ -146,7 +146,7 @@ published prices, not measured on a bill.
 | Problem | What to do |
 |---|---|
 | Something is missing or broken | Say **run the editor doctor**. Every line reads `ok`, or `FIX` with the exact command for your computer. |
-| Doctor says something moved off the pinned versions | Run `python3 plugins/ai-editor/skills/setup/scripts/setup.py repair` (`py` instead of `python3` on Windows). It puts the exact pinned set back. |
+| Doctor says something moved off the pinned versions | Say **repair the editor setup**. Claude runs `setup.py repair` from wherever the plugin is installed, and it puts the exact pinned set back. From a cloned folder (Way 1) you can run it yourself: `python3 plugins/ai-editor/skills/setup/scripts/setup.py repair` (`py` instead of `python3` on Windows). |
 | You skipped a key or step | Say **finish setup**. Only the skipped steps run. |
 | Claude does not know "edit my video" | The editor is not loaded. Type `/reload-plugins`, or install it with Way 2. |
 | `python3` not found | Mac: `brew install python`. Windows: `winget install -e --id Python.Python.3.12`, then open a new terminal. Linux: `sudo apt install -y python3 python3-venv`. |
@@ -156,9 +156,10 @@ published prices, not measured on a bill.
 | `Gemini rejected the key` | Make a new key at the link it prints. The teardown carries on without it meanwhile. |
 | A Drive or Dropbox link fails | Share it as **Anyone with the link**, and link the video file, not the folder. |
 | `the Modal render failed` | Claude offers the laptop render instead. |
-| You logged into a site for a product video and want that login gone | `node plugins/ai-editor/skills/product-video/scripts/login.mjs logout <site>` |
+| You logged into a site for a product video and want that login gone | Say **log me out of <site>**. Claude runs `login.mjs logout <site>`. From a cloned folder (Way 1): `node plugins/ai-editor/skills/product-video/scripts/login.mjs logout <site>`. |
+| Where are my keys? | `~/.config/creator-teardown/.env`, shared by both plugins. With `AI_EDITOR_HOME` set, `$AI_EDITOR_HOME/.env` instead, and the shared file is never read. |
 
-Without Claude, one command does the whole install and is safe to re-run:
+Without Claude, from a cloned folder (Way 1), one command does the whole install and is safe to re-run:
 
 ```
 python3 plugins/ai-editor/skills/setup/scripts/setup.py bootstrap

@@ -19,6 +19,7 @@ Numbers never come from here: size, place, colours, timings are look.py's. Only 
 categories the model names land in style.json, plus captions.font_match.
 
 Key: GEMINI_API_KEY in the environment, a .env here, or ~/.config/creator-teardown/.env
+($AI_EDITOR_HOME/.env instead when AI_EDITOR_HOME is set)
 (`fetch.py setkey --gemini`). Free at https://aistudio.google.com/apikey.
 Model: gemini-3.1-flash-lite ($0.25 per 1M input tokens), then gemini-3.5-flash-lite
 ($0.30) if a key cannot use it; GEMINI_MODEL overrides. A 60 s video at 1 fps, low

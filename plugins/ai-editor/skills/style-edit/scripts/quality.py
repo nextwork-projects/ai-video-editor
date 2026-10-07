@@ -3,6 +3,8 @@
 check.py render runs them after its own 4-a-second pass; they print in its FAIL / WARN / LOOK style.
 
     ~/.ai-video-editor/venv/bin/python quality.py demo     self-check, synthetic data, no video
+    python3 quality.py normalize <video>   opt-in only: <video stem>-normalized.mp4, one gain to -14 LUFS
+                                           (never past a -1 dBTP peak), video copied, no compression or denoise
 
 Every frame of the render (half size) is compared with the cut behind it, as check.py does:
   freeze      the render repeats a frame while the footage behind it moves (a dropped frame)
@@ -459,6 +461,31 @@ def loudness(video):
     return num(i), num(p)
 
 
+LUFS_TARGET = -14.0    # where the platforms play speech; normalize never goes past TP_WARN
+
+
+def gain_db(lufs, tp, target=LUFS_TARGET, ceiling=TP_WARN):
+    """The one gain that brings `lufs` to `target` without the true peak passing `ceiling`."""
+    return round(min(target - lufs, ceiling - tp), 2)
+
+
+def normalize(video):
+    """Opt-in: the whole audio track moved by one gain (no compressor, limiter or denoise), so the
+    voice sounds exactly as recorded, only louder or quieter. Writes <stem>-normalized.mp4 next to
+    `video` and leaves `video` as it is. Returns (out, gain, (lufs, tp) after)."""
+    video = Path(video)
+    lufs, tp = loudness(video)
+    if lufs is None or tp is None:
+        sys.exit(f"ERROR: no audio to measure in {video}")
+    g = gain_db(lufs, tp)
+    out = video.with_name(video.stem + "-normalized.mp4")
+    if subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", "0:v?", "-map", "0:a:0",
+                       "-c:v", "copy", "-af", f"volume={g}dB", "-c:a", "aac", "-b:a", "192k",
+                       "-movflags", "+faststart", str(out)]).returncode:
+        sys.exit("ERROR: ffmpeg could not write " + str(out))
+    return out, g, loudness(out)
+
+
 def grab(video, t, w, h):
     """One frame at t seconds, BGR, w x h."""
     import numpy as np
@@ -894,7 +921,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     meas["loudness"] = {"lufs": lufs, "true_peak_db": tp}
     if lufs is not None and not LUFS_LOW <= lufs <= LUFS_HIGH:
         out.append(F("WARN", None, f"loudness {lufs} LUFS; platforms play at about -14",
-                     "the cut's own level: louder or quieter at the source, not in the edit"))
+                     "leave it (the default), or opt in: quality.py normalize <render> applies one gain to "
+                     "-14 LUFS under a -1 dBTP peak, no compression"))
     if tp is not None and tp > TP_WARN:
         out.append(F("FAIL" if tp > TP_FAIL else "WARN", None, f"true peak {tp} dBTP (keep it under {TP_WARN})",
                      "a quieter cue (sfx.py) or a quieter source; peaks over 0 clip on every phone"))
@@ -1063,11 +1091,21 @@ def demo():
         p.write_text("{}")
         os.utime(r, (time.time() - 100, time.time() - 100))
         assert stale(r, [p])[0][0] == "plan.json" and stale(p, [r]) == []
+        # normalize: the quiet sample take's level comes up to -14 by one gain; a peak caps the gain
+        assert gain_db(-24.7, -12.0) == 10.7 and gain_db(-24.7, -4.0) == 3.0 and gain_db(-10.0, -2.0) == -4.0
+        q = Path(tmp) / "quiet.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                        "-af", "volume=-30dB", "-c:a", "aac", str(q)], check=True)
+        out, g, (lufs, tp) = normalize(q)
+        assert out.name == "quiet-normalized.mp4" and q.exists() and abs(lufs - LUFS_TARGET) < 0.5 and tp <= -0.5, (g, lufs, tp)
     print("demo ok")
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["demo"]:
         demo()
+    elif len(sys.argv) == 3 and sys.argv[1] == "normalize":
+        o, g, (lu, pk) = normalize(sys.argv[2])
+        print(f"{o}: {g:+.1f} dB, now {lu} LUFS, true peak {pk} dBTP. The original is untouched.")
     else:
         sys.exit(__doc__)

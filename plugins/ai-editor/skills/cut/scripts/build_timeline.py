@@ -5,6 +5,8 @@
 
 Reads   <edit_dir>/words.raw.json   the transcript of the source
         <edit_dir>/spans.json       what to remove, QUOTED from the transcript
+        <edit_dir>/lead.json        optional, one quoted range that plays first (an alternate
+                                    hook recorded after the body; retakes.py hook writes it)
 Writes  <edit_dir>/decisions.json   kept spans in source seconds (docs/CONTRACTS.md)
         <edit_dir>/report.json      every cut with its kind, evidence and note
         <edit_dir>/words.json       the kept words re-timed onto cut.mp4's timeline
@@ -47,7 +49,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from textnorm import load_words, locate  # noqa: E402
 
-KINDS = {"retake", "false_start", "filler", "meta", "audio_event", "redundant"}
+KINDS = {"alt_hook", "retake", "false_start", "filler", "meta", "audio_event", "redundant"}
 CONF = {"high", "medium", "low"}
 DEFAULT_MAX_PAUSE = 0.15
 GAP_QUIET_DB = 12.0   # a word gap counts as a pause only if it stays this far under speech
@@ -437,6 +439,14 @@ def kept_frames(cuts, fps, dur, total=None):
     return kept
 
 
+def lead_first(frames, a, b):
+    """Kept frame ranges with source frames [a, b) moved to the front, split at a and b."""
+    cut = []
+    for s, e in frames:
+        cut += [[x, y] for x, y in ((s, min(e, a)), (max(s, a), min(e, b)), (max(s, b), e)) if y > x]
+    return [f for f in cut if a <= f[0] and f[1] <= b] + [f for f in cut if not (a <= f[0] and f[1] <= b)]
+
+
 def is_kept(w, spans):
     """A word plays if at least 0.1 s (or half of it, if shorter) is inside a kept
     span. Overlap, not onset or midpoint: transcribers stretch a word into the
@@ -460,7 +470,7 @@ def retime(words, spans):
         out.append({"text": w["text"], "type": "word",
                     "start": round(max(w["start"], s["start"]) - s["start"] + o, 3),
                     "end": round(min(w["end"], s["end"]) - s["start"] + o, 3)})
-    return out
+    return sorted(out, key=lambda w: w["start"])
 
 
 def main():
@@ -520,6 +530,13 @@ def main():
         last = max(w["end"] for w in kept_words)
         allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
     frames = kept_frames(allcuts, fps, dur, nframes)
+    lead = d / "lead.json"
+    if lead.exists():   # split halfway into the pauses either side, so no word is halved
+        lc = resolve_spans([{**json.loads(lead.read_text()), "kind": "alt_hook"}], toks)[0]
+        before = max([t["end"] for t in toks if t["end"] <= lc["start"]], default=0.0)
+        after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
+        frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
+        print(f"lead       {lc['evidence'][:60]!r} plays first")
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)
 

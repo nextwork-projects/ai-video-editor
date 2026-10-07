@@ -15,7 +15,8 @@ Engines:
            (about 1 GB). Model from AI_EDITOR_CRISPER_MODEL (default "small"). Its
            weights are licensed for NON-COMMERCIAL use only.
   scribe   ElevenLabs Scribe v2, verbatim. Needs a key in ELEVENLABS_API_KEY or
-           ~/.config/creator-teardown/.env. Keeps every filler and false start.
+           ~/.config/creator-teardown/.env ($AI_EDITOR_HOME/.env when that is set).
+           Keeps every filler and false start.
   auto     scribe when a key exists, else crisper when installed, else whisper (default).
 
 Audio is pulled out with ffmpeg first (16 kHz mono WAV), so a multi-GB 4K file
@@ -161,8 +162,7 @@ def main():
     engine = a.engine if a.engine != "auto" else (
         "scribe" if key else "crisper" if has_crisper() else "whisper")
     if engine == "scribe" and not key:
-        print("ERROR: no ElevenLabs key (ELEVENLABS_API_KEY or ~/.config/creator-teardown/.env)",
-              file=sys.stderr)
+        print(f"ERROR: no ElevenLabs key (ELEVENLABS_API_KEY or {keys.key_file()})", file=sys.stderr)
         sys.exit(2)
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -6,6 +6,7 @@ reviews only what Jev was unsure of.
     python3 retakes.py propose <edit_dir> [--force]    spans.json + review.md (needs a TypeSafe key)
     python3 retakes.py fix     <edit_dir> cloud=Claude [jiv=Jev ...]   fix misheard words
     python3 retakes.py captions <edit_dir>             captions.json + captions.txt for style-edit
+    python3 retakes.py hook    <edit_dir> <n>          <edit_dir>-hook<n>/: the cut opening on alternate hook n
 
 text     words.raw.json as "[start-end] words" per phrase, about a fifth of its size. Read
          this, never the raw JSON.
@@ -18,12 +19,18 @@ propose  1. Code finds every candidate: a restart (words said again within 40 s:
             was unsure of) and candidates.json (every candidate with its answers).
          Last take wins: a restart cuts the earlier attempt, unless Jev says the later one
          is the broken one; that case is never cut automatically, it goes to review.md.
+         Alternate hooks are the exception: takes of the opening line recorded after the body
+         (after the call to action) are cut from the main cut as `alt_hook` and listed in
+         hooks.json, so the hook stays at the start and the cut never ends on one.
          With no TypeSafe key it writes transcript.txt and candidates.md and exits 4: decide
          the cut yourself from those (references/retake-detection.md).
 fix      Replaces one whole word everywhere in words.raw.json, words.json, cut.transcript.json
          and captions.json (style-edit's caption text), keeping
          punctuation and timings. A misheard name costs one command, not a rewrite. Each pair is
          kept in fixes.json, so captions applies it again.
+hook     A variant edit dir for alternate hook n (1-based, from hooks.json): the same spans,
+         with the opening hook cut, that alternate kept, and lead.json telling build_timeline.py
+         to play it first. Build, render, verify and style-edit it like any edit dir.
 captions The caption words: what the verify pass heard in cut.mp4 (cut.transcript.json), timed to
          it, with every word it heard differently at the same time (textnorm.pair_by_time) taken
          from the approved cut text (words.json), names spelled as the profile's `names`, and
@@ -191,17 +198,69 @@ def restarts(toks):
     return sorted(out)
 
 
+ALT_HOOK_MAX_WORDS = 30   # an alternate take longer than this is a second take of the video, not a hook
+
+
+def alt_hooks(toks):
+    """Takes of the opening line recorded after the body: [(a, b)] token ranges, each running to the
+    next take or the end of the recording. Only a tail counts: walking back from the end, every
+    stretch from a take of the opening to the next one is short. A callback to the hook mid-video
+    is followed by the rest of the body, so it is never a tail. Matched more than WINDOW_S after
+    the opening, so it is never a plain retake of it."""
+    phr = phrases(toks)
+    if not phr:
+        return []
+    first, t0 = opening(toks, *phr[0]), toks[phr[0][0]]["start"]
+    hits = [a for a, b in clauses(toks) if toks[a]["start"] - t0 > WINDOW_S
+            and similar_openings(first, opening(toks, a, b))]
+    takes, e = [], len(toks)
+    for a in reversed(hits):
+        if sum(len(nwords(t["text"])) for t in toks[a:e]) > ALT_HOOK_MAX_WORDS:
+            break
+        takes.insert(0, (a, e - 1))
+        e = a
+    return takes
+
+
+def hook_line(toks, take):
+    """(opening_keeper_first, opening_end, take_end): the opening hook the main cut keeps, and how
+    far the alternate `take` says the same line. The keeper is the last take of the opening within
+    WINDOW_S of the start (last take wins). Both ends are the last word the two takes share,
+    stretched to the end of its phrase.
+    ponytail: word alignment, not meaning; a hook reworded past its first words ends early, and
+    the variant's paper-edit.md read-through catches that."""
+    phr = phrases(toks)
+    first, t0 = opening(toks, *phr[0]), toks[phr[0][0]]["start"]
+    keep = max(a for a, b in clauses(toks) if toks[a]["start"] - t0 <= WINDOW_S
+               and similar_openings(first, opening(toks, a, b)))
+    end_of = {i: b for a, b in phr for i in range(a, b + 1)}
+    seq = norm_seq(toks)
+    x = [p for p in seq if keep <= p[1] < take[0]][:ALT_HOOK_MAX_WORDS + 10]
+    y = [p for p in seq if take[0] <= p[1] <= take[1]]
+    ea = eb = 0      # the shared run from the start: blocks of 2+ words, at most 3 words apart
+    for bl in difflib.SequenceMatcher(a=[w for w, _ in x], b=[w for w, _ in y], autojunk=False).get_matching_blocks():
+        if bl.size < (1 if not ea else 2) or bl.a - ea > 3 or bl.b - eb > 3:
+            break
+        ea, eb = bl.a + bl.size, bl.b + bl.size
+    xe, ye = (x[ea - 1][1], y[eb - 1][1]) if ea else (keep, take[0])
+    return keep, end_of[xe], min(end_of[ye], take[1])
+
+
 def find(toks):
     """Every candidate, each with the Jev questions that decide it."""
     phr = phrases(toks)
     end_of = {i: b for a, b in phr for i in range(a, b + 1)}
     cands = []
+    alts = alt_hooks(toks)
+    tail = alts[0][0] if alts else len(toks)   # nothing in the alternate hooks is judged: all of it is cut
 
     def add(kind, a, b, qs=None, **extra):
         cands.append({"id": f"c{len(cands)}", "kind": kind, "cut": [a, b], "at": toks[a]["start"],
                       "text": say(toks, a, b), "questions": qs or {}, **extra})
 
     for i, j in restarts(toks):
+        if j >= tail:
+            continue
         cid = f"c{len(cands)}"
         gap = toks[j]["start"] - toks[j - 1]["end"]
         second = say(toks, j, min(end_of[j], j + 25))
@@ -233,7 +292,7 @@ def find(toks):
 
     for pi, (a, b) in enumerate(phr):
         words = sum(len(nwords(t["text"])) for t in toks[a:b + 1])
-        if a in restarted or pi + 1 >= len(phr) or words > 8:
+        if a in restarted or pi + 1 >= len(phr) or words > 8 or a >= tail:
             continue
         if toks[b]["text"].strip().endswith((".", "?", "!")):
             continue
@@ -253,6 +312,8 @@ def find(toks):
             w0 = flat[:m.start()].count(" ")
             w1 = w0 + m.group(0).count(" ")
             a, b = seq[w0][1], seq[w1][1]
+            if a >= tail:
+                continue
             ctx = say(toks, max(0, a - 12), min(len(toks) - 1, b + 12))
             cid = f"c{len(cands)}"
             q = (jev.noul("In `text`, are the words `words` the speaker talking to themself about "
@@ -262,7 +323,9 @@ def find(toks):
                           "changing what is said?", text=ctx, word=m.group(0)))
             add(kind, a, b, {f"{cid}_{kind}": q})
 
-    for i, t in enumerate(toks):
+    for n, (a, b) in enumerate(alts, 1):
+        add("alt_hook", a, b, hook=n)
+    for i, t in enumerate(toks[:tail]):
         ws = nwords(t["text"])
         if t.get("type") == "audio_event":
             add("audio_event", i, i)
@@ -281,7 +344,8 @@ def decide(cands, answers):
         qs = {q.rsplit("_", 1)[1]: answers.get(q) for q in c["questions"]}
         c["answers"] = {k: v for k, v in qs.items() if v}
         if not qs:   # um, uh, audio events: always cut
-            cuts.append({**c, "confidence": "high", "note": "hesitation" if c["kind"] == "filler" else ""})
+            note = {"filler": "hesitation", "alt_hook": f"alternate hook {c.get('hook')}: retakes.py hook"}
+            cuts.append({**c, "confidence": "high", "note": note.get(c["kind"], "")})
             continue
         p = next(v["noul"] for k, v in qs.items() if k != "keep")
         keep = qs.get("keep")
@@ -308,12 +372,12 @@ def decide(cands, answers):
 
 def to_spans(cuts, toks):
     """Merge overlapping or touching cuts and quote them for build_timeline.py."""
-    rank = {"retake": 4, "false_start": 3, "meta": 2, "filler": 1, "audio_event": 0}
+    rank = {"alt_hook": 5, "retake": 4, "false_start": 3, "meta": 2, "filler": 1, "audio_event": 0}
     level = {"low": 0, "medium": 1, "high": 2}
     merged = []
     for c in sorted(cuts, key=lambda c: c["cut"][0]):
         a, b = c["cut"]
-        if merged and a <= merged[-1]["b"] + 1:
+        if merged and a <= merged[-1]["b"] + 1 and (merged[-1]["kind"] == "alt_hook") == (c["kind"] == "alt_hook"):
             m = merged[-1]
             m["b"] = max(m["b"], b)
             m["kind"] = max(m["kind"], c["kind"], key=rank.get)
@@ -362,8 +426,13 @@ def candidates_md(cands):
         if c["questions"]:
             extra = f" -> said again: \"{c['second']}\"" if c.get("second") else ""
             lines.append(f"- {c['at']:.2f}s `{c['kind']}` \"{c['text']}\"{extra}")
-    n = sum(1 for c in cands if not c["questions"])
+    alts = [c for c in cands if c["kind"] == "alt_hook"]
+    n = sum(1 for c in cands if not c["questions"]) - len(alts)
     lines += ["", f"Plus {n} um/uh/audio-event token(s), always cut."]
+    if alts:
+        lines += ["", "Alternate hooks (takes of the opening line after the body). Not retakes: cut each "
+                  "from the main cut as `alt_hook`, the opening stays first (references/retake-detection.md):"]
+        lines += [f"- hook {c['hook']}: {c['at']:.2f}s \"{c['text']}\"" for c in alts]
     return "\n".join(lines) + "\n"
 
 
@@ -373,6 +442,7 @@ def propose(d, key=None, canned=None, force=False):
     toks = load(d)
     (d / "transcript.txt").write_text(text_view(toks, d.name))
     cands = find(toks)
+    write_hooks(d, toks)
     if key is None and canned is None:
         (d / "candidates.md").write_text(candidates_md(cands))
         return 4
@@ -390,9 +460,63 @@ def propose(d, key=None, canned=None, force=False):
     (d / "candidates.json").write_text(json.dumps(
         [{k: v for k, v in c.items() if k != "questions"} for c in cands], indent=1))
     u = jev.ask.last_usage
+    n = sum(c["kind"] == "alt_hook" for c in cands)
+    if n:
+        print(f"{n} alternate hook(s) after the body, cut from the main cut: {d / 'hooks.json'}")
     print(f"{len(cands)} candidates, {len(qs)} questions, {u['input_tokens']} Jev tokens "
           f"(${u['cost_usd']:.4f}); {len(spans)} spans, {len(review)} to review")
     return 0
+
+
+# --- alternate hooks -------------------------------------------------------------
+
+def write_hooks(d, toks):
+    """hooks.json: the opening the main cut keeps and every alternate take, quoted for spans.json."""
+    alts = alt_hooks(toks)
+    f = Path(d) / "hooks.json"
+    if not alts:
+        f.unlink(missing_ok=True)
+        return []
+    q = lambda a, b: {"text": say(toks, a, b), "after": max(0.0, round(toks[a]["start"] - 0.001, 3))}  # noqa: E731
+    keep, oe, _ = hook_line(toks, alts[0])
+    out = {"opening": q(keep, oe),
+           "alternates": [{"n": n, **q(a, hook_line(toks, (a, b))[2])} for n, (a, b) in enumerate(alts, 1)]}
+    f.write_text(json.dumps(out, indent=1))
+    return out["alternates"]
+
+
+def hook_variant(d, n):
+    """<d>-hook<n>/: words.raw.json, fixes.json, spans.json with the opening hook cut and alternate n
+    kept, and lead.json (alternate n plays first). Returns the new dir."""
+    import shutil
+    import build_timeline as B
+    d = Path(d)
+    toks = load(d)
+    alts = alt_hooks(toks)
+    if not 1 <= n <= len(alts):
+        sys.exit(f"ERROR: no alternate hook {n}; {d.name} has {len(alts)} (retakes.py propose lists them)")
+    take = alts[n - 1]
+    keep, oe, le = hook_line(toks, take)
+    spans = json.loads((d / "spans.json").read_text())
+    t_open, t_tail = toks[oe]["end"], toks[alts[0][0]]["start"]
+    # the opening (replaced) and the alternate hooks (rebuilt below, one span per take)
+    out = [sp for sp in spans if t_open <= B.resolve_spans([sp], toks)[0]["start"] < t_tail]
+    q = lambda a, b, kind, note: {"text": say(toks, a, b), "kind": kind, "note": note,  # noqa: E731
+                                  "after": max(0.0, round(toks[a]["start"] - 0.001, 3))}
+    out.append(q(0, oe, "alt_hook", f"opening hook, replaced by alternate hook {n}"))
+    for m, (a, b) in enumerate(alts, 1):
+        if m != n:
+            out.append(q(a, b, "alt_hook", f"alternate hook {m}"))
+        elif le < b:
+            out.append(q(le + 1, b, "alt_hook", f"after alternate hook {n}"))
+    v = d.parent / f"{d.name}-hook{n}"
+    v.mkdir(exist_ok=True)
+    for name in ("words.raw.json", "fixes.json"):
+        if (d / name).exists():
+            shutil.copyfile(d / name, v / name)
+    (v / "spans.json").write_text(json.dumps(sorted(out, key=lambda s: s["after"]), indent=1))
+    (v / "lead.json").write_text(json.dumps(q(take[0], le, "alt_hook", f"alternate hook {n}, played first"), indent=1))
+    return v
 
 
 # --- fix -------------------------------------------------------------------------
@@ -468,9 +592,9 @@ def captions(d):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions"])
+    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook"])
     ap.add_argument("edit_dir")
-    ap.add_argument("pairs", nargs="*", help="fix: old=new")
+    ap.add_argument("pairs", nargs="*", help="fix: old=new; hook: the alternate's number")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     d = Path(a.edit_dir)
@@ -484,6 +608,12 @@ def main():
         if not pairs:
             sys.exit("usage: retakes.py fix <edit_dir> old=new [old=new ...]")
         print(f"{fix(d, pairs)} token(s) changed")
+    elif a.cmd == "hook":
+        if not a.pairs or not a.pairs[0].isdigit():
+            sys.exit("usage: retakes.py hook <edit_dir> <n>")
+        if not (d / "spans.json").exists():
+            sys.exit(f"ERROR: no spans.json in {d}: decide the main cut first")
+        print(hook_variant(d, int(a.pairs[0])))
     elif a.cmd == "captions":
         if not (d / "cut.transcript.json").exists():
             sys.exit(f"ERROR: no cut.transcript.json in {d}: run the cut skill's verify step first")

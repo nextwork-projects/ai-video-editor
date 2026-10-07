@@ -4,6 +4,31 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Alternate hooks recorded after the call to action stay out of the main cut (backlog Next). A take that
+  ends with more takes of the opening line had "last take wins" moving the hook to the end. `retakes.py
+  propose` now finds them (more than 40 s after the opening, at the end of the recording, each under 30
+  words), cuts each from the main cut as `alt_hook` (never judged as a retake), keeps the hook at the start
+  (its last good take there, as before) and lists them in `hooks.json`; `candidates.md` lists them without
+  a key. After the cut is approved the cut skill asks once whether to render one version per hook:
+  `retakes.py hook edits/<name> <n>` writes `edits/<name>-hook<n>/` (same body, the opening cut, that
+  alternate kept) with `lead.json`, which `build_timeline.py` plays first. Test: `test_retakes.py`
+  (opening, body, call to action, then two more takes of the opening: the hook stays first, both late
+  takes are one `alt_hook` span, the main cut ends on the call to action, and the hook-2 variant opens on
+  the body with alternate 2 kept and the others cut; `lead_first` moves and splits frame ranges).
+- Key paths with `AI_EDITOR_HOME` set (backlog Next): README troubleshooting no longer gives
+  `plugins/ai-editor/...` paths that exist only in a cloned folder; it says what to ask Claude, with the
+  path for Way 1 marked as such, and a "Where are my keys?" row. `style-edit/references/contracts.md`,
+  the `gemini.py` docstring and the cut `transcribe.py` docstring say `$AI_EDITOR_HOME/.env` when it is
+  set; the transcribe "no ElevenLabs key" error names the file it actually read.
+- Opt-in loudness fix (backlog Next): the sample take plays at -24.7 LUFS and every first render WARNed
+  with no fix. When `check.py render` WARNs on loudness, style-edit asks once, default "leave my audio as it
+  is"; on yes, `quality.py normalize <render>` writes `<render>-normalized.mp4` with one gain to -14 LUFS,
+  never past a -1 dBTP peak, no compression, limiter or denoise, the original left as it is. Test:
+  `quality.py demo` (`gain_db`, and a -30 dB tone normalized to -14 +-0.5 LUFS).
+- doctor's key lines say `Say "add my <name> key": setup saves it from your clipboard`, the same one
+  instruction as setup step 5, instead of "Run in a terminal: ... setkey" (backlog Next). Test:
+  `setup.py demo` (`key_line`).
+
 - Fewer bytes before the first step (backlog Next, cost). Each skill's required reads (SKILL.md plus every
   file it says to "Read ... first") now fit a budget that `tests/check_plugins.py` enforces: start 12 KB,
   cut 15 KB, style-edit 25 KB, product-video 30 KB. Before and after: start 15.6 to 12.0 KB (the intake

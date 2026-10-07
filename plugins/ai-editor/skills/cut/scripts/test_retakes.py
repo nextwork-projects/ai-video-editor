@@ -85,6 +85,46 @@ def test_chain_cuts_all_but_last():
     assert sum(q.endswith("_keep") for q in qs) == 1, qs   # only the chain end asks which take
 
 
+HOOK = "most people edit their videos backwards."
+BODY = ("start with the ending you want the viewer to remember. | then write the line that gets them there. | "
+        "film that line three times and keep the cleanest one. | cut every pause longer than a breath. | "
+        "put a caption on the word that carries the idea. | zoom in when the point lands, not before. | "
+        "add sound only where something changes on screen. | watch it once muted to check the captions. | "
+        "play it back loud for the pace. | post it at the hour your audience is awake.")
+CTA = "follow for the next part."
+
+
+def test_alternate_hooks_after_the_cta():
+    """Opening, body, call to action, then two more takes of the opening: the hook stays at the start,
+    both late takes are cut from the main cut and listed, and the main cut never ends on a hook."""
+    text = f"{HOOK} | {BODY} | {CTA} | {HOOK} | most people edit their videos the wrong way round."
+    toks = take(text)
+    assert len(R.alt_hooks(toks)) == 2, R.alt_hooks(toks)
+    spans, review, qs = run(text)
+    alts = [s for s in spans if s["kind"] == "alt_hook"]
+    assert [s["text"] for s in alts] == [f"{HOOK} most people edit their videos the wrong way round."], spans
+    assert not any(s["kind"] == "retake" for s in spans), spans   # no "last take wins" on a hook
+    cuts = B.resolve_spans(spans, toks)
+    kept = [w["text"] for w in toks if not B.covered_by(w, cuts)]
+    assert " ".join(kept).startswith(HOOK) and kept[-1] == "part.", kept[-6:]
+    with tempfile.TemporaryDirectory() as d:
+        e = Path(d) / "take"
+        e.mkdir()
+        (e / "words.raw.json").write_text(json.dumps(toks))
+        (e / "spans.json").write_text(json.dumps(spans))
+        assert [a["n"] for a in R.write_hooks(e, toks)] == [1, 2]
+        assert "Alternate hooks" in R.candidates_md(R.find(toks))
+        v = R.hook_variant(e, 2)
+        vt = B.resolve_spans(json.loads((v / "spans.json").read_text()), toks)
+        lead = B.resolve_spans([json.loads((v / "lead.json").read_text())], toks)[0]
+        assert lead["evidence"] == "most people edit their videos the wrong way round.", lead
+        kept = [w for w in toks if not B.covered_by(w, vt)]
+        assert kept[0]["text"] == "start", kept[:3]
+        assert [w["text"] for w in kept[-10:]] == "part. most people edit their videos the wrong way round.".split(), kept[-10:]
+    # lead_first moves the lead's frames to the front and splits a span across its edges
+    assert B.lead_first([[0, 10], [20, 40]], 30, 40) == [[30, 40], [0, 10], [20, 30]]
+
+
 def test_text_and_fix():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "words.raw.json").write_text(json.dumps(take("I use cloud code. | cloud, daily")))

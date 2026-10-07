@@ -238,6 +238,13 @@ def free_bytes():
     return shutil.disk_usage(p).free
 
 
+def key_line(name, have, without, where):
+    """One doctor row. A missing key points at the setup skill, which saves it from the clipboard
+    (the same one instruction as setup SKILL.md step 5), never at a terminal."""
+    return f"{'ok ' if where else '-- '}  {name + ' key':<20} " + (
+        f"{have} ({where})" if where else f"{without}. Say \"add my {name} key\": setup saves it from your clipboard")
+
+
 def doctor():
     rows = checks()
     for name, ok, detail, cmd in rows:
@@ -251,9 +258,7 @@ def doctor():
     here = Path(__file__).resolve()
     py_self = "py" if OS == "Windows" else "python3"
     for name, have, without in KEY_ROWS:
-        _, where = keys.get(name)
-        print(f"{'ok ' if where else '-- '}  {name + ' key':<20} " + (f"{have} ({where})" if where else
-              f"{without}. Run in a terminal: {py_self} \"{here}\" setkey {name}"))
+        print(key_line(name, have, without, keys.get(name)[1]))
     cw = venv_has("crisperwhisper")
     print(f"{'ok ' if cw else '-- '}  {'crisperwhisper':<20} " + ("installed: free verbatim transcripts" if cw else
           f"optional, keeps every um and restart for free (non-commercial licence): {py_self} \"{here}\" crisper"))
@@ -603,6 +608,9 @@ def step_matte(force=False):
 
 
 def demo():
+    miss = key_line("gemini", "x", "no look pass", None)
+    assert "add my gemini key" in miss and "clipboard" in miss and "terminal" not in miss, miss
+    assert key_line("gemini", "looks", "x", "the GEMINI_API_KEY variable").startswith("ok "), "found key row"
     assert modal_status() in ("ready", "no token", "missing")
     assert major("v22.3.0") == 22 and major(None) == 0
     assert fix("ffmpeg").split()[0] in ("brew", "winget", "sudo")

@@ -92,8 +92,7 @@ TypeSafe's Jev judges them in one request (a fraction of a cent) into `spans.jso
   `references/retake-detection.md`, and write `spans.json` (`references/shapes.md`). Tell the user once that a
   TypeSafe key makes this much cheaper (the `setup` skill walks them through it).
 
-`propose` will not overwrite an existing `spans.json`; `--force` replaces it and keeps the old one
-as `spans.prev.json`. Last take wins either way. Never type a timestamp and never write a span for
+Last take wins, except alternate hooks. Never type a timestamp and never write a span for
 a pause.
 
 Only if the user wants it shorter, also read `references/editorial-rules.md` and add `redundant`
@@ -154,6 +153,8 @@ remote machine: give the full path to `cut-check.html`). Tell the user in two li
 came out and what the page shows (struck-through words are cut, highlighted ones are judgement
 calls). Then **wait**. "keep <line>": delete or narrow that span. "cut <line>": add one. Pauses
 rushed or slow: rebuild with another `--max-pause`. After any change: build, render, verify, reopen.
+
+`hooks.json` exists: after approval, ask about hook variants (`references/retake-detection.md`).
 
 Only the user's approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
 cut first", stop after approval and say they can ask for the style. Never start style-edit on your own.

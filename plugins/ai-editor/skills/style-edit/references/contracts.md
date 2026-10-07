@@ -25,7 +25,9 @@ Everything the skills install lives in one folder per user, outside the plugin (
 ```
 
 The ElevenLabs key stays where creator-teardown already keeps it: `~/.config/creator-teardown/.env`
-(`ELEVENLABS_API_KEY=...`), written by `fetch.py setkey`. Both plugins read it there.
+(`ELEVENLABS_API_KEY=...`), written by `fetch.py setkey`. Both plugins read it there. With
+`AI_EDITOR_HOME` set, both read and save keys in `$AI_EDITOR_HOME/.env` instead and never open the
+shared file.
 
 Python scripts run with `~/.ai-video-editor/venv/bin/python` (`Scripts\python.exe` on Windows).
 Stdlib-only scripts may run with any `python3`.

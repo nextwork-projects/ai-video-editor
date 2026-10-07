@@ -14,14 +14,6 @@ public website (product-video, brief to animatic).
 
 ## Next
 
-- Alternate hooks recorded after the call to action: the sample take ends with two more takes of the
-  opening line (186-199 s). `retake-detection.md` says "the last take wins", which would move the
-  hook to the end; there is no rule for it and `candidates.md` flags it as a plain retake.
-- README troubleshooting gives `python3 plugins/ai-editor/...` paths, which exist only for Way 1
-  (the cloned folder), not for a Way 2 plugin install.
-- The sample take is quiet (-24.6 LUFS), so every first render WARNs on loudness with no fix offered.
-- doctor's key lines say "Run in a terminal: ... setkey", while setup SKILL.md saves keys from the
-  clipboard. One instruction.
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download
   path, untested live (no public OneDrive sample). Test with a real share; if Microsoft has
   closed it, say "download it in the browser" instead.

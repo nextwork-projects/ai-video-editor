@@ -46,6 +46,25 @@ until they get it right. Exceptions:
 - The last attempt is itself broken or unfinished. Keep the best complete one.
 - The user supplied a script and both takes are complete: keep the one closer to it.
 
+**Alternate hooks are not retakes.** Takes of the opening line recorded after the body (usually
+after the call to action) are alternate hooks. Last take wins would move the hook to the end. Instead:
+- The hook at the start stays: the last good take of it there, by the rules above.
+- Every take after the body is cut from the main cut as `alt_hook`, whole (the main cut ends on the
+  call to action, never on a hook).
+- `retakes.py propose` finds them (more than 40 s after the opening, at the end of the recording, each
+  under 30 words) and lists them in `hooks.json`; `candidates.md` lists them without a key.
+
+After the main cut is approved, ask once in the question box:
+
+> You recorded N more takes of the opening line at the end. Render one version per hook?
+> - **Just the main cut (Recommended).** The opening you recorded first, alternates left out.
+> - **One version per hook.** Same body, each alternate hook first: a cut and a styled edit each.
+
+On "one version per hook", for each n in `hooks.json`: `python3 "$S/retakes.py" hook edits/<name> <n>`
+prints `edits/<name>-hook<n>`; run cut steps 3-5 on it (build prints `lead ... plays first`; the
+paper-edit lists words in recording order, so the hook reads last there), then style-edit on it with
+the same choices as the main edit.
+
 Words that often come just before a retake: "wait", "sorry", "again", "let me do that again",
 "one more time", or a hard stop followed by a long pause.
 
@@ -72,7 +91,8 @@ when the user wants the video shorter. Every `redundant` cut is highlighted in c
 
 1. Read the whole transcript. Note gaps over 1 second: retakes cluster around them.
 2. Find repeats: near-identical phrases within about 30 seconds.
-3. For each cluster, pick the keeper (last take wins, then the exceptions).
+3. For each cluster, pick the keeper (last take wins, then the exceptions). Takes of the opening
+   after the body are alternate hooks: cut them as `alt_hook`.
 4. Mark false starts, then meta, then fillers.
 5. For every cut ask: is this a worse take of something said better elsewhere? If there is no
    better take, it is not a cut. Repetition for emphasis, delivered cleanly both times, stays.
