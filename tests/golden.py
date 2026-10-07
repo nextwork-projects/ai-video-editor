@@ -2,8 +2,8 @@
 """Golden stills: the renderer's look, pinned. Catches a change that moves, recolours or drops a card,
 a caption or the footage without anyone looking.
 
-    ~/.ai-video-editor/venv/bin/python tests/golden.py            render, compare with tests/golden/
-    ~/.ai-video-editor/venv/bin/python tests/golden.py --update   render, overwrite tests/golden/
+    ~/.ai-video-editor/venv/bin/python tests/golden.py            render, compare with tests/golden/<os>/
+    ~/.ai-video-editor/venv/bin/python tests/golden.py --update   render, overwrite tests/golden/<os>/
     ~/.ai-video-editor/venv/bin/python tests/golden.py --out DIR  also keep the fresh stills and diffs in DIR
     python tests/golden.py demo                                   self-check of the diff, and the default look
                                                                   planned with no banned AI tell; no renderer
@@ -17,7 +17,13 @@ both images are shrunk to 135x240 (area average), so a glyph edge that moved a p
 eighth of one. Then, per 15x15 tile (an eighth of the width), the mean absolute difference in any
 channel. A tile over TILE_MAX means something in that area changed: a card missing or moved, a
 caption gone, a colour swapped. Text that reflows to a different line width moves whole words,
-which also lands over it. CI runs this on Ubuntu only: macOS and Windows rasterise fonts differently.
+which also lands over it.
+
+Each OS rasterises fonts its own way (Linux moves a chat bubble's text enough to cross TILE_MAX), so
+the references are per OS: tests/golden/linux/ (CI, from the golden-out artifact or --update on
+Linux), tests/golden/darwin/ (made on a Mac). An OS with no set fails and says to run --update there.
+Every run also proves the threshold still bites on the real stills: the fresh still moved down 24 px
+(a card moved) and with its middle third blanked (a card gone) must both fail against the reference.
 """
 import json
 import os
@@ -30,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SK = ROOT / "plugins" / "ai-editor" / "skills" / "style-edit" / "scripts"
-GOLDEN = Path(__file__).resolve().parent / "golden"
+GOLDEN = Path(__file__).resolve().parent / "golden" / platform.system().lower()   # linux, darwin, windows
 STILLS = ("1-opening", "4-card", "5-card", "6-card")
 SMALL = (135, 240)       # w, h the diff runs at
 KEEP = (270, 480)        # w, h the references are stored at (small enough for the repo)
@@ -134,8 +140,9 @@ def main():
         return demo()
     import argparse
     import cv2
+    import numpy as np
     ap = argparse.ArgumentParser()
-    ap.add_argument("--update", action="store_true", help="overwrite tests/golden/ with this render")
+    ap.add_argument("--update", action="store_true", help="overwrite tests/golden/<os>/ with this render")
     ap.add_argument("--out", help="keep the fresh stills and the diff images here")
     a = ap.parse_args()
     work = Path(tempfile.mkdtemp(prefix="ave-golden-"))
@@ -157,13 +164,22 @@ def main():
             cv2.imwrite(str(out / f"{n}.png"), small)
         ref = GOLDEN / f"{n}.png"
         if a.update:
-            GOLDEN.mkdir(exist_ok=True)
+            GOLDEN.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(ref), small)
             print(f"updated {ref}")
             continue
         if not ref.exists():
-            sys.exit(f"GOLDEN FAIL: {ref} missing: run with --update and commit tests/golden/")
-        worst, (x, y) = diff(cv2.imread(str(ref)), small)
+            sys.exit(f"GOLDEN FAIL: {ref} missing: no references for {platform.system()} yet. "
+                     f"Run with --update on {platform.system()} and commit {GOLDEN.relative_to(ROOT).as_posix()}/")
+        ref_img = cv2.imread(str(ref))
+        worst, (x, y) = diff(ref_img, small)
+        moved = diff(ref_img, np.roll(small, 24, axis=0))[0]
+        gone = small.copy()
+        gone[KEEP[1] // 3:KEEP[1] * 2 // 3] = small.mean(axis=(0, 1)).astype(np.uint8)
+        gone = diff(ref_img, gone)[0]
+        if moved <= TILE_MAX or gone <= TILE_MAX:
+            sys.exit(f"GOLDEN FAIL: TILE_MAX {TILE_MAX} is too loose on {n}: a moved still scores {moved:.1f}, "
+                     f"a blanked one {gone:.1f}; both must fail")
         print(f"{n}: worst tile {worst:.1f} (max {TILE_MAX}) at {x * 4},{y * 4} px of 540x960")
         if worst > TILE_MAX:
             bad.append(n)

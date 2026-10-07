@@ -6,7 +6,7 @@
 //   node tests/test_record.mjs --require-chrome   CI after setup: a missing shell fails instead of skipping
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,7 +29,7 @@ for (const t of ["Start free", "Projects", "Search", "Open roadmap", "Next step"
   assert.ok(!DENY.test(t), `DENY blocks the harmless ${JSON.stringify(t)}`);
 console.log("deny list ok");
 
-const { launch, findBinary, SHELLS } = await import(path.join(SCRIPTS, "style-edit/scripts/capture.mjs"));
+const { launch, findBinary, SHELLS } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
 const bin = findBinary(SHELLS);
 if (!bin) {
   if (process.argv.includes("--require-chrome")) throw new Error(`no Chrome Headless Shell under ${SHELLS}`);

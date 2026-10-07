@@ -17,11 +17,11 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { findBinary, SHELLS, DISMISS } = await import(path.join(HERE, "../../style-edit/scripts/capture.mjs"));
-const { chromeBinary, hasProfile, profileFor, FLAGS } = await import(path.join(HERE, "login.mjs"));
+const { findBinary, SHELLS, DISMISS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
+const { chromeBinary, hasProfile, profileFor, FLAGS } = await import(pathToFileURL(path.join(HERE, "login.mjs")).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const args = process.argv.slice(2);
 const flag = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };

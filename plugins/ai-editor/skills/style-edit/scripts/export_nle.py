@@ -40,7 +40,6 @@ import tempfile
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
-from urllib.parse import quote
 
 FORMATS = ("fcpxml", "premiere", "resolve", "capcut", "edl", "srt")
 TITLE_UID = ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"
@@ -305,7 +304,7 @@ def srt(caps, fps):
 
 
 def url(p):
-    return "file://" + quote(Path(p).resolve().as_posix() if Path(p).is_absolute() or Path(p).exists() else str(p))
+    return Path(p).resolve().as_uri()  # file:///C:/... on Windows, spaces as %20
 
 
 def color(hexstr, alpha=1):
@@ -605,6 +604,10 @@ def export(ctx, out, todo, render):
 
 # ---------- demo ----------
 
+# "/footage/take one.mov" resolves onto the current drive on Windows (file:///D:/footage/...).
+SRC_URL = re.compile(r"file:///([A-Za-z]:/)?footage/take%20one\.mov")
+
+
 def demo():
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
@@ -640,7 +643,8 @@ def demo():
         assert [(c.get("offset"), c.get("start"), c.get("duration")) for c in clips] == \
             [("0s", "108030/30s", "60/30s"), ("60/30s", "108150/30s", "60/30s")], [c.attrib for c in clips]
         src = x.find(".//asset[@id='r3']/media-rep").get("src")
-        assert src == "file:///footage/take%20one.mov" and x.find(".//asset[@id='r3']").get("start") == "108000/30s"
+        assert SRC_URL.fullmatch(src), src
+        assert x.find(".//asset[@id='r3']").get("start") == "108000/30s"
         # the race card starts at timeline 70 = inside clip 2, local = tc0 + 150 + 10
         race = clips[1].find("asset-clip[@name='race']")
         assert race.get("offset") == "108160/30s" and race.get("lane") == "2" and race.find("adjust-transform").get("position") == "0.0000 0.0000"
@@ -659,7 +663,7 @@ def demo():
         assert len(tracks) == 3 and [c.findtext("in") for c in tracks[0]] == ["30", "150"]
         assert tracks[1].find(".//parameter[parameterid='center']/value/vert").text == "-0.25000"
         assert len(m.findall(".//audio/track")) == 2 and len(m.findall("sequence/marker")) == 2
-        assert m.find(".//file[@id='file-1']/pathurl").text == "file:///footage/take%20one.mov"
+        assert SRC_URL.fullmatch(m.find(".//file[@id='file-1']/pathurl").text)
         # EDL: source timecode from the take's own, record from 0
         e = edl(ctx)
         assert "001  AX       V     C        01:00:01:00 01:00:03:00 00:00:00:00 00:00:02:00" in e, e

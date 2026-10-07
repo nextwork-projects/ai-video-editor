@@ -3,6 +3,8 @@
 
     python3 test_build_timeline.py
 """
+import contextlib
+import io
 import math
 import sys
 from pathlib import Path
@@ -60,11 +62,13 @@ def test_spans():
             for i, t in enumerate("so the thing about the thing about ducks".split())]
     cuts = B.resolve_spans([{"text": "the thing about", "occurrence": 1, "kind": "false_start"}], toks)
     assert (cuts[0]["start"], cuts[0]["end"]) == (1, 3.5), cuts
+    err = io.StringIO()
     try:
-        B.resolve_spans([{"text": "the thing about", "kind": "false_start"}], toks)
+        with contextlib.redirect_stderr(err):  # the expected ERROR stays out of the CI log
+            B.resolve_spans([{"text": "the thing about", "kind": "false_start"}], toks)
         raise AssertionError("an ambiguous span must fail")
     except SystemExit:
-        pass
+        assert "appears 2x" in err.getvalue(), err.getvalue()
 
 
 def test_frames_and_retime():

@@ -16,6 +16,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const HOME = process.env.AI_EDITOR_HOME || path.join(os.homedir(), ".ai-video-editor");
 const CHROMES = {
@@ -76,7 +77,7 @@ async function login(url, checkUrl) {
 
 const [cmd, arg] = process.argv.slice(2);
 const flag = (k) => { const a = process.argv, i = a.indexOf(k); return i >= 0 ? a[i + 1] : undefined; };
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("login.mjs")) {
+if ((process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) || process.argv[1]?.endsWith("login.mjs")) {
   if (cmd === "login" && arg) await login(arg, flag("--check"));
   else if (cmd === "check" && arg) { const v = await check(arg); console.log(JSON.stringify(v)); process.exit(v.ok ? 0 : 1); }
   else if (cmd === "logout" && arg) { fs.rmSync(profileFor(arg), { recursive: true, force: true }); console.log(`deleted ${profileFor(arg)}: logged out of ${domainOf(arg)} on this computer`); }

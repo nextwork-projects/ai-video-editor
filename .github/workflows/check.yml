@@ -142,9 +142,10 @@ jobs:
       - name: Recording safety (deny list, blur on a synthetic page)
         run: node tests/test_record.mjs --require-chrome
 
-  # The renderer's look pinned by four stills (tests/golden/). Ubuntu only: each OS rasterises
-  # fonts its own way. On a failure the fresh stills and diffs are uploaded: if the change was
-  # meant, download them into tests/golden/ (or run tests/golden.py --update) and commit.
+  # The renderer's look pinned by four stills (tests/golden/linux/; each OS rasterises fonts its own
+  # way, so each has its own set, and a Mac checks tests/golden/darwin/ locally). On a failure the
+  # fresh stills and diffs are uploaded: if the change was meant, download them into
+  # tests/golden/linux/ (or run tests/golden.py --update on Linux) and commit.
   golden:
     runs-on: ubuntu-latest
     timeout-minutes: 30

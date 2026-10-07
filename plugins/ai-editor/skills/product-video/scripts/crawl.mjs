@@ -14,10 +14,10 @@
 //   --include  url,url: pages the user's brief names, read first (kind "brief")
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { launch, findBinary, SHELLS, DISMISS } = await import(path.join(HERE, "../../style-edit/scripts/capture.mjs"));
+const { launch, findBinary, SHELLS, DISMISS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 
 const W = 1440, H = 900, DSF = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
