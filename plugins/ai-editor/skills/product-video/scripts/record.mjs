@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { findBinary, SHELLS, DISMISS } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
+const { findBinary, SHELLS, DISMISS, TEXT } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 const { chromeBinary, hasProfile, profileFor, FLAGS } = await import(pathToFileURL(path.join(HERE, "login.mjs")).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const args = process.argv.slice(2);
@@ -291,7 +291,11 @@ async function captureStates(flow, s, ev, waitFor, settle, bcfg, out) {
     const f = `${id}-${String(n++).padStart(2, "0")}-${tag}.jpg`;
     if (bcfg) await ev(BLUR(bcfg));
     await shoot(f, clip);
-    st.states.push({ src: `flows/states/${f}`, plate, y: off, size, tag });
+    // the text's line boxes and the pictures' boxes, state px: the film keeps each line wholly in frame or out
+    const o = clip ? [clip.x, clip.y] : await ev("[scrollX, scrollY]");
+    const tx = await ev(TEXT([o[0], o[1], size[0], size[1]]));
+    const rel = (r) => [r[0] - o[0], r[1] - o[1], r[2], r[3]].map((v) => Math.round(v * 10) / 10);
+    st.states.push({ src: `flows/states/${f}`, plate, y: off, size, tag, lines: (tx?.lines || []).map(rel), images: (tx?.images || []).map(rel) });
     return st.states.length - 1;
   };
   // a state is taken only once the view has finished loading (at most 8 s)

@@ -4,6 +4,26 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- No half-cut text at the frame edge (backlog Now 1). `record.mjs --states` records each state's
+  text line boxes from the DOM (Range.getClientRects per text node, one box per line inside one
+  block, overflow-clipped and hidden text left out) and its pictures' boxes; OCR reads text inside
+  pictures, and whole states recorded before this. Each held framing keeps every line wholly in
+  frame or out: the focus grows to the lines it holds part of, then the camera shifts or widens within
+  the key's limits and the resolution floor, never onto emptier ground (`journey.text_guard`); a
+  line it cannot clear, off the focus, fades out at that edge (`journey.edge_fades`, drawn by
+  Journey.tsx); a cut line on the focus FAILs the plan. `product.py check` reads the render with OCR at
+  2 fps: a word running into the frame edge is a WARN, on the focus a FAIL. Style-edit captures:
+  `capture.mjs` grows a shot's clip so no line crosses its edge (`snapClip`) and lists the PNG's
+  line boxes; a sticker's crop keeps every line whole (`plan.py whole_lines`) and `check.py` FAILs a
+  crop that cuts one. Tests: `journey.py demo` (a framing that cuts a line fails, the guard re-frames
+  it, an unclearable line gets an edge fade, the OCR edge rule), `check.py demo` (a sticker trim that
+  cuts two lines fails, the planned crop passes), `tests/test_record.mjs` (snapClip; the DOM line
+  boxes on a page with two columns, an overflow clip and hidden text). linear.app 16:9 and nextwork
+  9:16 re-rendered as v7: cut-text WARNs 6 to 0 and 6 to 1 (a filter chip the page scrolls under its
+  own edge), 0 FAIL, meter inside the Linear bar (judder 0, stops 0.4 and 0.23 per 10 s, jerk p95
+  1888 and 1436). Where a paragraph sat beside the focus, the framing is now wider, so the type is
+  smaller.
+
 - Product films, v6 (backlog item 9). Sparse dark sites: the plan estimates how much of each framing
   is product (edge cells of the states on screen, the measure `check` uses) and re-frames any under
   50% tighter onto the busy part, its focus kept whole and above the words (`journey.fill_guard`); a

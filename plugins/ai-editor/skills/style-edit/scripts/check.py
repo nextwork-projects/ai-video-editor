@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, SAFE, clean, cut_points, head_during, overlay_led  # noqa: E402
+from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, SAFE, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -174,6 +174,11 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
+        if c.get("format") == "sticker" and c.get("lines") and c.get("size"):
+            cut = cut_lines(sticker_crop(c), c["lines"])
+            if cut:
+                out.append(finding("FAIL", c["start"], f"{name} sticker's crop cuts {len(cut)} line(s) of text at its edge",
+                                   "plan again (plan.py whole_lines grows the crop to whole lines), or drop props.crop"))
         if c.get("layer") == "behind":
             # behind the speaker: the cutout covers the card where it meets him, so it may reach the head,
             # but only once matte.py has cut him out for this card's time
@@ -589,6 +594,15 @@ def demo():
                       {"anim": {"type": "chat", "props": {"messages": [{"text": "3x faster"}]}}, "trigger_word": "it", "start": 1},
                       {"anim": {"type": "social_post", "props": {"text": "99 likes"}}, "trigger_word": "days", "start": 2}]}
     assert [(c["trigger_word"], n) for c, n in unsaid_numbers(talk)] == [("it", "3")], unsaid_numbers(talk)
+    # a sticker's crop never cuts a line of text: the default trim into a tight capture fails, plan.py's fix passes
+    import plan as pl
+    lines = [[12, 14, 2430, 100], [12, 150, 1500, 100]]
+    stk = {**band, "cards": [{"src": "images/s.png", "format": "sticker", "size": [2460, 260], "lines": lines, "start": 0.5,
+                              "end": 2, "trigger_word": "s", "box": [4, 10, 92, 20], "layout": "box"}]}
+    assert any("cuts 2 line" in f["what"] for f in check_plan(stk, face)), check_plan(stk, face)
+    fixed = pl.with_formats([{k: v for k, v in stk["cards"][0].items()}], [])[0]
+    stk["cards"][0]["props"] = fixed["props"]
+    assert not any("cuts" in f["what"] for f in check_plan(stk, face)), (fixed["props"], check_plan(stk, face))
     print("demo ok")
 
 

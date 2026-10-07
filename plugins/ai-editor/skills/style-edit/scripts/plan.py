@@ -560,7 +560,7 @@ def _place(images, words, duration, hold, ent, box, aspect):
         card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
         if im.get("lane"):
             card["lane"] = im["lane"]
-        for k in ("highlight", "size", "layout", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh"):
+        for k in ("highlight", "size", "layout", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh", "lines"):
             if im.get(k):
                 card[k] = im[k]
         if im.get("marks"):
@@ -1031,6 +1031,45 @@ def pick_look(style, prof, prof_mod):
     return look
 
 
+def sticker_crop(c):
+    """The part of a sticker's picture the card shows, image px: its "crop", else Overlays.tsx Sticker's trim of
+    capture.mjs's padding."""
+    p = c.get("props") or {}
+    if p.get("crop"):
+        return list(p["crop"])
+    w0, h0 = c["size"]
+    t = round(min(h0 * 0.08, w0 * 0.035))
+    return [t, t, w0 - 2 * t, h0 - 2 * t]
+
+
+def cut_lines(crop, lines):
+    """The text lines (image px) a crop [x, y, w, h] crosses: neither wholly inside it nor wholly out."""
+    x0, y0, x1, y1 = crop[0], crop[1], crop[0] + crop[2], crop[1] + crop[3]
+    return [ln for ln in lines if ln[0] < x1 and ln[0] + ln[2] > x0 and ln[1] < y1 and ln[1] + ln[3] > y0
+            and not (ln[0] >= x0 and ln[1] >= y0 and ln[0] + ln[2] <= x1 and ln[1] + ln[3] <= y1)]
+
+
+def whole_lines(crop, lines, size, pad=4):
+    """The crop grown (or, past the picture's edge, shrunk) until no line of text crosses its edge: every line
+    wholly shown or wholly out (capture.mjs snapClip, on the picture)."""
+    x0, y0, x1, y1 = crop[0], crop[1], crop[0] + crop[2], crop[1] + crop[3]
+    for _ in range(6):
+        hit = cut_lines([x0, y0, x1 - x0, y1 - y0], lines)
+        if not hit:
+            break
+        for lx, ly, lw, lh in (ln[:4] for ln in hit):
+            if ly < y0:
+                y0 = ly - pad if ly - pad >= 0 else ly + lh + pad
+            if ly + lh > y1:
+                y1 = ly + lh + pad if ly + lh + pad <= size[1] else ly - pad
+            if lx < x0:
+                x0 = lx - pad if lx - pad >= 0 else lx + lw + pad
+            if lx + lw > x1:
+                x1 = lx + lw + pad if lx + lw + pad <= size[0] else lx - pad
+    x0, y0 = max(0, x0), max(0, y0)
+    return [round(x0), round(y0), round(min(size[0], x1) - x0), round(min(size[1], y1) - y0)]
+
+
 def with_formats(images, visuals):
     """A capture beat's "format" (shot | browser | sticker | plain) and "props" (label, crop, rotate, zoom,
     cursor) reach its card. capture.mjs names a capture images/capture-<i>-<word>.png after the i-th capture
@@ -1048,6 +1087,9 @@ def with_formats(images, visuals):
             props.setdefault("url", b["url"])
         if props:
             im["props"] = props
+        if im.get("format") == "sticker" and im.get("lines") and im.get("size"):
+            # the card's crop keeps every line of the sentence whole (a trim into the text cut words off)
+            im["props"] = {**props, "crop": whole_lines(sticker_crop(im), im["lines"], im["size"])}
         if b.get("box") or im.get("box"):
             im["_own_box"] = True
         out.append(im)

@@ -260,6 +260,77 @@ const lines = (rects) => {
   return out;
 };
 
+// Every line of text the page draws inside area [x, y, w, h] (document px), as document-px boxes, and the
+// pictures there (img, canvas, video, svg: their text only OCR can read). Range.getClientRects per text node,
+// exact and free. Fragments join into one line only inside one block and only when they touch, so two
+// columns never read as one line. Text an overflow box clips away, or that is hidden or transparent, is left out.
+const TEXT = (area) => `(() => {
+  const [ax, ay, aw, ah] = ${JSON.stringify(area)};
+  const sx = scrollX, sy = scrollY, cut = new Map();
+  const clipOf = (e) => {
+    if (!e || e === document.body || e === document.documentElement) return [-1e9, -1e9, 1e9, 1e9];
+    if (cut.has(e)) return cut.get(e);
+    let c = clipOf(e.parentElement);
+    const cs = getComputedStyle(e);
+    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+      const r = e.getBoundingClientRect();
+      c = [Math.max(c[0], r.left), Math.max(c[1], r.top), Math.min(c[2], r.right), Math.min(c[3], r.bottom)];
+    }
+    cut.set(e, c);
+    return c;
+  };
+  const blockOf = (e) => { while (e && e !== document.body && getComputedStyle(e).display.startsWith('inline')) e = e.parentElement; return e; };
+  const frags = [];
+  const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n; (n = tw.nextNode());) {
+    const p = n.parentElement;
+    if (!p || !n.nodeValue.trim() || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.tagName)) continue;
+    if (p.checkVisibility && !p.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+    const c = clipOf(p), b = blockOf(p), r = document.createRange();
+    r.selectNodeContents(n);
+    for (const q of r.getClientRects()) {
+      const x0 = Math.max(q.left, c[0]), y0 = Math.max(q.top, c[1]), x1 = Math.min(q.right, c[2]), y1 = Math.min(q.bottom, c[3]);
+      if (x1 - x0 < 2 || y1 - y0 < 4) continue;
+      if (x1 + sx <= ax || x0 + sx >= ax + aw || y1 + sy <= ay || y0 + sy >= ay + ah) continue;
+      frags.push({ b, r: [x0 + sx, y0 + sy, x1 + sx, y1 + sy] });
+    }
+  }
+  const out = [];
+  for (const f of frags.sort((a, b) => a.r[1] - b.r[1] || a.r[0] - b.r[0])) {
+    const [x0, y0, x1, y1] = f.r, h = y1 - y0;
+    const l = out.find((o) => o.b === f.b && Math.min(o.r[3], y1) - Math.max(o.r[1], y0) > h / 2 && x0 <= o.r[2] + h && x1 >= o.r[0] - h);
+    if (l) l.r = [Math.min(l.r[0], x0), Math.min(l.r[1], y0), Math.max(l.r[2], x1), Math.max(l.r[3], y1)];
+    else out.push({ b: f.b, r: [...f.r] });
+  }
+  // a logo's word mark is a picture too: anything from a small svg up
+  const images = [...document.querySelectorAll('img, canvas, video, svg')].filter((e) => !e.parentElement?.closest('svg'))
+    .filter((e) => !e.checkVisibility || e.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+    .map((e) => e.getBoundingClientRect()).filter((q) => q.width >= 40 && q.height >= 12)
+    .map((q) => [q.left + sx, q.top + sy, q.width, q.height]).filter((q) => q[0] < ax + aw && q[0] + q[2] > ax && q[1] < ay + ah && q[1] + q[3] > ay);
+  return { lines: out.map((o) => [o.r[0], o.r[1], o.r[2] - o.r[0], o.r[3] - o.r[1]].map((v) => Math.round(v * 10) / 10)),
+    images: images.map((q) => q.map(Math.round)) };
+})()`;
+
+// A clip [x, y, w, h] grown (or, where that runs off the page, shrunk) so no line of text crosses its edge:
+// every line wholly in the shot or wholly out. lines: document-px boxes (TEXT); max: the page's [width, height].
+const snapClip = (clip, lines, max = [1e9, 1e9], pad = 4) => {
+  let [x0, y0, x1, y1] = [clip[0], clip[1], clip[0] + clip[2], clip[1] + clip[3]];
+  for (let i = 0; i < 6; i++) {
+    let moved = false;
+    for (const [lx, ly, lw, lh] of lines) {
+      const lx1 = lx + lw, ly1 = ly + lh;
+      if (lx1 <= x0 || lx >= x1 || ly1 <= y0 || ly >= y1) continue;          // out of the shot
+      if (lx >= x0 && lx1 <= x1 && ly >= y0 && ly1 <= y1) continue;          // wholly in it
+      if (ly < y0) { y0 = ly - pad >= 0 ? ly - pad : ly1 + pad; moved = true; }
+      if (ly1 > y1) { y1 = ly1 + pad <= max[1] ? ly1 + pad : ly - pad; moved = true; }
+      if (lx < x0) { x0 = lx - pad >= 0 ? lx - pad : lx1 + pad; moved = true; }
+      if (lx1 > x1) { x1 = lx1 + pad <= max[0] ? lx1 + pad : lx - pad; moved = true; }
+    }
+    if (!moved) break;
+  }
+  return [x0, y0, x1 - x0, y1 - y0];
+};
+
 // The sticker beat: the sentence holding the first mark, alone, shot at the page's own type.
 async function shootSticker(s, beat, out) {
   const finds = beat.marks.filter((mk) => mk.find).map((mk) => mk.find);
@@ -287,7 +358,9 @@ async function shootSticker(s, beat, out) {
     return { ...mk, rect: px([x0, y0, x1 - x0, y1 - y0]), rects: ls.map(px) };
   });
   console.log(`  sticker: "${got.sentence.replace(/\s+/g, " ")}" (x-height ${Math.round(got.xh * k)} px in the PNG)`);
-  return { size, marks, xh: Math.round(got.xh * k * 10) / 10 };
+  const { result: tx } = await s("Runtime.evaluate", { returnByValue: true, expression: TEXT([x, y, w, h]) });
+  const lns = (tx.value?.lines || []).filter(([a, b, c, d]) => a >= x - 1 && b >= y - 1 && a + c <= x + w + 1 && b + d <= y + h + 1).map(px);
+  return { size, marks, xh: Math.round(got.xh * k * 10) / 10, lines: lns };
 }
 
 async function shoot(cdp, beat, out) {
@@ -354,16 +427,23 @@ async function shoot(cdp, beat, out) {
         .filter((t) => t.length > 20 && t.length < 400).slice(0, 120))()` });
       fs.writeFileSync(out.replace(/\.png$/, ".text.json"), JSON.stringify(result.value || [], null, 1));
     }
-    let highlight;
+    let highlight, hrs;
     if (beat.highlight) {
-      const rs = await find(beat.highlight);
-      const bottom = Math.max(...rs.map((r) => r[1] + r[3]));
+      hrs = await find(beat.highlight);
+      const bottom = Math.max(...hrs.map((r) => r[1] + r[3]));
       // Shoot from the clip's top down past the sentence, so the card can travel to it. Capped: a
       // screenshot taller than this is mostly scroll nobody reads.
       clip.height = Math.min(Math.max(clip.height, bottom + 140 - clip.y), 3200);
-      highlight = { rects: rs.map(([x, y, w, h]) => [(x - clip.x) / clip.width, (y - clip.y) / clip.height,
+    }
+    // no line of text cut by the shot's edge: the clip grows to take a crossing line whole (or drops it)
+    const ev = async (expression) => (await s("Runtime.evaluate", { returnByValue: true, expression })).result.value;
+    const page = await ev("[document.documentElement.scrollWidth, document.documentElement.scrollHeight]");
+    const near = await ev(TEXT([clip.x - 400, clip.y - 400, clip.width + 800, clip.height + 800]));
+    [clip.x, clip.y, clip.width, clip.height] = snapClip([clip.x, clip.y, clip.width, clip.height], near?.lines || [], [page[0], Math.min(page[1], clip.y + 3300)]);
+    if (hrs) {
+      highlight = { rects: hrs.map(([x, y, w, h]) => [(x - clip.x) / clip.width, (y - clip.y) / clip.height,
         w / clip.width, h / clip.height].map((v) => Math.round(v * 10000) / 10000)) };
-      if (rs.some((r) => r[1] + r[3] > clip.y + clip.height)) console.error(`  ${beat.url}: highlight runs past 3200 px, cut off`);
+      if (hrs.some((r) => r[1] + r[3] > clip.y + clip.height)) console.error(`  ${beat.url}: highlight runs past 3200 px, cut off`);
     }
     const { data } = await s("Page.captureScreenshot", { format: "png", captureBeyondViewport: true,
       clip: { ...clip, scale: 1 } });
@@ -382,7 +462,10 @@ async function shoot(cdp, beat, out) {
       delete mk.page_rect;
       delete mk.page_rects;
     }
-    return { highlight, size, marks };
+    // the text's line boxes in the PNG's px: a card's crop keeps each line whole (plan.py whole_lines)
+    const lns = (near?.lines || []).filter(([x, y, w, h]) => x >= clip.x && y >= clip.y && x + w <= clip.x + clip.width && y + h <= clip.y + clip.height)
+      .map(([x, y, w, h]) => [x - clip.x, y - clip.y, w, h].map((v) => Math.round(v * k)));
+    return { highlight, size, marks, lines: lns };
   } finally {
     await cdp.send("Target.closeTarget", { targetId });
   }
@@ -592,6 +675,7 @@ async function main() {
       if (shot.highlight) im.highlight = shot.highlight;
       if (shot.marks.length) im.marks = shot.marks;
       if (shot.xh) im.xh = shot.xh;
+      if (shot.lines?.length) im.lines = shot.lines;
       images.push(im);
       console.log(`${src}  <- ${b.url}`);
     }
@@ -604,5 +688,5 @@ async function main() {
 }
 
 // Imported by product-video/scripts/crawl.mjs for the browser, banner and text-finding helpers.
-export { launch, findBinary, SHELLS, DISMISS, FIND, lines };
+export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip };
 if (path.basename(process.argv[1] || "") === "capture.mjs") await main();

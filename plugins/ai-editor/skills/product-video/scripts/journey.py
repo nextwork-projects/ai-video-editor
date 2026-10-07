@@ -258,6 +258,35 @@ def ocr_boxes():
         return None
 
 
+def text_lines(d, s):
+    """A state's text line boxes, state px: the DOM's own (record.mjs, Range.getClientRects), plus OCR inside the
+    pictures it shows (their text is pixels). A state recorded before record.mjs took them is read by OCR whole.
+    The OCR part is cached beside the still as <src>.lines.json."""
+    d = Path(d)
+    if "lines" in s and not s.get("images"):
+        return [list(r) for r in s["lines"]]
+    cache = d / (str(Path(s["src"]).with_suffix("")) + ".lines.json")
+    if cache.exists() and cache.stat().st_mtime >= (d / s["src"]).stat().st_mtime:
+        return list(s.get("lines", [])) + json.loads(cache.read_text())
+    read = ocr_boxes()
+    if not read:
+        return list(s.get("lines", []))
+    from PIL import Image
+    out = []
+    W, H = s["size"]
+    with Image.open(d / s["src"]) as im:
+        im = im.convert("RGB")
+        k = im.size[0] / W
+        for a in (s["images"] if "lines" in s else [[0, 0, W, H]]):
+            x0, y0, x1, y1 = max(0, a[0]), max(0, a[1]), min(W, a[0] + a[2]), min(H, a[1] + a[3])
+            if x1 - x0 < 20 or y1 - y0 < 10:
+                continue
+            for _, (x, y, w, h) in read(im.crop([int(x0 * k), int(y0 * k), int(x1 * k), int(y1 * k)])):
+                out.append([round(x0 + x * (x1 - x0), 1), round(y0 + y * (y1 - y0), 1), round(w * (x1 - x0), 1), round(h * (y1 - y0), 1)])
+    cache.write_text(json.dumps(out))
+    return list(s.get("lines", [])) + out
+
+
 def union(*rs):
     rs = [r for r in rs if r]
     x0, y0 = min(r[0] for r in rs), min(r[1] for r in rs)
@@ -350,6 +379,10 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
              "t": round(t0, 3), "kind": kind, "dur": round(dur, 3)}
         for k, v in kw.items():
             L[k] = [round(x, 1) for x in v] if isinstance(v, list) and v and isinstance(v[0], (int, float)) else v
+        # the text this layer puts on the canvas (canvas px): a region reveal only what lands inside its region
+        reg = (kw.get("weak") or kw.get("rect")) if kind in ("pop", "sweep", "modal") else [r[0], r[1], r[2], r[3]]
+        lines = [[r[0] + a[0], r[1] + a[1], a[2], a[3]] for a in text_lines(d, flows[fid]["states"][state])] if kind != "type" else []
+        L["lines"] = [[round(v) for v in a] for a in lines if reg and reg[0] <= a[0] + a[2] / 2 <= reg[0] + reg[2] and reg[1] <= a[1] + a[3] / 2 <= reg[1] + reg[3]]
         layers.append(L)
         return L
 
@@ -605,6 +638,13 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
             L["res"] = round(im.size[0] / L["w"], 3)      # picture px per page px: the most it can be magnified
     n = int(round(total * fps))
     fill_guard(d, keys, layers, plates, W, H, wmin)
+    fcache = {}
+
+    def fill_at(k, cam):
+        F = k["focus"]
+        pi = next((i for i, p in enumerate(plates) if p["x"] <= F[0] + F[2] / 2 <= p["x"] + p["w"] and p["y"] <= F[1] + F[3] / 2 <= p["y"] + p["h"]), None)
+        return 1.0 if pi is None else fill_of(fill_cells(d, layers, pi, plates[pi], k["t"], fcache), plates[pi], cam, W, H)
+    text_guard(keys, layers, W, H, wmin, fill=fill_at)
     cam, hold_focus = camera(keys, n, fps, W, H, wmin)
     cursor = cursor_path(cursor_moves, presses, n, fps, vertical, out_beats)
     raw_cursor = [list(c) for c in cursor]
@@ -828,6 +868,228 @@ def fill_guard(d, keys, layers, plates, W, H, wmin):
             k["cam"], k["fill"] = [round(float(v), 2) for v in best[0]], round(float(best[1]), 2)
 
 
+# ---------------------------------------------------------------- text whole or out
+
+TEXT_M = 6          # frame px: a line kept in frame sits at least this far inside the edge
+FADE_MAX = 0.12     # the edge fade, at most this share of the short side: a short fade, never a vignette
+
+
+def shown_lines(layers, t, cache):
+    """The text lines on the canvas at time t, as an (n, 5) array x0, y0, x1, y1, plate: each layer's lines, less
+    an earlier layer's lines on the same plate under its region (a new state replaces what it covers)."""
+    import numpy as np
+    idx = tuple(i for i, L in enumerate(layers) if L["t"] <= t)
+    if idx in cache:
+        return cache[idx]
+    vis = np.zeros((0, 5))
+    for i in idx:
+        L = layers[i]
+        if L["kind"] == "type":
+            continue
+        R = (L.get("weak") or L.get("rect")) if L["kind"] in ("pop", "sweep", "modal") else [L["x"], L["y"], L["w"], L["h"]]
+        if R and len(vis):
+            cx, cy = (vis[:, 0] + vis[:, 2]) / 2, (vis[:, 1] + vis[:, 3]) / 2
+            vis = vis[~((vis[:, 4] == L["plate"]) & (cx >= R[0]) & (cx <= R[0] + R[2]) & (cy >= R[1]) & (cy <= R[1] + R[3]))]
+        ln = L.get("lines") or []
+        if ln:
+            a = np.array(ln, float)
+            vis = np.vstack([vis, np.column_stack([a[:, 0], a[:, 1], a[:, 0] + a[:, 2], a[:, 1] + a[:, 3], np.full(len(a), L["plate"])])])
+    cache[idx] = vis
+    return vis
+
+
+def cut_by(lines, cam, W, H):
+    """Which lines (shown_lines rows) the frame of camera (cx, cy, w) cuts: in it but not wholly inside, TEXT_M
+    in from the edge. A line overlapping the frame by under 2 frame px is out."""
+    cx, cy, w = cam
+    h, k = w * H / W, W / w
+    fx0, fy0, fx1, fy1 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+    m, e = TEXT_M / k, 2 / k
+    x0, y0, x1, y1 = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+    inter = (x0 < fx1 - e) & (x1 > fx0 + e) & (y0 < fy1 - e) & (y1 > fy0 + e)
+    inside = (x0 >= fx0 + m) & (x1 <= fx1 - m) & (y0 >= fy0 + m) & (y1 <= fy1 - m)
+    return inter & ~inside
+
+
+def on_focus(lines, F):
+    """Lines that are part of the focus: a quarter or more of the line inside it."""
+    ox = (lines[:, 2].clip(None, F[0] + F[2]) - lines[:, 0].clip(F[0])).clip(0)
+    oy = (lines[:, 3].clip(None, F[1] + F[3]) - lines[:, 1].clip(F[1])).clip(0)
+    return ox * oy >= 0.25 * (lines[:, 2] - lines[:, 0]) * (lines[:, 3] - lines[:, 1])
+
+
+def focus_ok(F, cam, W, H, words):
+    """The focus wholly inside the safe frame, and clear of the words when they are up (framing's own test)."""
+    cx, cy, w = cam
+    k = W / w
+    m = SAFE * min(W, H)
+    x0, y0 = (F[0] - cx) * k + W / 2, (F[1] - cy) * k + H / 2
+    x1, y1 = x0 + F[2] * k, y0 + F[3] * k
+    if x0 < m - 1 or y0 < m - 1 or x1 > W - m + 1 or y1 > H - m + 1:
+        return False
+    if words:
+        wb = words_rect(W, H)
+        ov = max(0, min(x1, wb[0] + wb[2]) - max(x0, wb[0])) * max(0, min(y1, wb[1] + wb[3]) - max(y0, wb[1]))
+        return ov <= 0.04 * max(1, (x1 - x0) * (y1 - y0))
+    return True
+
+
+def text_guard(keys, layers, W, H, wmin, only=None, fill=None):
+    """Every held framing shows each line of text whole or not at all. The focus first grows to the whole of
+    the lines it holds part of (when that still fits), then the camera shifts (up to a quarter of the frame) or
+    widens (up to the key's wmax, never past 1:1 on the capture) to the nearest framing that cuts the fewest
+    lines, the focus kept whole in the safe frame and, given fill(key, cam), the product filling as much of the
+    frame as before (dropping a line by framing empty ground beside it is no fix). Checked at the hold's start and at the end of its push-in.
+    Lines it cannot clear are faded at the edge (edge_fades), never the focus's. Returns the lines still cut."""
+    import numpy as np
+    cache = {}
+    left = 0
+    ks = sorted(range(len(keys)), key=lambda i: keys[i]["t"])
+    for n, j in enumerate(ks):
+        if only is not None and j not in only:
+            continue
+        k = keys[j]
+        nxt = keys[ks[n + 1]] if n + 1 < len(ks) else None
+        t1 = max(k["t"], nxt["t"] - nxt.get("D", 1.0)) if nxt else k["t"] + 2.0
+        lines = np.vstack([shown_lines(layers, t, cache) for t in (k["t"] + 0.05, t1)])
+        if not len(lines):
+            continue
+        push = math.exp(-HOLD_PUSH * min(t1 - k["t"], 4) / 3)
+        wmax = k.get("wmax", k["cam"][2] * 1.3)
+        cx, cy, w = k["cam"]
+        F = k["focus"]
+        hit = on_focus(lines, F)
+        if hit.any():
+            g = lines[hit]
+            F2 = union(F, [float(g[:, 0].min()), float(g[:, 1].min()), float(g[:, 2].max() - g[:, 0].min()), float(g[:, 3].max() - g[:, 1].min())])
+        else:
+            F2 = F
+
+        def cost(cam, foc):
+            c = 0.0
+            for ww in (cam[2], cam[2] * push):
+                cut = cut_by(lines, (cam[0], cam[1], ww), W, H)
+                c += 100 * float((cut & foc).sum()) + float((cut & ~foc).sum())
+            return c
+
+        f0 = min(FILL_AIM, fill(k, k["cam"])) if fill else 0
+        lost = (lambda cam: 8 * max(0.0, f0 - fill(k, cam))) if fill else (lambda cam: 0.0)
+        base = cost(k["cam"], on_focus(lines, F))
+        if base == 0 and F2 == F:
+            continue
+        best = None
+        for F_ in ([F2, F] if F2 != F else [F]):
+            foc = on_focus(lines, F_)
+            for w2 in sorted({w, *np.geomspace(max(wmin, w * 0.88), max(w, wmax), 14)}):
+                h2 = w2 * H / W
+                for dx in np.linspace(-0.25, 0.25, 21) * w2:
+                    for dy in np.linspace(-0.25, 0.25, 21) * h2:
+                        cam = (cx + dx, cy + dy, w2)
+                        if not focus_ok(F_, (cam[0], cam[1], w2 * push), W, H, k.get("words")) or not focus_ok(F_, cam, W, H, k.get("words")):
+                            continue
+                        c = cost(cam, foc)
+                        sc = c + 3 * math.hypot(dx, dy) / w + 2 * abs(math.log(w2 / w)) + lost(cam)
+                        if best is None or sc < best[0]:
+                            best = (sc, c, cam, F_)
+            if best and best[1] < 100:
+                break           # the grown focus fits whole: keep it
+        if best and best[1] < base:
+            k["cam"] = [round(float(v), 2) for v in best[2]]
+            k["focus"] = [round(float(v), 1) for v in best[3]]
+            base = best[1]
+        k["text_cut"] = int(base)
+        left += int(base > 0)
+    return left
+
+
+def holding(cam, i, fps):
+    """The camera is holding at frame i: moving under a fifth of the frame a second (check_render's test)."""
+    a, b = cam[max(0, min(len(cam) - 2, i))], cam[max(1, min(len(cam) - 1, i + 1))]
+    return (math.hypot(b[0] - a[0], b[1] - a[1]) / a[2] + abs(math.log(b[2] / a[2]))) * fps <= 0.2
+
+
+def held_key(keys, t):
+    """The key being held at t (after its arrival, before the next move starts), or None."""
+    j = max((n for n, kk in enumerate(keys) if kk["t"] <= t), default=None)
+    if j is not None and (j + 1 >= len(keys) or t < keys[j + 1]["t"] - keys[j + 1].get("D", 1.5) - 2 * SMOOTH_S) and t - keys[j]["t"] > 0.25:
+        return j
+    return None
+
+
+def edge_fades(plan):
+    """Per frame [left, top, right, bottom] frame px: where a held frame still cuts a line that is not part of
+    the focus, that edge fades out over a short band (the line's visible part plus 10 px, at most about a word
+    of its type at the side edges and FADE_MAX of the short side), eased in and out over 0.25 s. Journey.tsx
+    masks the canvas with it: clear for the outer 40% of the band (the cut glyphs), then a ramp."""
+    import numpy as np
+    W, H, fps = plan["width"], plan["height"], plan["fps"]
+    cam, keys, layers = plan["cam"], plan["keys"], plan["canvas"]["layers"]
+    n = len(cam)
+    out = np.zeros((n, 4))
+    cap = FADE_MAX * min(W, H)
+    cache = {}
+    for i in range(n):
+        t = i / fps
+        if t >= plan.get("end", 1e9) - 0.15 or not holding(cam, i, fps):
+            continue
+        lines = shown_lines(layers, t, cache)
+        if not len(lines):
+            continue
+        cut = cut_by(lines, cam[i], W, H)
+        j = held_key(keys, t)
+        if j is not None:
+            cut &= ~on_focus(lines, keys[j]["focus"])
+        if not cut.any():
+            continue
+        cx, cy, w = cam[i]
+        h, k = w * H / W, W / w
+        fx0, fy0, fx1, fy1 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+        m = TEXT_M / k
+        for x0, y0, x1, y1, _ in lines[cut]:
+            word = max(40, 3 * (y1 - y0) * k)          # about a word of this line's type: the cut word goes
+            if x0 < fx0 + m:
+                out[i, 0] = max(out[i, 0], min(cap, word, (min(x1, fx1) - fx0) * k + 10))
+            if x1 > fx1 - m:
+                out[i, 2] = max(out[i, 2], min(cap, word, (fx1 - max(x0, fx0)) * k + 10))
+            if y0 < fy0 + m:
+                out[i, 1] = max(out[i, 1], min(cap, (min(y1, fy1) - fy0) * k + 10))
+            if y1 > fy1 - m:
+                out[i, 3] = max(out[i, 3], min(cap, (fy1 - max(y0, fy0)) * k + 10))
+    # held for 0.25 s either side, then eased: the fade never pops
+    r = max(1, int(0.25 * fps))
+    for c in range(4):
+        col = out[:, c]
+        mx = np.array([col[max(0, i - r):i + r + 1].max() for i in range(n)])
+        out[:, c] = np.convolve(np.pad(mx, r, mode="edge"), np.ones(2 * r + 1) / (2 * r + 1), mode="valid")
+    return [[round(float(v), 1) for v in row] for row in out]
+
+
+def text_cuts(plan):
+    """[(t, problem, key j)] for every held frame where the frame edge cuts a line of text: on the focus it is a
+    framing failure; elsewhere it must sit under an edge fade (plan["edge"]) at least as deep as the cut."""
+    W, H, fps = plan["width"], plan["height"], plan["fps"]
+    keys, layers, cam = plan["keys"], plan["canvas"]["layers"], plan["cam"]
+    edge = plan.get("edge")
+    out, cache = [], {}
+    for i in range(len(cam)):
+        t = i / fps
+        if t >= plan.get("end", 1e9) - 0.15:
+            break
+        j = held_key(keys, t)
+        if j is None:
+            continue
+        lines = shown_lines(layers, t, cache)
+        if not len(lines):
+            continue
+        cut = cut_by(lines, cam[i], W, H)
+        foc = cut & on_focus(lines, keys[j]["focus"])
+        if foc.any():
+            out.append((t, f"{int(foc.sum())} line(s) of text on the focus cut by the frame edge", j))
+        elif cut.any() and not (edge and any(v > 0 for v in edge[i])):
+            out.append((t, f"{int(cut.sum())} line(s) of text cut by the frame edge, not faded", j))
+    return out
+
+
 def framing(plan, words_box=None):
     """Every frame, from the plan's own camera: the held focus inside the safe frame, never under the words,
     the cursor wholly in frame or not shown, no capture shown bigger than it was taken. [(t, problem, key i)]"""
@@ -871,6 +1133,8 @@ def framing(plan, words_box=None):
             x0, y0 = (x - cw / 2, y - ch / 2) if plan.get("touch") else (x - 3 * S, y - 2 * S)
             if x0 < 0 or y0 < 0 or x0 + cw > W or y0 + ch > H:
                 out.append((t, f"the cursor is cut by the frame edge at ({x:.0f}, {y:.0f})", j))
+    if plan.get("canvas", {}).get("layers") and any(L.get("lines") for L in layers):
+        out += [p for p in text_cuts(plan) if "on the focus" in p[1]]
     return out
 
 
@@ -890,7 +1154,7 @@ def replan(plan, rounds=6):
         bad = framing(plan)
         idx = sorted({j for _, _, j in bad if j is not None})
         if not bad or not idx:
-            return bad
+            break
         for j in idx:
             k = plan["keys"][j]
             cx, cy, w = k["cam"]
@@ -902,11 +1166,14 @@ def replan(plan, rounds=6):
             cx = fx if F[2] > w2 * 0.8 else min(max(cx, F[0] + F[2] - w2 / 2 + w2 * 0.06), F[0] + w2 / 2 - w2 * 0.06)
             cy = fy + (h2 * 0.17 if k.get("words") else 0) if F[3] > h2 * 0.5 else min(max(cy, F[1] + F[3] - h2 / 2 + h2 * 0.08 + (h2 * 0.3 if k.get("words") else 0)), F[1] + h2 / 2 - h2 * 0.08)
             k["cam"] = [cx, cy, w2]
+        text_guard(plan["keys"], plan.get("canvas", {}).get("layers", []), W, H, plan.get("wmin", 0), only=set(idx))
         cam, _ = camera(plan["keys"], plan["durationInFrames"], fps, W, H, plan.get("wmin", 0))
         plan["cam"] = [[round(x, 2) for x in c] for c in cam]
         if plan.get("cursor_raw"):
             plan["cursor"] = [list(c) for c in plan["cursor_raw"]]
             gate_cursor(plan["cursor"], plan["cam"], W, H, fps, plan.get("touch"))
+    if plan.get("canvas", {}).get("layers"):
+        plan["edge"] = edge_fades(plan)
     return framing(plan)
 
 
@@ -1096,6 +1363,39 @@ def check_render(d, plan, video):
             out.append(("FAIL", f"{t:.1f} s: the focus is drawn at ({x * 2}, {y * 2}) and runs past the safe frame", "re-plan the camera"))
         elif abs(x - px) > 12 or abs(y - py) > 12:
             out.append(("WARN", f"{t:.1f} s: the focus is drawn {abs(x - px) * 2:.0f}, {abs(y - py) * 2:.0f} px from where the plan put it", "the renderer and journey.py disagree"))
+    # text cut by the frame edge, read off the render: OCR at 2 fps, full size, on held frames
+    read = ocr_boxes()
+    if not read:
+        out.append(("WARN", "no OCR engine (ocrmac or rapidocr): the cut-text check did not run", "setup installs one"))
+    else:
+        from PIL import Image
+        hits = []
+        proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"fps=2,scale={W}:{H}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                stdout=subprocess.PIPE)
+        i = -1
+        while True:
+            buf = proc.stdout.read(W * H * 3)
+            if len(buf) < W * H * 3:
+                break
+            i += 1
+            t = i / 2
+            fi = min(len(plan["cam"]) - 1, round(t * fps))
+            if t < 0.5 or t > end - 0.3 or not holding(plan["cam"], fi, fps):
+                continue
+            img = Image.frombytes("RGB", (W, H), buf)
+            boxes = [[x * W, y * H, w * W, h * H] for _, (x, y, w, h) in read(img)]
+            j = held_key(keys, t)
+            fr = None
+            if j is not None:
+                F, (cx, cy, cw) = keys[j]["focus"], plan["cam"][fi]
+                k = W / cw
+                fr = [(F[0] - cx) * k + W / 2, (F[1] - cy) * k + H / 2, F[2] * k, F[3] * k]
+            hits += [(t, lvl) for lvl, _ in edge_text(boxes, W, H, fr, grey=np.asarray(img.convert("L")))]
+        proc.wait()
+        for lvl in ("FAIL", "WARN"):
+            for a, b in runs([t for t, l in hits if l == lvl], 0.6):
+                out.append((lvl, f"{a:.1f}-{b:.1f} s: a line of text runs into the frame edge" + (" on the focus" if lvl == "FAIL" else ""),
+                            "product.py plan again (journey.text_guard re-frames it, edge_fades fades it)"))
     # names: the logged-in account's own name or handle, readable anywhere
     who = d / "flows" / "whoami.json"
     toks = [x.lower() for x in json.loads(who.read_text()).get("tokens", []) if len(x) >= 4] if who.exists() else []
@@ -1120,6 +1420,27 @@ def check_render(d, plan, video):
            f"speed {r['speed_median']} %/s, cuts {r['cuts_per_10s']}/10 s, carry {r['carry_moving_cuts']}")
     lvl = "WARN" if r["judder_per_10s"] > 0.2 or r["stops_per_10s"] > 0.5 or r["jerk_p95"] > 3000 else "INFO"
     out.append((lvl, msg, "the bar: Linear's films, judder 0, stops under 0.5/10 s, jerk p95 under 3000" if lvl == "WARN" else ""))
+    return out
+
+
+def edge_text(boxes, W, H, focus=None, touch=3, grey=None):
+    """[(level, box)] for OCR text boxes (frame px) that touch the frame edge with ink on the edge itself (grey:
+    the frame, 0-255; an OCR box's own padding touching it is not a cut), so their words are cut: FAIL when the
+    box overlaps the focus (frame px), WARN elsewhere."""
+    import numpy as np
+    out = []
+    for b in boxes:
+        x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+        if x0 > touch and y0 > touch and x1 < W - touch and y1 < H - touch:
+            continue
+        if grey is not None:
+            ya, yb, xa, xb = int(max(0, y0)), int(min(H, y1 + 1)), int(max(0, x0)), int(min(W, x1 + 1))
+            strips = ([grey[ya:yb, :3]] if x0 <= touch else []) + ([grey[ya:yb, -3:]] if x1 >= W - touch else []) + \
+                     ([grey[:3, xa:xb]] if y0 <= touch else []) + ([grey[-3:, xa:xb]] if y1 >= H - touch else [])
+            if not any(st.size and float(st.max()) - float(np.median(st)) > 40 for st in strips):
+                continue
+        on = focus is not None and x0 < focus[0] + focus[2] and x1 > focus[0] and y0 < focus[1] + focus[3] and y1 > focus[1]
+        out.append(("FAIL" if on else "WARN", b))
     return out
 
 
@@ -1166,6 +1487,38 @@ def demo():
     # the frame filled by product: an empty ground (any colour) counts as none of it, UI detail as all of it
     busy = (np.random.default_rng(0).random((540, 960, 3)) * 255).astype(np.uint8)
     assert content_fill(np.full((540, 960, 3), 40, np.uint8)) == 0 and content_fill(busy) > 0.9
+    # text whole or out: a framing that cuts a line at the frame edge fails; text_guard re-frames it
+    lay = [{"plate": 0, "t": 0, "kind": "base", "x": 0, "y": 0, "w": 1440, "h": 900, "dur": 0,
+            "lines": [[100, 100, 600, 40], [900, 400, 500, 30], [200, 600, 400, 30]]}]
+
+    def text_plan(cam, focus):
+        ks = [{"t": 0.0, "cam": list(cam), "focus": list(focus), "words": False, "wmax": 1872}]
+        return {"width": 1920, "height": 1080, "fps": 30, "keys": ks, "canvas": {"layers": lay}, "end": 9,
+                "cam": camera(ks, 90, 30, 1920, 1080, 400)[0]}
+    tp = text_plan([500, 300, 1000], [100, 100, 400, 40])                     # the right edge cuts the second line
+    assert any("not faded" in m for _, m, _ in text_cuts(tp)), text_cuts(tp)[:2]
+    assert text_guard(tp["keys"], lay, 1920, 1080, 400) == 0, tp["keys"]
+    tp["cam"] = camera(tp["keys"], 90, 30, 1920, 1080, 400)[0]
+    assert not text_cuts(tp), text_cuts(tp)[:2]
+    tp = text_plan([300, 300, 640], [100, 100, 400, 40])                      # the focus's own line cut: a framing failure
+    assert any("on the focus" in m for _, m, _ in framing({**tp, "cursor": [[0, 0, 0, 0, 0]] * 90, "words": []}))
+    assert text_guard(tp["keys"], lay, 1920, 1080, 400) == 0 and tp["keys"][0]["focus"][2] >= 600, tp["keys"]
+    tp["cam"] = camera(tp["keys"], 90, 30, 1920, 1080, 400)[0]
+    assert not text_cuts(tp), text_cuts(tp)[:2]
+    # a line no framing can clear (wider than the page) is faded at both edges, never left hard-cut
+    lay[0]["lines"].append([-600, 300, 3000, 30])
+    tp = text_plan([500, 300, 1000], [100, 100, 400, 40])
+    text_guard(tp["keys"], lay, 1920, 1080, 400)
+    tp["cam"] = camera(tp["keys"], 90, 30, 1920, 1080, 400)[0]
+    assert text_cuts(tp)
+    tp["edge"] = edge_fades(tp)
+    assert tp["edge"][45][0] > 0 and tp["edge"][45][2] > 0 and not text_cuts(tp), (tp["edge"][45], text_cuts(tp)[:2])
+    # the render check: an OCR box touching the frame edge is a cut word; on the focus it fails
+    bx = [[1800, 500, 120, 30], [0, 900, 80, 30], [500, 500, 300, 30]]
+    assert [lv for lv, _ in edge_text(bx, 1920, 1080, [1700, 480, 220, 80])] == ["FAIL", "WARN"]
+    g = np.zeros((1080, 1920), np.uint8)
+    g[505:525, 1910:1920:3] = 230                   # glyph strokes run into the right edge; the left box's edge is bare
+    assert [lv for lv, _ in edge_text(bx, 1920, 1080, [1700, 480, 220, 80], grey=g)] == ["FAIL"]
     print("demo ok")
 
 

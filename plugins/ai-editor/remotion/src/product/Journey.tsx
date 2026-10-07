@@ -22,6 +22,7 @@ export type JourneyPlan = ProductPlan & {
   cam: [number, number, number][]; cursor: [number, number, number, number, number][]; touch?: boolean;
   clicks: { t: number; x: number; y: number }[]; words: { text: string; start: number; end: number }[];
   beats: { job: string; start: number; end: number; text?: string }[]; end: number;
+  edge?: [number, number, number, number][];   // per frame, frame px: [left, top, right, bottom] edge fades (journey.edge_fades)
 };
 
 // the same curve journey.py moves the camera on, for the layers' own entrances
@@ -140,6 +141,16 @@ const Cursor: React.FC<{ plan: JourneyPlan; lead: number }> = ({ plan, lead }) =
     opacity: a, transform: `scale(${1 - 0.14 * press})`, transformOrigin: "3px 2px", filter: `drop-shadow(0 ${3 * S}px ${5 * S}px rgba(0,0,0,0.4))` }}>{shape}</svg>;
 };
 
+const edgeMask = (e: number[] | null): React.CSSProperties => {
+  if (!e || Math.max(...e) < 0.5) return {};
+  const [l, t, r, b] = e;
+  // the outer 40% of each band is clear (the cut glyphs), then a ramp in
+  const g = (dir: string, a: number, z: number) => `linear-gradient(to ${dir}, transparent 0px, transparent ${a * 0.4}px, black ${a}px, `
+    + `black calc(100% - ${z}px), transparent calc(100% - ${z * 0.4}px), transparent 100%)`;
+  const m = `${g("right", l, r)}, ${g("bottom", t, b)}`;
+  return { WebkitMaskImage: m, maskImage: m, WebkitMaskComposite: "source-in", maskComposite: "intersect" };
+};
+
 export const Journey: React.FC<{ plan: JourneyPlan; fams: Fams }> = ({ plan, fams }) => {
   const { width: W, height: H, fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -166,7 +177,10 @@ export const Journey: React.FC<{ plan: JourneyPlan; fams: Fams }> = ({ plan, fam
       {t < plan.end + 0.6 ? (
         <AbsoluteFill style={{ opacity: 1 - out, filter: out > 0.01 ? `blur(${out * 16}px)` : undefined }}>
           {/* inside the blur, Freeze runs half a frame to a frame ahead: lead 0.75 centres the shutter on this frame */}
-          {blur ? <CameraMotionBlur samples={6} shutterAngle={180}>{scene(0.75)}</CameraMotionBlur> : scene(0)}
+          {/* a line of text the held frame cannot keep whole fades out at the edge instead of being cut there */}
+          <AbsoluteFill style={edgeMask(plan.edge ? at(plan.edge, frame) : null)}>
+            {blur ? <CameraMotionBlur samples={6} shutterAngle={180}>{scene(0.75)}</CameraMotionBlur> : scene(0)}
+          </AbsoluteFill>
           <AbsoluteFill style={{ pointerEvents: "none", background: `radial-gradient(ellipse 120% 90% at 50% 45%, transparent 60%, rgba(0,0,0,${dark ? 0.35 : 0.08}) 100%)` }} />
           {word ? <>
             <AbsoluteFill style={{ background: `linear-gradient(to top, ${sg} 0%, ${sg}D0 22%, ${sg}00 46%)`,

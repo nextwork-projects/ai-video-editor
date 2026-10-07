@@ -83,6 +83,17 @@ shows of it (`journey.crop_layers`), so a tall 3x still is never decoded whole. 
 found by template match where the plan put it, the product filling the frame by detected content (edges,
 not colour: an empty dark panel is empty), and no logged-in name readable (OCR).
 
+Text whole or out. `record.mjs --states` stores each state's text line boxes from the page
+(Range.getClientRects per text node, columns kept apart, clipped and hidden text left out) and the
+boxes of its pictures; text inside pictures, and states recorded before this, are read by OCR
+(cached as `<still>.lines.json`). Every held framing shows each line wholly or not at all: the focus
+first grows to the whole of a line it holds part of, then the camera shifts (up to a quarter of the
+frame) or widens (up to the key's limit, never past 1:1, never onto emptier ground) to the nearest
+framing that cuts no line (`journey.text_guard`). A line it cannot clear that is not part of the focus
+fades out at that edge over about a word of its type (`journey.edge_fades`, Journey.tsx masks the
+canvas); a cut line on the focus FAILs the plan. `check` reads the render with OCR at 2 fps on held
+frames: a word box running into the frame edge with ink on the edge is a WARN, on the focus a FAIL.
+
 ## The animatic, before any render
 
 `product.py animatic DIR --plan plan-<tag>.json`: the start, middle and end of every beat as stills on one

@@ -145,8 +145,8 @@ from the planned camera): smooth beats short, so a site with long pages can run 
 
 A story of beats plans the rendered film (`journey.py`): the pages on one canvas left to right, one camera
 on one easing, a drawn cursor, every change revealed in place, 60 fps. The plan checks every frame from the
-camera path (the held focus in the safe frame and clear of the words, the cursor whole or hidden, no
-capture past its own resolution), re-plans the camera when a frame fails, and exits 1 on what is left. A sparse
+camera path (the held focus in the safe frame and clear of the words, the cursor whole or hidden, every
+line of text whole or out of frame, no capture past its own resolution), re-plans the camera when a frame fails, and exits 1 on what is left. A sparse
 page is framed tighter on its detected content (`references/story.md` "Framing guarantee"). The score follows
 the beats (a section per beat, the chord changing at each), effects land on the clicks, keys and new pages; -14 LUFS, -1 dBTP. A story of `shots` plans the
 older shot film (screencasts and the shot library, each shot naming its `job`).

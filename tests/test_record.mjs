@@ -29,7 +29,20 @@ for (const t of ["Start free", "Projects", "Search", "Open roadmap", "Next step"
   assert.ok(!DENY.test(t), `DENY blocks the harmless ${JSON.stringify(t)}`);
 console.log("deny list ok");
 
-const { launch, findBinary, SHELLS } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+// snapClip: a shot whose edge crosses a line of text grows to take the line whole; one past the page drops it
+{
+  const { snapClip: snap } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+  const ln = [[20, 90, 300, 20], [20, 300, 900, 20]];
+  const cuts = (c) => ln.filter(([x, y, w, h]) => x < c[0] + c[2] && x + w > c[0] && y < c[1] + c[3] && y + h > c[1]
+    && !(x >= c[0] && y >= c[1] && x + w <= c[0] + c[2] && y + h <= c[1] + c[3])).length;
+  const naive = [0, 0, 600, 100];
+  assert.equal(cuts(naive), 1, "the naive clip cuts the first line");
+  assert.equal(cuts(snap(naive, ln)), 0, JSON.stringify(snap(naive, ln)));
+  assert.equal(cuts(snap([0, 200, 600, 120], ln, [600, 1000])), 0, "a line wider than the page is left out whole");
+  console.log("snapClip ok");
+}
+
+const { launch, findBinary, SHELLS, TEXT } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
 const bin = findBinary(SHELLS);
 if (!bin) {
   if (process.argv.includes("--require-chrome")) throw new Error(`no Chrome Headless Shell under ${SHELLS}`);
@@ -56,6 +69,19 @@ try {
   assert.deepEqual(blurred, { me: true, av: true, mail: true, field: true, copy: false, card: true }, JSON.stringify({ blurred, hits }));
   assert.ok(hits.some((h) => h.startsWith("listed: ")) && hits.some((h) => h.startsWith("email")), JSON.stringify(hits));
   console.log("blur ok:", [...new Set(hits)].join(", "));
+  // TEXT: one box per line, columns kept apart, text an overflow box clips away or a hidden one left out
+  const page2 = `<!doctype html><html><body style="margin:0;font:20px/30px sans-serif">
+    <div style="display:flex;gap:40px;width:900px"><p id="a" style="width:300px;margin:0">left column words that wrap onto two lines here</p>
+    <p style="width:300px;margin:0">right column</p></div>
+    <div style="width:120px;overflow:hidden;white-space:nowrap">clipped away after this long run of words</div>
+    <p style="visibility:hidden">hidden words</p><p style="opacity:0">clear words</p></body></html>`;
+  await cdp.send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: page2 }, sessionId);
+  const tx = await ev(TEXT([0, 0, 1000, 700]));
+  const ls = tx.lines;
+  assert.equal(ls.length, 4, JSON.stringify(ls));                       // two left lines, the right column, the clipped run
+  assert.ok(ls.every(([x, , w]) => x + w <= 341 || x >= 339), "a line never spans both columns: " + JSON.stringify(ls));
+  assert.ok(ls.some(([x, y, w]) => y > 60 && w <= 120.5), "the overflow box clips its line: " + JSON.stringify(ls));
+  console.log("text lines ok");
 } finally {
   cdp.close();
 }
