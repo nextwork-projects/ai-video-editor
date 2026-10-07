@@ -1,10 +1,12 @@
 // Full-frame scenes: an explaining beat cuts away from the speaker to the look's flat ground, the type
-// filling the frame, and cuts back. The cut in and out is a designed transition, never a hard cut:
+// filling the frame, and cuts back. The cut in and out is a designed transition, or a hard cut for a
+// creator who only cuts (style.json "transitions": []):
 //   match  a dot of the scene's ground grows from the focus point (the face) to become the whole frame
 //   iris   a circle opens from the focus point
 //   push   the scene pushes the footage off the frame, motion-blurred along x
 //   block  two colour blocks sweep across and the scene is under the second
 //   wipe   a hard edge crosses from the right; fade: a plain dissolve
+//   cut    none: the scene is there on its first frame and gone after its last
 // Inside, the camera drifts and flat colour blocks sit on their own parallax layer.
 import React from "react";
 import { Sequence, useVideoConfig } from "remotion";
@@ -12,8 +14,9 @@ import { Motion, prog } from "./motion";
 import { Fonts, Ground, Look, Texture, onGround } from "./look";
 import { Anim, AnimCard } from "./Anims";
 import { Capture, Mark } from "./Capture";
+import { Kind, cutPhase } from "./ground";
 
-export type Transition = "match" | "iris" | "push" | "block" | "wipe" | "fade";
+export type Transition = Kind;
 export type SceneCard = { anim?: Anim; src?: string; size?: [number, number]; marks?: Mark[];
   highlight?: { rects: [number, number, number, number][] }; start: number; end: number; layout?: "scene" | "box";
   transition_in?: Transition; transition_out?: Transition; focus?: [number, number]; ground?: Ground;
@@ -28,7 +31,7 @@ export const sceneGrounds = (cards: SceneCard[]) => {
 };
 
 const EASE: Record<Transition, string> = { match: "expo.inOut", iris: "power3.inOut", push: "power4.inOut", block: "power3.inOut",
-  wipe: "power3.inOut", fade: "sine.inOut" };
+  wipe: "power3.inOut", fade: "sine.inOut", cut: "none" };
 export const TR_S = 0.62; // seconds a transition takes at k = 1
 
 /** Where a scene's type lives, % of the frame: clear of the app's top bar and the captions under it. */
@@ -36,8 +39,9 @@ export const sceneBox = (w: number, h: number): [number, number, number, number]
 
 export const phases = (c: SceneCard, t: number, m: Motion) => {
   const T = TR_S * m.k;
-  const tin = c.transition_in ?? "match", tout = c.transition_out ?? (tin === "block" || tin === "push" ? tin : "iris");
-  return { T, tin, tout, pi: prog(t - c.start, 0, T, EASE[tin]), po: prog(t, c.end - T, T, EASE[tout]) };
+  const tin = c.transition_in ?? "match", tout = c.transition_out ?? (tin === "block" || tin === "push" || tin === "cut" ? tin : "iris");
+  const [pi, po] = cutPhase(tin, tout, prog(t - c.start, 0, T, EASE[tin]), prog(t, c.end - T, T, EASE[tout]));
+  return { T, tin, tout, pi, po };
 };
 
 /** The footage's x offset while a push scene is entering or leaving (it is pushed off, then back). */

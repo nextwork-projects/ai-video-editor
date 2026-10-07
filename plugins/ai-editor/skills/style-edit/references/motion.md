@@ -152,7 +152,8 @@ A scene card in plan.json:
 ## Transitions
 
 `transition_in` / `transition_out` on a scene card (default in: `match`; out: `iris`, or the same as in
-for `push` and `block`). Each takes about 0.62 s x the personality's duration multiplier.
+for `push`, `block` and `cut`). Each takes about 0.62 s x the personality's duration multiplier. plan.py cycles
+style.json `transitions`; an empty list (the creator only cuts) gives `cut` in and out.
 
 | name | what happens | ease |
 |---|---|---|
@@ -162,6 +163,7 @@ for `push` and `block`). Each takes about 0.62 s x the personality's duration mu
 | `block` | an accent block then an ink block sweep across; the scene switches under the second (transitions-cover) | power3.inOut |
 | `wipe` | a hard edge crosses from the right | power3.inOut |
 | `fade` | a dissolve | sine.inOut |
+| `cut` | none: the scene is whole on its first frame and gone after its last | |
 
 Box cards that swap in the same lane keep the cover wipe.
 

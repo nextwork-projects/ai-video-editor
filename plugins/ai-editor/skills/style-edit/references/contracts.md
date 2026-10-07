@@ -250,8 +250,9 @@ A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. 
 
 - `layout`: `"scene"` (full frame) | `"split"` (the split layout's top panel) | `"box"` (the card's `box` over the footage).
   plan.py sets it on every card; a visuals.json beat's own `layout` wins, except that an explaining card on vertical is never a box.
-- `transition_in`, `transition_out`: `match` | `iris` | `push` | `block` (scene only; defaults `match` in, `iris` out,
-  or cycled from style.json `transitions`). Each takes about 0.62 s x the personality's k.
+- `transition_in`, `transition_out`: `match` | `iris` | `push` | `block` | `wipe` | `fade` | `cut` (scene only; cycled
+  from style.json `transitions`; `cut` when that list is empty, a creator who only cuts; `match` in, `iris` out when
+  there is no list). Each takes about 0.62 s x the personality's k; `cut` takes none.
 - `focus`: `[x, y]` % of the frame a scene opens from and closes to (default the head centre from face.json).
 - `marks`: `[{"kind": "box|ring|underline|bracket|pill|dim|highlight", "rect": [x, y, w, h], "at": 0.8}]` on a
   capture card. `rect` is in the capture's own pixels, `at` is seconds after the card lands (from `at_word`,

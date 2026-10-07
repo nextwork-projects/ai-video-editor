@@ -39,8 +39,10 @@ export type CaptionStyle = {
   /** Lines a page may take. Default 1: one line, never wrapped. */
   max_lines?: number;
   width_pct?: number;
-  /** false: no drop shadow (set while a scene is up: dark ink on a flat ground). */
+  /** false: no default drop shadow (the creator's measured look); the contrast treatment still applies. */
   shadow?: boolean;
+  /** true while a scene is up: dark ink on a flat ground, no shadow and no contrast treatment. */
+  flat?: boolean;
 };
 
 export const useFamily = (name: string | undefined, weight: number) => {
@@ -84,13 +86,12 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
     const pageO = fx === "slide" ? prog(lt, 0, 0.2, "power1.out") : 1;
     const lift = ((style.active_lift ?? (fx === "lift" ? 8 : 0)) / 100) * size;
     const dimmed = style.inactive_opacity ?? (fx === "karaoke" ? 0.35 : fx === "reveal" ? 0 : 1);
-    // contrast treatment (off while a scene is up: shadow false there), each step keeps the one before
-    const tr = style.shadow === false ? undefined : chunk.treat;
+    // contrast treatment (off while a scene is up: flat there), each step keeps the one before
+    const tr = style.flat ? undefined : chunk.treat;
     const tc = chunk.treat_color ?? "#111111";
     const boxed = style.box || tr === "backing";
-    const shadow = style.shadow === false ? undefined
-      : tr ? `0 0 ${size * 0.02}px ${rgba(tc, 1)}, 0 0 ${size * 0.06}px ${rgba(tc, 0.9)}, 0 ${size * 0.04}px ${size * 0.18}px ${rgba(tc, 0.6)}`
-      : style.box || style.stroke ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)`;
+    const shadow = tr ? `0 0 ${size * 0.02}px ${rgba(tc, 1)}, 0 0 ${size * 0.06}px ${rgba(tc, 0.9)}, 0 ${size * 0.04}px ${size * 0.18}px ${rgba(tc, 0.6)}`
+      : style.flat || style.shadow === false || style.box || style.stroke ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)`;
     return (
       <div style={{ transform: pageT, opacity: pageO, textAlign: "center", fontFamily: family, fontWeight: weight, fontSize: size,
         lineHeight: 1.14, color, whiteSpace: lines === 1 ? "nowrap" : undefined, padding: boxed ? `${size * 0.12}px ${size * 0.3}px` : 0, borderRadius: size * 0.2,

@@ -25,6 +25,10 @@ Sources:
   guess calls a near-square one-line word mark a logo. A real non-talking-head creator run to check
   the overlay mode's precision outside the fixture.
 
+- Teardowns made before `"transitions": []` was written leave the key out for a creator who only cuts,
+  so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
+  SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
+
 Skill wording:
 - cut step 0 says ask "even if they said 'edit my video like @creator'", which routes to start.
 - cut and clips use `python3` with no "`py` on Windows" line.

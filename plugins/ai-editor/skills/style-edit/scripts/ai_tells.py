@@ -270,7 +270,8 @@ def check_plan(plan, visuals=None, table=None):
         if len(ents) == 1:
             out.append(tell("same-entrance", "cards", f"all {len(content)} enter with '{ents.pop()}'"))
     scenes = [c for c in content if c.get("layout") == "scene"]
-    if len(scenes) >= 3 and len({(c.get("transition_in"), c.get("transition_out")) for c in scenes}) == 1:
+    pairs = {(c.get("transition_in"), c.get("transition_out")) for c in scenes}
+    if len(scenes) >= 3 and len(pairs) == 1 and pairs != {("cut", "cut")}:
         out.append(tell("same-transition", "scenes", f"all {len(scenes)} use {scenes[0].get('transition_in')}/{scenes[0].get('transition_out')}"))
     m = re.search(r"\b(back\.out|elastic|bounce)\w*", json.dumps(plan.get("motion")) + json.dumps(cards), re.I)
     if m:
@@ -506,6 +507,10 @@ def demo():
     assert all(f["level"] in ("BAN", "WARN") and f["fix"] for f in got)
     assert check_plan({"width": 1080, "height": 1920, "look": {"preset": "neutral", "font": "Newsreader"},
                        "cards": [{"src": "images/capture-1.png", "entrance": "pop"}]}, [], T) == []
+    # every scene cut hard (a creator who only cuts) is the fix, not the tell
+    sc = [{"src": f"images/capture-{i}.png", "entrance": e, "layout": "scene", "transition_in": "cut", "transition_out": "cut"}
+          for i, e in enumerate(("pop", "slide", "fade"))]
+    assert not [f for f in check_plan({"cards": sc}, [], T) if f["tell"] == "same-transition"]
 
     # pixels: the rejected title card (cream ground, centred heading, small line, short bar)
     W, H = 540, 960

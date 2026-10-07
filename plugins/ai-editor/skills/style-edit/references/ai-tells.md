@@ -18,7 +18,7 @@ Sources (numbered in the lists below):
 7. Nielsen Norman Group, "The AI sparkles icon problem": https://www.nngroup.com/articles/ai-sparkles-icon-problem/
 8. Flitto DataLab, orange-and-teal bias in AI art: https://datalab.flitto.com/en/company/blog/?p=425
 9. Submagic, auto video editor (auto emoji, auto B-roll, Magic Zoom): https://www.submagic.co/it/features/auto-video-editor
-10. Submagic, "How to make Alex Hormozi captions": https://www.submagic.co/blog/how-to-make-alex-hormozi-captions
+10. Submagic, a guide to the uppercase yellow-keyword stroked caption preset: https://www.submagic.co/blog/how-to-make-alex-hormozi-captions
 11. Know Your Meme, Vine boom: https://knowyourmeme.com/memes/vine-thud-boom-sound-effect
 12. invideo, faceless channel format (AI images + Ken Burns + TTS + word-synced captions): https://info.invideo.io/whats-the-best-ai-to-create-a-faceless-youtube-channel-about
 13. Pangram, "Signs of AI writing": https://www.pangram.com/signs-of-ai-writing
@@ -239,12 +239,12 @@ Sources (numbered in the lists below):
 **`same-transition`** WARN, code
 - Tell: every scene uses the same designed transition (all match/iris, all whip).
 - Why: template packs; motion on everything [2].
-- Detect: 3+ scenes, one (in, out) pair.
+- Detect: 3+ scenes, one (in, out) pair, unless that pair is a hard cut (`cut`/`cut`, a creator who only cuts).
 - Instead: hard cuts for most; a designed transition for one or two moments.
 
 **`zoom-every-line`** WARN, code
 - Tell: a punch zoom on every sentence.
-- Why: auto zoom is a one-click feature with AI-chosen placement [9]; Hormozi-style punchy zooms every 1-3 s [10].
+- Why: auto zoom is a one-click feature with AI-chosen placement [9]; the same preset pairs its captions with punchy zooms every 1-3 s [10].
 - Detect: zooms over 15 a minute.
 - Instead: the creator's measured rate; zoom on the lines that earn it.
 
@@ -258,7 +258,7 @@ Sources (numbered in the lists below):
 
 **`preset-captions`** WARN, code
 - Tell: UPPERCASE, heavy stroke, yellow active word, pop-in, one word at a time.
-- Why: the Hormozi preset is a one-tap template in every caption app [10].
+- Why: the uppercase yellow-keyword stroked caption preset is a one-tap template in every caption app [10].
 - Detect: captions `case: upper` + yellow `highlight_color` + stroke or box.
 - Instead: the creator's measured caption style (style.json).
 

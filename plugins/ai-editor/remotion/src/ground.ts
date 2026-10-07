@@ -1,6 +1,11 @@
 // Where a scene's ground still is while it cuts in or out: the shapes Scene.tsx draws, as one pure
 // function with no imports, so tests/test_record.mjs checks it without a render.
-export type Kind = "match" | "iris" | "push" | "block" | "wipe" | "fade";
+export type Kind = "match" | "iris" | "push" | "block" | "wipe" | "fade" | "cut";
+
+/** [in, out] progress of a scene from its eased curves. A hard cut has no transition: the scene is whole
+ *  from its first frame (in = 1) and stays whole to its last (out = 0). */
+export const cutPhase = (tin: Kind, tout: Kind, pi: number, po: number): [number, number] =>
+  [tin === "cut" ? 1 : pi, tout === "cut" ? 0 : po];
 
 /** Does the scene's ground cover the point (x, y) px? p: how much of the scene shows (0-1, eased, as
  *  Scene.tsx's p); ph: seconds into the transition; T: its length; focus: % of the frame match and iris
@@ -18,5 +23,6 @@ export const groundCovers = (kind: Kind, leaving: boolean, p: number, ph: number
   if (kind === "push") { const off = leaving ? -(1 - p) * W : (1 - p) * W; return x >= off && x <= off + W; }
   if (kind === "wipe") return leaving ? x <= p * W : x >= (1 - p) * W;
   if (kind === "block") return leaving ? ph < T * 0.5 : ph >= T * 0.5;
+  if (kind === "cut") return true; // whole until its last frame (cutPhase)
   return p >= 0.5; // fade: the ground is the stronger half
 };

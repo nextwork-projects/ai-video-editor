@@ -45,7 +45,7 @@ export type Card = {
   format?: "shot" | "browser" | "sticker" | "plain"; // how an image card is drawn (default shot); plain = the old flat capture
   props?: Record<string, unknown>; // extra props for the format: url, label, crop, rotate, zoom, cursor
   layout?: "scene" | "box"; // scene: a full-frame cut-away on the look's ground (Scene.tsx)
-  transition_in?: Transition; // scene only: match | iris | push | block | wipe | fade
+  transition_in?: Transition; // scene only: match | iris | push | block | wipe | fade | cut
   transition_out?: Transition;
   focus?: [number, number]; // scene only: where match / iris open from, % of the frame (the face)
   ground?: Ground; // scene only: ground | ink | accent (default: those in turn, scene by scene)
@@ -274,7 +274,7 @@ const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: n
   const shown = new Set(words(sc.anim?.props ?? {}));
   if (said.length && said.every((w) => shown.has(w))) return { ...style, present: false };
   const g = onGround(look, grounds.get(sc) ?? "ground");
-  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, shadow: false };
+  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, flat: true };
 };
 
 export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans }) => {

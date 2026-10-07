@@ -1199,9 +1199,10 @@ def head_centre(face, t):
 
 
 def as_scene(card, face, style, n):
-    """A full-frame cut-away: the scene box, the transitions (style.json "transitions" cycled, else
-    match in / iris out; a beat's own win) and the focus they grow from (the head at the card's start)."""
-    cyc = style.get("transitions") or []
+    """A full-frame cut-away: the scene box, the transitions (style.json "transitions" cycled; an empty
+    list, a creator who only cuts, gives hard cuts; no list gives match in / iris out; a beat's own win)
+    and the focus they grow from (the head at the card's start)."""
+    cyc = ["cut"] if style.get("transitions") == [] else style.get("transitions") or []
     card.update({"layout": "scene", "box": list(SCENE_BOX), "focus": card.get("focus") or head_centre(face, card["start"])})
     card.setdefault("transition_in", cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
     card.setdefault("transition_out", cyc[n % len(cyc)] if cyc else TRANSITIONS[1])
@@ -1833,6 +1834,9 @@ def demo():
     st = build({**style, "transitions": ["push", "block"]}, words, vm, visuals=tv + [
         {"word": "edit.", "nth": 1, "kind": "anim", "type": "flow", "layout": "scene", "props": {"nodes": [{"logo": "github"}]}}])
     assert [c["transition_in"] for c in st["cards"] if c.get("layout") == "scene"] == ["push", "block"]
+    # a creator measured as only cutting ("transitions": []) gets hard cuts, not the match/iris default
+    sc = [c for c in build({**style, "transitions": []}, words, vm, visuals=tv)["cards"] if c.get("layout") == "scene"]
+    assert [(c["transition_in"], c["transition_out"]) for c in sc] == [("cut", "cut")], sc
     sp2 = build(style, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=tv[:1])
     assert "layout" not in sp2 and [c["layout"] for c in sp2["cards"]] == ["box", "scene"], sp2["cards"]
     assert build(style, words, vm, visuals=[{"word": "zooms", "kind": "anim", "type": "counter", "opt_in": True, "props": {"to": 3}}])["cards"] == []

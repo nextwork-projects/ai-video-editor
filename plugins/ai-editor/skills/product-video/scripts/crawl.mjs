@@ -31,6 +31,11 @@ const MAX_TILES = Number(flag("--max-tiles", 9));
 const MAX_PAGES = Number(flag("--pages", 20));
 for (const d of ["images", "fonts", "media"]) fs.mkdirSync(path.join(outDir, d), { recursive: true });
 const save = (rel, buf) => { fs.writeFileSync(path.join(outDir, rel), buf); return rel; };
+// site.json is written twice: the home page as soon as it is shot (the brief reads it while the inner pages
+// load), then with the pages. Atomic, so product.py never reads half a file; an old one goes first.
+const SITE = path.join(outDir, "site.json");
+const writeSite = (site) => { fs.writeFileSync(`${SITE}.tmp`, JSON.stringify(site, null, 1)); fs.renameSync(`${SITE}.tmp`, SITE); };
+fs.rmSync(SITE, { force: true });
 const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
 
 // ---------- in-page readers ----------
@@ -461,9 +466,6 @@ async function main() {
         copy: a.copy.filter((c) => c.rect[1] < H) };
     }
 
-    // ---- the rest of the site: features, pricing, docs, changelog, customers, templates, launch posts
-    const pages = await pagesP;
-
     const fontFiles = await fonts(brand);
     const accent = accentOf(brand);
     const ground = hex(brand.page_bg);
@@ -478,10 +480,15 @@ async function main() {
       },
       logo: logoOut, icon: icon ? save("images/icon.png", icon) : null, og_image: els.og_image,
       viewport: [W, H], dsf: DSF, page_height: els.height, tiles, hero, mobile, elements, media, app,
-      copy: els.copy, pages,
+      copy: els.copy, pages: [], pages_pending: MAX_PAGES > 0,
     };
-    fs.writeFileSync(path.join(outDir, "site.json"), JSON.stringify(site, null, 1));
-    console.log(`${path.join(outDir, "site.json")}: ${tiles.length} tiles, ${elements.length} element crops, ${media.length} videos, `
+    writeSite(site);
+    if (MAX_PAGES > 0) console.log(`${SITE}: home page written (product.py copy reads it), inner pages still loading`);
+    // ---- the rest of the site: features, pricing, docs, changelog, customers, templates, launch posts
+    site.pages = await pagesP;
+    delete site.pages_pending;
+    writeSite(site);
+    console.log(`${SITE}: ${site.pages.length} inner pages, ${tiles.length} tiles, ${elements.length} element crops, ${media.length} videos, `
       + `${fontFiles.length} font files (${site.brand.display.family} / ${site.brand.body.family}), logo ${logoNote(logoOut)}, `
       + `ground ${ground} ink ${site.brand.ink} accent ${accent}`);
   } finally {

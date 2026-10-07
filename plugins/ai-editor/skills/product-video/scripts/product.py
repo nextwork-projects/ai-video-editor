@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -58,6 +59,21 @@ def norm(s):
 
 def load(d, name):
     return json.loads((Path(d) / name).read_text())
+
+
+def wait_site(d, pages=False, timeout=240):
+    """site.json once crawl.mjs (in the background while the brief is asked) has written it: the home page
+    first, which `copy` needs, then the inner pages, which `pages` needs."""
+    p = Path(d) / "site.json"
+    end = time.time() + timeout
+    while True:
+        site = json.loads(p.read_text()) if p.exists() else None
+        if site and not (pages and site.get("pages_pending")):
+            return site
+        if time.time() >= end:
+            sys.exit(f"ERROR: {p} {'has no inner pages yet' if site else 'is missing'} after {timeout} s: "
+                     "is crawl.mjs still running? Its output says why it stopped")
+        time.sleep(2)
 
 
 def tag_of(variant, aspect):
@@ -118,7 +134,7 @@ def brief_lines(site):
 
 
 def cmd_copy(d):
-    site = load(d, "site.json")
+    site = wait_site(d)
     print("\n".join(brief_lines(site)))
     cands = candidates(site)
     from ai_editor import jev, keys
@@ -149,7 +165,7 @@ def cmd_pages(d):
     """pages.md: a compact read of every crawled page (never raw HTML) to find the use cases in. With a
     TypeSafe key Jev also ranks the headings by how plainly each names a job a user does with the product."""
     d = Path(d)
-    site = load(d, "site.json")
+    site = wait_site(d, pages=True)
     pages = [{"id": "home", "url": site["url"], "kind": "home", "title": site.get("title"), "description": site.get("description"),
               "lines": [{"tag": c["tag"], "text": c["text"]} for c in site["copy"] if c["tag"] in ("h1", "h2", "h3", "p")],
               "controls": [], "media": site.get("media", [])}] + site.get("pages", [])
@@ -1190,6 +1206,15 @@ def demo():
             assert p["shots"][-1]["kind"] == "end" and all(s["end"] > s["start"] for s in p["shots"])
             assert ("cursor" in p["shots"][0]) == (v == "apple") and p["shots"][1]["lift"]["src"] == "images/el-0.png"
             assert v == "apple" or p["shots"][1]["cut_in"] == "blur"
+        # the crawl runs in the background during the brief: copy reads the home page as soon as crawl.mjs
+        # writes it, pages waits for the inner pages
+        (Path(t) / "site.json").write_text(json.dumps({**site, "pages": [], "pages_pending": True}))
+        assert wait_site(t, timeout=0)["pages_pending"]
+        try:
+            wait_site(t, pages=True, timeout=0)
+            raise AssertionError("pages read a crawl still running")
+        except SystemExit as e:
+            assert "inner pages" in str(e), e
     print("demo ok")
 
 

@@ -4,6 +4,26 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Blending creators dropped the pace creator's scene transitions: `profile.py` PARTS["pace"] did not list
+  `transitions`, so the blend fell back to style-edit's default. It now comes with pace, as in
+  creator-teardown's editplan. Test: `profile.py demo`.
+- A creator measured with no drop shadow lost the contrast treatment on bright footage: Captions.tsx read
+  `shadow: false` as "a scene is up" and dropped the treatment with the shadow. Scenes now set their own
+  `flat` flag; `shadow: false` only drops the default shadow. Before: the no-shadow bright-desk render read
+  1.24:1 and `check.py render` FAILed; after, it passes. Test: `tests/smoke.py` (the `noshadow` contrast case).
+- A creator who only cuts got match in / iris out on every scene. Scene.tsx has a `cut` transition (no
+  transition either side), creator-teardown writes `"transitions": []` when the cuts it measured are all
+  hard, and plan.py turns that into `cut` in and out (no list still gives match / iris). The
+  `same-transition` tell no longer fires on all-cut scenes, which is its own fix. Test: `plan.py demo`,
+  `visual.py demo`, `ai_tells.py demo`, `node tests/test_record.mjs` (cutPhase).
+- ai-tells.md named a real person for a caption preset; it now says "the uppercase yellow-keyword stroked
+  caption preset" and keeps the source link.
+- product-video loaded the home page twice: once for the brief (`--pages 0`) and again in the full crawl.
+  The full crawl now starts in the background before the brief; crawl.mjs writes site.json as soon as the
+  home page is shot (`pages_pending`) and again with the inner pages, `product.py copy` waits for the
+  first and `product.py pages` for the second. On linear.app: 55 s + 56 s of crawl before, 54 s after
+  (the inner pages finished inside the home page's time). Test: `product.py demo` (wait_site).
+
 - creator-teardown did not measure how a caption's words change as they are said (`highlight None` on a
   grey-to-dark karaoke). look.py now reads every source frame inside the caption box of up to 8 captions a
   video, times each word from the transcript, and names the style from what a word looks like before it is

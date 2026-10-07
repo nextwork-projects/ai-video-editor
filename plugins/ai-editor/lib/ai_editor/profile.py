@@ -223,7 +223,7 @@ def default_style(prof=None):
 
 
 # ---------- blending creators ----------
-PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion"),
+PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion", "transitions"),
          "visuals": ("graphics", "look", "layout", "cats", "events")}
 
 
@@ -313,12 +313,13 @@ def demo():
                            capture_output=True, text=True, env=dict(os.environ, AI_EDITOR_HOME=d))
         assert r.returncode == 0 and (Path(d) / "edits" / "new" / "style.json").exists(), r.stderr
     styles = {"a": {"captions": {"size_pct": 4}, "zoom": {"per_min": 6}, "graphics": {"palette": [
-                  {"hex": "#000000", "pct": 14}, {"hex": "#DEDACC", "pct": 8}, {"hex": "#E5482C", "pct": 3}]}},
-              "b": {"captions": {"size_pct": 7, "font_match": "Inter"}, "pace": {"median_shot_s": 1.2}}}
+                  {"hex": "#000000", "pct": 14}, {"hex": "#DEDACC", "pct": 8}, {"hex": "#E5482C", "pct": 3}]}, "transitions": ["push"]},
+              "b": {"captions": {"size_pct": 7, "font_match": "Inter"}, "pace": {"median_shot_s": 1.2}, "transitions": []}}
     s = blend(styles, [{"handle": "a", "take": ["visuals"]}, {"handle": "b", "take": ["captions", "pace"]}],
               {"captions": {"style": "karaoke"}, "sound": {"sfx": False}})
     assert s["captions"]["size_pct"] == 7 and s["captions"]["effect"] == "karaoke" and s["sfx"] is False, s
     assert s["blend"] == {"captions": "b", "pace": "b", "visuals": "a"} and s["pace"]["median_shot_s"] == 1.2
+    assert s["transitions"] == [], s     # the pace creator's transitions come with pace (b only cuts)
     lk = resolve_look(s, {}, warn=lambda m: None)
     assert lk["ground"] == "#DEDACC" and lk["accent"] == "#E5482C" and "font" not in lk, lk    # Inter refused
     w = []

@@ -69,7 +69,7 @@ console.log("deny list ok");
 // The captions keep the leaving scene's ink until its ground is gone from under them (ground.ts): halfway
 // through an iris out (the old switch, 0.31 s early) the paper still covers a caption at 75%, near the end it does not
 {
-  const { groundCovers } = await import(pathToFileURL(path.join(ROOT, "plugins/ai-editor/remotion/src/ground.ts")).href);
+  const { groundCovers, cutPhase } = await import(pathToFileURL(path.join(ROOT, "plugins/ai-editor/remotion/src/ground.ts")).href);
   const at = (kind, p, ph = 0.31) => groundCovers(kind, true, p, ph, 0.62, 1080, 1920, [50, 30], 540, 0.75 * 1920);
   assert.equal(at("iris", 0.5), true, "iris out halfway: the ground is still under the captions");
   assert.equal(at("iris", 0.2), false, "iris nearly closed on the face: the captions are on the footage");
@@ -80,6 +80,9 @@ console.log("deny list ok");
   assert.equal(at("wipe", 0.6), true);
   assert.equal(at("block", 1, 0.2), true);
   assert.equal(at("block", 1, 0.4), false);
+  // a creator who only cuts: the scene is whole from its first frame to its last, no transition either side
+  assert.deepEqual(cutPhase("cut", "cut", 0.1, 0.7), [1, 0]);
+  assert.deepEqual(cutPhase("match", "iris", 0.1, 0.7), [0.1, 0.7]);
   console.log("scene ink until the ground leaves ok");
 }
 

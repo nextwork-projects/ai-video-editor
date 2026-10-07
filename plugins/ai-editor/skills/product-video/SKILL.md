@@ -39,9 +39,9 @@ It installs the Chrome Headless Shell the crawl and the recordings drive. Read t
 
 ## 1. The brief, in the question box, before crawling deeply
 
-Load the home page first (`node "$S/crawl.mjs" <url> product/<name> --pages 0`, about 40 s), then
-`python3 "$S/product.py" copy product/<name>`: its `tagline:` and `nav:` lines and the headings under them
-are the options, in the site's own words. Never read `site.json` (about 20 KB). Then three AskUserQuestion calls (at most four questions each), the
+Start the crawl (step 2) in the background (Bash `run_in_background`), then `python3 "$S/product.py" copy product/<name>`:
+it waits for the home page (about 50 s; the inner pages load while the questions are asked). Its `tagline:`
+and `nav:` lines and the headings under them are the options, in the site's own words. Never read `site.json` (about 20 KB). Then three AskUserQuestion calls (at most four questions each), the
 recommended option first and marked "(Recommended)", "Other" always open for their own words.
 
 **Call 1, the video's job:**
@@ -86,10 +86,10 @@ box) and blurs personal data; show the user the `flows/<id>-blurred.png` sheets 
 node "$S/crawl.mjs" <url> product/<name> [--include <brief urls>] [--pages 20] [--app <url> --cookies cookies.json]
 ```
 
-About a minute (inner pages four at a time, beside the home page). The home page as before (2x tiles, element crops, brand from computed styles, logo,
-font files, the page's own videos), then up to 20 inner pages found from the site's own nav and
-sitemap.xml, ranked features > pricing > customers > templates > docs > changelog > blog, a few of each,
-the brief's URLs first. Each page: its headings and lines, its controls (tabs, buttons, inputs), its
+Started in step 1; about a minute, `product.py pages` waits for it (a brief page it missed: rerun with `--include`).
+The home page (2x tiles, element crops, brand from computed styles, logo, font files, the page's own videos),
+then, four at a time beside it, up to 20 inner pages from the site's nav and sitemap.xml, ranked features >
+pricing > customers > templates > docs > changelog > blog, the brief's URLs first. Each page: its headings and lines, its controls (tabs, buttons, inputs), its
 videos and GIFs, a screenshot. Look at `images/tile-0.jpg`: a blank tile means the site blocked the
 headless browser; say so and offer another URL.
 
