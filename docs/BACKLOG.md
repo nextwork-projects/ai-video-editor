@@ -23,6 +23,9 @@ Sources:
 
 ## Next
 
+- Teardown accuracy: the word-by-word caption reveal (grey to dark) is not measured (`highlight None`); app logos are labelled "text card"; on non-talking-head creators the graphics detector has low recall (missed a product card) and low precision; the "Inter" font BAN comes from Gemini's closest-font guess, not a measurement. Test on a fixture clip for each.
+- Teardown does not write top-level `transitions`, `layout`, `color`, `shadow` to style.json, so the editor uses defaults for those.
+
 Skill wording:
 - cut step 0 says ask "even if they said 'edit my video like @creator'", which routes to start.
 - cut and clips use `python3` with no "`py` on Windows" line.
