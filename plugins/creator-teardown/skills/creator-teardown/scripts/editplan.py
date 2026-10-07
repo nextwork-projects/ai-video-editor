@@ -173,9 +173,18 @@ def render(plan_path):
     print(f"{len(cards)} cards -> {plan_path.parent / 'plan.srt'} and plan.md")
 
 
-PARTS = {"captions": ["captions"], "pace": ["pace", "zoom", "motion"],
+# camera goes with pace and hook with visuals, as style-edit reads them (took "pace" / "graphics")
+PARTS = {"captions": ["captions"], "pace": ["pace", "zoom", "camera", "motion"],
          "visuals": ["graphics", "face", "look", "cats", "per_min", "first_in_s", "gap_s", "events",
-                     "layout"]}
+                     "layout", "hook"],
+         "sound": ["sound"]}
+
+
+def shares(d):
+    """A {name: percent} dict (cut kinds, graphic kinds, zones): a name one creator lacks is 0% there."""
+    vals = list(d.values())
+    return bool(vals) and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vals) \
+        and 95 <= sum(vals) <= 105
 
 
 def mix(vals):
@@ -186,7 +195,8 @@ def mix(vals):
         return None
     if all(isinstance(v, dict) for v, _ in vals):
         keys = dict.fromkeys(k for v, _ in vals for k in v)
-        return {k: mix([(v.get(k), w) for v, w in vals]) for k in keys}
+        fill = 0 if all(shares(v) for v, _ in vals) else None
+        return {k: mix([(v.get(k, fill), w) for v, w in vals]) for k in keys}
     if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v, _ in vals):
         tw = sum(w for _, w in vals)
         x = sum(v * w for v, w in vals) / tw
@@ -300,7 +310,14 @@ def demo():
     assert m["face"] == {"framing": "close"} and m["videos"] == 8
     m = blend({"a": a, "b": b}, {"a": 1, "b": 1}, {"captions": "b", "pace": "a"})
     assert m["captions"] == b["captions"] and m["pace"] == a["pace"], m
-    assert m["blend"]["owners"] == {"captions": "b", "pace": "a", "visuals": "weighted"}
+    assert m["blend"]["owners"] == {"captions": "b", "pace": "a", "visuals": "weighted", "sound": "weighted"}
+    # camera follows the pace owner; percentage dicts still add to 100 when a key is missing on one side
+    m = blend({"a": {**a, "camera": {"pan_per_min": 0.0}}, "b": {**b, "camera": {"pan_per_min": 4.4}}},
+              {"a": 1, "b": 1}, {"pace": "a"})
+    assert m["camera"] == {"pan_per_min": 0.0}, m["camera"]
+    m = blend({"a": {**a, "pace": {"cut_kinds": {"hard": 100}}}, "b": {**b, "pace": {"cut_kinds": {"jump": 100}}}},
+              {"a": 1, "b": 1}, {})
+    assert m["pace"]["cut_kinds"] == {"hard": 50, "jump": 50}, m["pace"]
     with tempfile.TemporaryDirectory() as d:
         for h, s in (("a", a), ("b", b)):
             (Path(d) / h).mkdir()
@@ -311,7 +328,7 @@ def demo():
         assert set(t) == {"captions", "graphics", "sfx", "blend"} and set(t["graphics"]) == {"entrances"}, t
         assert t["sfx"] is True and t["blend"]["take"] == ["captions", "entrances"]
         args = argparse.Namespace(name="mix", sources="@A,b", weights="a=2", captions="b",
-                                  pace=None, visuals=None, take=None)
+                                  pace=None, visuals=None, sound=None, take=None)
         out = cmd_blend(args, Path(d))
         assert json.loads((Path(d) / "mix" / "style.json").read_text()) == out
         assert out["handle"] == "mix" and out["captions"]["color"] == "#FFE14D"

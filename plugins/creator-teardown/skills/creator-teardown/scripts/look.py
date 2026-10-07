@@ -690,13 +690,18 @@ def merge(rows, visuals, style):
     return {"captions": cap, "face": face, "graphics": graphics, "motion": motion}
 
 
+def pct(d):
+    """{"hard": 56, "jump": 7} -> "hard 56%, jump 7%" (look.md is read by people too, not a dict dump)."""
+    return ", ".join(f"{k} {v}%" for k, v in (d or {}).items()) or "none"
+
+
 def summary(style, rows_n=None):
     """The <48-line text Claude reads instead of frames."""
     c, f, g, m = (style.get(k) or {} for k in ("captions", "face", "graphics", "motion"))
     # One source for the graphics numbers: graphics.py's per-card measure when it has run (report.py
     # shows the same), else look.py's frame estimate, labelled as such.
     if "share_pct_measured" in g:
-        gsrc, gshare, gpm, ghold = (f"{g.get('measured')} cards measured", g["share_pct_measured"],
+        gsrc, gshare, gpm, ghold = (f"{g.get('measured')} card{'' if g.get('measured') == 1 else 's'} measured", g["share_pct_measured"],
                                     g.get("per_min_measured"), g.get("hold_s_measured"))
     else:
         gsrc, gshare, gpm, ghold = "frame estimate", g.get("share_pct"), g.get("per_min"), g.get("hold_s")
@@ -708,8 +713,8 @@ def summary(style, rows_n=None):
     if z:
         L.append(f"Zoom: {z.get('kind')} x{z.get('scale')}, {z.get('per_min')} a minute, on {z.get('on')}.")
     if m:
-        L.append(f"Motion: {m.get('personality')}. Graphics land in {m.get('ease_in_s')} s. "
-                 f"Captions settle in {m.get('caption_ease_s')} s.")
+        L.append(f"Motion: {m.get('personality')}." + (f" Graphics land in {m['ease_in_s']} s." if m.get("ease_in_s") is not None else "")
+                 + (f" Captions settle in {m['caption_ease_s']} s." if m.get("caption_ease_s") is not None else ""))
     L.append("")
     if c.get("present") is False:
         L.append("Captions: none burned in.")
@@ -742,12 +747,12 @@ def summary(style, rows_n=None):
                      + f"; over the face {lay.get('covers_face_pct')}%")
     snd = style.get("sound") or {}
     if snd:
-        L.append(f"Sound: {snd.get('sfx_per_min')} effects a minute {snd.get('kinds') or ''}, "
+        L.append(f"Sound: {snd.get('sfx_per_min')} effects a minute ({pct(snd.get('kinds'))}), "
                  f"music in {(snd.get('music') or {}).get('present_pct')}% of videos.")
     cam = style.get("camera") or {}
     if cam:
         L.append(f"Camera: {cam.get('pan_per_min')} pans, {cam.get('push_per_min')} pushes a minute; "
-                 f"cuts {(style.get('pace') or {}).get('cut_kinds')}")
+                 f"cuts {pct((style.get('pace') or {}).get('cut_kinds'))}")
     win = style.get("winners") or {}
     for line in (win.get("differs") or [])[:4]:
         L.append("Winners: " + line)
@@ -775,30 +780,32 @@ def write_summary(outdir):
     return text
 
 
+def measure_one(job):
+    """One video's look.json (worker process: each builds its own OCR engine and face detector)."""
+    p, tdir, fps = job
+    engine, ocr = ocr_engine()
+    print(f"{p.stem} measuring", file=sys.stderr)
+    r = measure_video(p, load_words(tdir, p.stem), ocr, face_detector(), engine, fps)
+    p.with_suffix(".look.json").write_text(json.dumps(r, default=float))
+    c = r["captions"]
+    print(f"  {p.stem}: captions {c.get('present')} ({c['samples']} samples) y {c.get('y_pct')} "
+          f"size {c.get('size_pct')} {c.get('color')}; graphics {r['graphics']['share_pct']}%", file=sys.stderr)
+
+
 def cmd_measure(a):
     outdir = OUT_ROOT / slug(a.handle)
     vids = sorted((outdir / "video").glob("*.mp4"))
     if not vids:
         sys.exit(f"no videos in {outdir / 'video'}. Run visual.py download first.")
-    engine, ocr = ocr_engine()
-    if not ocr:
+    if not ocr_engine()[1]:
         print("no OCR engine (ocrmac or rapidocr): captions are left to the sheet pass", file=sys.stderr)
-    faces = face_detector()
-    rows = []
+    todo = [p for p in vids if a.force or not p.with_suffix(".look.json").exists()]
     for p in vids:
-        cache = p.with_suffix(".look.json")
-        if cache.exists() and not a.force:
-            rows.append(json.loads(cache.read_text()))
+        if p not in todo:
             print(f"{p.stem} cached", file=sys.stderr)
-            continue
-        print(f"{p.stem} measuring", file=sys.stderr)
-        r = measure_video(p, load_words(outdir / "transcripts", p.stem), ocr, faces, engine, a.fps)
-        cache.write_text(json.dumps(r, default=float))
-        rows.append(r)
-        c = r["captions"]
-        print(f"  captions {c.get('present')} ({c['samples']} samples) y {c.get('y_pct')} "
-              f"size {c.get('size_pct')} {c.get('color')}; graphics {r['graphics']['share_pct']}%",
-              file=sys.stderr)
+    from parallel import pmap
+    pmap(measure_one, [(p, outdir / "transcripts", a.fps) for p in todo])
+    rows = [json.loads(p.with_suffix(".look.json").read_text()) for p in vids]
     visuals = [json.loads(p.read_text()) for p in sorted((outdir / "video").glob("*.visual.json"))]
     sp = outdir / "style.json"
     style = json.loads(sp.read_text()) if sp.exists() else {"handle": slug(a.handle)}
@@ -897,6 +904,13 @@ def demo():
                                     "found": [{"level": "BAN", "tell": "glass-panel", "where": "look 'creator'"}]}})
         assert "[" not in txt and "55%" not in txt and "9.0 s" not in txt, txt
         assert "on screen 3%" in txt and "1.7 a minute" in txt and "BAN glass-panel" in txt, txt
+        # look.md is prose: no None for an unmeasured number, no dict dumps
+        txt = summary({"handle": "x", "videos": 2, "captions": {"present": False},
+                       "motion": {"personality": "smooth", "ease_in_s": 0.3, "caption_ease_s": None, "cuts_per_min": 9},
+                       "camera": {"pan_per_min": 0, "push_per_min": 1},
+                       "pace": {"wpm": 150, "median_shot_s": 2, "max_pause_s": 0.4, "cut_kinds": {"hard": 56, "jump": 7}},
+                       "sound": {"sfx_per_min": 2, "kinds": {"pop": 60}, "music": {"present_pct": 0}}})
+        assert "None" not in txt and "{" not in txt and "hard 56%, jump 7%" in txt and "pop 60%" in txt, txt
     print("ok")
 
 

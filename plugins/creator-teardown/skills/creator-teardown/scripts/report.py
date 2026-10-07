@@ -134,7 +134,8 @@ def compare(rows):
     for k in (rows[0]["fields"] if rows else {}):
         w = [r["fields"][k] for r in W if r["fields"].get(k) is not None]
         c = [r["fields"][k] for r in C if r["fields"].get(k) is not None]
-        if not w or not c:
+        if len(w) < 2 or len(c) < 2:
+            # one video a side is an anecdote, not a difference
             out.append({"field": k, "n_winners": len(w), "n_control": len(c), "verdict": "not enough"})
             continue
         mw, mc = statistics.median(w), statistics.median(c)
@@ -185,6 +186,10 @@ def scan_tells(style, outdir, gfx_rows, at=None):
     # crop_palette is the colours inside the cards (captured pages, logos), real content, not their look.
     g = style.get("graphics") or {}
     pal = sorted(g.get("palette") or g.get("crop_palette") or [], key=lambda p: -p.get("pct", 0))
+    # With almost no graphics on screen those frames are the camera shot (a red wall, a blue table), not a
+    # designed ground. ponytail: a 5% runtime floor, a per-frame "is this a card" check if it misfires.
+    if g.get("share_pct_measured") is not None and g["share_pct_measured"] < 5:
+        pal = []
     sat = [p for p in pal if (at.hsv(p["hex"]) or (0, 0, 0))[1] >= 0.4]
     look = {"preset": "creator", "font": cap.get("font_match"), "font_display": cap.get("font_match"),
             "ground": pal[0]["hex"] if pal else None, "accent": sat[0]["hex"] if sat else None}
@@ -542,6 +547,10 @@ def demo():
     assert c["first graphic (s)"]["verdict"] == "differs, every winner" and c["first graphic (s)"]["winners"] == 1.2, c
     assert c["cuts a minute"]["verdict"] == "same", c
     assert "n=3" in sentence(c["first graphic (s)"]) and "n=2" in sentence(c["first graphic (s)"])
+    # one video on a side is an anecdote: no verdict, no Winners line
+    one = compare([{"role": "winner", "fields": {"x": 1.0}}, {"role": "winner", "fields": {"x": None}},
+                   {"role": "control", "fields": {"x": 9.0}}, {"role": "control", "fields": {"x": 8.0}}])
+    assert one[0]["verdict"] == "not enough" and sentence(one[0]) is None, one
     assert role({"vs_median": 3}) == "winner" and role({"vs_median": 1}) == "control" and role({"vs_median": 0.2}) == "low"
     look = {"samples": [{"t": 0.0, "face": [0.4, 0.4, 0.2, 0.15], "lines": [["They studied women", [0.2, 0.1, 0.6, 0.05], False]]},
                         {"t": 0.4, "face": None, "lines": [["read", [0.4, 0.7, 0.2, 0.05], True]]}]}
@@ -588,6 +597,9 @@ def demo():
                                      {"hex": "#D9C5B0", "pct": 8}, {"hex": "#422720", "pct": 4}],
                          "crop_palette": [{"hex": "#DCCAB8", "pct": 48}, {"hex": "#817EEB", "pct": 9}]}}
     assert not scan_tells(dark, Path("."), [], FakeTells)["found"]
+    # Graphics on 1% of the runtime: the palette is the camera shot, no palette tell
+    shot = {"graphics": {"palette": [{"hex": "#6A4CF0", "pct": 20}], "share_pct_measured": 1}}
+    assert not {f["tell"] for f in scan_tells(shot, Path("."), [], FakeTells)["found"]} & {"purple-blue"}
     at = ai_tells_module()
     if at:   # the real checks, when the ai-editor plugin sits next to this one
         real = scan_tells({"captions": {"font_match": "Montserrat", "case": "upper", "highlight_color": "#FFD400", "stroke": True},

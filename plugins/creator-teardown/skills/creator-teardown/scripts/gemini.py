@@ -128,16 +128,16 @@ def parse(resp):
 
 def call(key, payload):
     """(response, model). Tries MODELS in order past a 404."""
-    global MODEL
-    for MODEL in MODELS:
-        r = post(key, payload)
+    for model in MODELS:   # local, not the global: look calls run in threads
+        r = post(key, payload, model)
         if r is not None:
-            return r, MODEL
+            return r, model
     raise SystemExit(f"none of {', '.join(MODELS)} is available to this key")
 
 
-def post(key, payload):
-    req = urllib.request.Request(API.format(m=MODEL), json.dumps(payload).encode(),
+def post(key, payload, model=None):
+    model = model or MODEL
+    req = urllib.request.Request(API.format(m=model), json.dumps(payload).encode(),
                                  {"Content-Type": "application/json", "x-goog-api-key": key})
     for wait in (10, 30, 60, None):
         try:
@@ -146,7 +146,7 @@ def post(key, payload):
         except urllib.error.HTTPError as e:
             msg = e.read().decode(errors="replace")[:400]
             if e.code == 404:
-                print(f"  {MODEL} not available to this key, trying the next", file=sys.stderr)
+                print(f"  {model} not available to this key, trying the next", file=sys.stderr)
                 return None
             if e.code in (429, 500, 503) and wait:
                 print(f"  HTTP {e.code}, retrying in {wait} s", file=sys.stderr)
@@ -155,7 +155,16 @@ def post(key, payload):
             if e.code in (400, 401, 403) and "key" in msg.lower():
                 sys.exit(f"Gemini rejected the key (HTTP {e.code}). Make a new one at "
                          f"aistudio.google.com/apikey and save it with: fetch.py setkey --gemini")
+            if e.code == 429:
+                raise SystemExit("Gemini is rate-limiting this key (HTTP 429, the free tier's per-minute cap). "
+                                 "Wait a minute and rerun: finished videos are cached and skipped.")
             raise SystemExit(f"Gemini HTTP {e.code}: {msg}")
+        except (urllib.error.URLError, TimeoutError) as e:
+            if wait:
+                print(f"  no answer from Gemini ({e}), retrying in {wait} s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise SystemExit(f"Gemini unreachable ({e}). Check the internet connection and rerun.")
 
 
 def mode(xs):
@@ -207,8 +216,8 @@ KINDS_SCHEMA = {"type": "OBJECT", "properties": {"items": {"type": "ARRAY", "ite
         "what": {"type": "STRING"}},
     "required": ["i", "kind", "what"]}}}, "required": ["items"]}
 
-KINDS_PROMPT = """Each image is a crop of one graphic laid over a short-form talking-head video, numbered
-in order from 0. Name its kind:
+KINDS_PROMPT = """Each image is a crop a detector flagged as a graphic laid over a short-form video, numbered
+in order from 0. Many are false alarms: a patch of the camera shot itself. Name its kind:
 - real screenshot: a still capture of a real web page, post, app, document or table
 - UI recording: a moving screen recording of an app or site
 - logo: a brand or product logo on its own
@@ -216,8 +225,11 @@ in order from 0. Name its kind:
 - photo: a real photograph
 - meme: a reaction image or meme template
 - chart: a graph or data chart
-- b-roll: a video clip of the real world (people, places, objects)
-- part of the set: not a graphic at all, just the room, furniture, the speaker's body or hands
+- b-roll: a separate video clip inserted by the editor, with its own frame edge or a different scene
+  from the main shot (a rare kind: most real-world crops are part of the set)
+- part of the set: not a graphic at all, a piece of the main camera shot: the room, ceiling, sky, trees,
+  furniture, props, the speaker or other people in the scene, their body or hands. When unsure between
+  this and b-roll, pick this.
 what: under 8 words, what it shows ("Reddit post about ad copy", "Claude pricing table")."""
 
 
@@ -306,31 +318,44 @@ def cmd_look(a):
         if vj.exists():
             views = {v["id"]: v.get("view_count") or v.get("like_count") or 0 for v in json.loads(vj.read_text())["videos"]}
         ids = sorted(have, key=lambda i: -views.get(i, 0))[:a.top]
-    total = 0
-    for vid in ids:
+    def one(vid):
+        """Tokens spent on one video (a thread: the work is an HTTP call)."""
         out = outdir / "video" / f"{vid}.look-ai.json"
         if out.exists() and not a.force:
             print(f"{vid} cached", file=sys.stderr)
-            continue
+            return 0
         if vid not in have:
             print(f"{vid} not downloaded, skipped", file=sys.stderr)
-            continue
+            return 0
         data = video_bytes(have[vid])
         if len(data) > 15_000_000:
             print(f"{vid} too big to send inline ({len(data) >> 20} MB), skipped", file=sys.stderr)
-            continue
+            return 0
         resp, model = call(key, body(data, a.fps))
         look, tokens = parse(resp)
-        total += tokens
         out.write_text(json.dumps({**look, "_source": model, "_tokens": tokens}, indent=2))
         print(f"{vid} {tokens} tokens: {look['font_class']}, {look['caption_animation']}, "
               f"{look['motion_personality']}", file=sys.stderr)
+        return tokens
+    from parallel import pmap
+    total = sum(pmap(one, ids, threads=True))
     print(f"{total} input tokens, about ${total / 1e6 * 0.30:.4f} at most on the paid tier (free tier: $0)",
           file=sys.stderr)
+    if a.no_merge:
+        print("saved video/*.look-ai.json; style.json is merged by the next `gemini.py merge` (or `look`)",
+              file=sys.stderr)
+        return
     cmd_merge(a)
 
 
+def demo_kinds_prompt():
+    # a crop of the live shot (a ceiling, a person in the scene) is the set, not b-roll: b-roll must be inserted
+    assert "other people in the scene" in KINDS_PROMPT and "ceiling" in KINDS_PROMPT
+    assert "pick this" in KINDS_PROMPT.split("part of the set:")[1] and "talking-head" not in KINDS_PROMPT
+
+
 def demo():
+    demo_kinds_prompt()
     with tempfile.TemporaryDirectory() as d:
         clip = Path(d) / "c.mp4"
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=720x1280:d=2:r=30",
@@ -382,6 +407,8 @@ def main():
     p.add_argument("--ids", default=None)
     p.add_argument("--fps", type=float, default=1.0)
     p.add_argument("--force", action="store_true")
+    p.add_argument("--no-merge", action="store_true",
+                   help="only call the model (run beside transcription); `merge` writes style.json later")
     p.set_defaults(fn=cmd_look)
     p = sub.add_parser("merge")
     p.add_argument("handle")

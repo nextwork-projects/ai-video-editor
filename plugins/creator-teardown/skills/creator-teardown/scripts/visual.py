@@ -40,6 +40,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from parallel import pmap
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch import OUT_ROOT, count_line, pick, slug, ytdlp  # noqa: E402
 
@@ -401,18 +403,41 @@ def cmd_download(a):
         sys.exit("yt-dlp not found. Run fetch.py doctor.")
     vdir = outdir / "video"
     vdir.mkdir(parents=True, exist_ok=True)
-    for v in todo:
-        if (vdir / f"{v['id']}.mp4").exists():
-            print(f"{v['id']} cached")
-            continue
-        print(f"{v['id']} downloading")
+    failed = [vid for vid, ok in pmap(lambda v: fetch_one(yt, v, vdir), todo, threads=True) if not ok]
+    print(f"{len(todo) - len(failed)} of {len(todo)} downloaded -> {vdir}")
+    if failed:
+        # Every later step measures what is on disk: a gap here is a smaller sample, so say it.
+        print(f"failed: {','.join(failed)}  (retry: visual.py download {handle} --ids {','.join(failed)}, "
+              f"or pick others with --ids)")
+        sys.exit(1)
+
+
+def fetch_one(yt, v, vdir, tries=2):
+    """(id, ok). Two tries: YouTube's 403 on a media URL is often gone on the second request."""
+    if (vdir / f"{v['id']}.mp4").exists():
+        print(f"{v['id']} cached")
+        return v["id"], True
+    print(f"{v['id']} downloading")
+    for k in range(tries):
         r = subprocess.run(yt + ["-f", "bv*+ba/b", "-S", "vcodec:h264,res:1080",
                                  "--merge-output-format", "mp4", "--no-warnings",
                                  "-o", str(vdir / "%(id)s.%(ext)s"), v["webpage_url"]],
                            capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  failed: {r.stderr.strip()[-300:]}", file=sys.stderr)
-    print(f"-> {vdir}")
+        if r.returncode == 0 and (vdir / f"{v['id']}.mp4").exists():
+            return v["id"], True
+        print(f"  {v['id']} failed{' (retrying)' if k + 1 < tries else ''}: {r.stderr.strip()[-300:]}",
+              file=sys.stderr)
+    return v["id"], False
+
+
+def measure_one(job):
+    """One video's visual.json (worker process)."""
+    p, sheets = job
+    r = measure_video(p, sheets)
+    p.with_suffix(".visual.json").write_text(json.dumps(r, indent=2))
+    print(f"{p.stem}: {len(r['cuts'])} cuts ({r['cuts_per_10s']}/10s), median shot "
+          f"{r['median_shot_s']} s, {len(r['zooms'])} zooms, {len(r['sheets'])} sheets", file=sys.stderr)
+    return r
 
 
 def cmd_measure(a):
@@ -422,14 +447,8 @@ def cmd_measure(a):
     if not vids:
         sys.exit(f"no videos in {outdir / 'video'}. Run `download {handle}` first.")
     tdir = outdir / "transcripts"
-    rows = []
-    for p in vids:
-        print(f"{p.stem} measuring", file=sys.stderr)
-        r = measure_video(p, outdir / "sheets")
-        p.with_suffix(".visual.json").write_text(json.dumps(r, indent=2))
-        rows.append(r)
-        print(f"  {len(r['cuts'])} cuts ({r['cuts_per_10s']}/10s), median shot "
-              f"{r['median_shot_s']} s, {len(r['zooms'])} zooms, {len(r['sheets'])} sheets")
+    print(f"measuring {len(vids)} videos", file=sys.stderr)
+    rows = pmap(measure_one, [(p, outdir / "sheets") for p in vids])
 
     sp = [s for s in (speech(tdir, r["id"]) for r in rows) if s]
     first = rows[0]

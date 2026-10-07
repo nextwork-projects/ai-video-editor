@@ -10,7 +10,7 @@
       "name": "creator-teardown",
       "source": "./plugins/creator-teardown",
       "description": "Break down any short-form creator's videos: view counts, word-level transcripts, measured pace, cuts, zooms and caption style.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "media",
       "tags": ["video", "analysis"],
       "keywords": ["creator", "tiktok", "youtube-shorts", "transcription", "teardown"],

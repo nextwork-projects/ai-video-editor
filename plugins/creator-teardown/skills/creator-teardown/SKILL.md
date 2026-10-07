@@ -7,12 +7,10 @@ compatibility: Python 3.9+, ffmpeg, yt-dlp and internet access. Optional ElevenL
 
 # Creator Teardown
 
-Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md.
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md. On Windows, use `py` wherever
+these commands say `python3`.
 
 Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
-
-Give it a creator. Get back a teardown of their format and a page of what they do on
-screen, every claim tied to a view count and every timing measured.
 
 ## Output
 
@@ -27,10 +25,7 @@ plus the per-video files listed in `${CLAUDE_SKILL_DIR}/references/outputs.md`. 
 python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" doctor
 ```
 
-Run it before the first teardown in a session. On Windows, use `py` wherever these
-commands say `python3`.
-
-`Ready.` means go. If it prints `Not ready`, or the user asks to install or set up
+Run it before the first teardown in a session. `Ready.` means go. If it prints `Not ready`, or the user asks to install or set up
 the skill, follow `${CLAUDE_SKILL_DIR}/references/setup.md`. The ElevenLabs and
 Gemini keys are optional. Never ask for either in the chat: the user saves them with
 `setkey` (`setkey --gemini`) in their own terminal.
@@ -42,12 +37,12 @@ the tool venv's Python wherever `AI_EDITOR_HOME` puts it.
 
 ### Quick mode (called by ai-editor's start, setup or style-edit)
 
-When another skill needs only the style.json, run exactly: Step 1 `list`, Step 2's two commands with
+When another skill needs only the style.json, run exactly: Step 1 `list`, Step 2's commands with
 `--top 5` (5 plus 2 control videos), Step 3b's three, then Step 3c's four (a `gemini.py` that exits 2
 with no key is skipped), then stop. The Step 0 parts question only if the caller has not asked it. Skip
 `metrics.py`, the Step 3 written passes and Steps 4-6 (Step 3's "always run" is the visual pass, included).
-About 15 minutes per creator on a laptop, measured: download and transcription about a minute a video,
-`look.py` about 40 s a video, `graphics.py` about 20 s, `sound.py` 2 s, the page 15 s. Say so first.
+About 3 minutes per creator on a 14-core Mac (5 videos: 2-3 min measured), about twice that on an
+8-core laptop. Say so first.
 
 ### Step 0: Ask, once
 
@@ -55,9 +50,9 @@ Skip what the message already answers. One question box call:
 
 1. **Which creators?** The handle or links they named (Recommended) / I'll paste more handles or
    links. Several is normal: people like one creator's captions and another's pace.
-2. With more than one: **which part from whom?** Captions, pace (cuts, zooms, motion), visuals
-   (graphics, face framing, cards), or **Not sure yet (Recommended)**: ask again after Step 3b, with
-   each creator's `look.md` to compare.
+2. With more than one: **which part from whom?** **Not sure yet (Recommended)**: ask again after
+   Step 3b, with each creator's `look.md` to compare; or captions, pace (cuts, zooms, motion), visuals
+   (graphics, face framing, cards), sound.
 
 ### Step 1: Get the videos
 
@@ -86,7 +81,11 @@ picks exact videos. The median ones are the control: a move that appears in the 
 video *and* the 3K video is that creator's habit, not the reason the 500K one
 worked. Keep at least 2.
 
-Say the time first (download plus transcription, about a minute a video on a laptop). Whisper
+Run `transcribe` and `$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle> --no-merge` at the same
+time (two Bash calls in one message): the model watches while Whisper listens. Every measuring script
+works on several videos at once (`CT_JOBS=1` turns that off on a small laptop).
+
+Say the time first (download plus transcription, about 10 s a video on a 14-core Mac). Whisper
 (free, local) is the default; with an ElevenLabs key `transcribe` uses Scribe, which keeps every
 filler ($0.22 an hour of audio; give the estimate before 10+ videos).
 If filler counts lean on Whisper transcripts, say so in the teardown.
@@ -100,9 +99,11 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/metrics.py" <handle>
 Writes `metrics.json` (WPM per third, pauses, fillers, sentence length, you/I/we,
 repeated phrases), all off the word timestamps.
 
-Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its passes. Read
-`transcripts/<id>.txt` (flat text with a stats header), never `transcripts/<id>.json` or `metrics.json`
-whole:
+Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its passes. For pass 1, launch
+one `video-analyst` agent per video, all in one message (they run at once): give each the absolute
+`creator-teardowns/<handle>/` path and one id. Each returns a JSON beat map; merge them into the
+tables. Without an Agent tool, read `transcripts/<id>.timed.txt` yourself, one video at a time. Never
+read `transcripts/<id>.json` or `metrics.json` whole:
 
 1. **Beat map + timings.** Every video split into labelled beats with second-marks
    and word counts.
@@ -132,9 +133,8 @@ Run them after `transcribe` (`look.py` matches OCR text to the spoken words).
 2. `look.py`: OCR 3 frames a second and YuNet faces: the captions (place, size, words,
    case, colours, weight, entrance), face framing, graphics share, palette, motion
    personality. About 40 s a video.
-3. `gemini.py look`: Gemini Flash-Lite watches the 5 most-viewed videos (about 5,600
-   tokens each) and names font, graphics style, transitions, what is not generic. Never
-   a number.
+3. `gemini.py look`: merges what Gemini Flash-Lite said in Step 2 (it watches any video not done yet)
+   about the 5 most-viewed: font, graphics style, transitions, what is not generic. Never a number.
 
 **Then read `look.md` (under 48 lines). Do not open frames or sheets.** Every
 field is in `${CLAUDE_SKILL_DIR}/references/look-pass.md`. Numbers in `style.json`
@@ -224,6 +224,8 @@ from the visual pass; it does not render.
 | `gemini.py` exits 2 (no key) | Step 3b "No Gemini key" |
 | `Gemini rejected the key` / `none of ... is available to this key` | the user makes a new key at the link it prints; meanwhile the haiku fallback |
 | `no videos in ... Run download first` | run `visual.py download <handle>` |
+| download `failed: <ids>` (exit 1) | rerun with the `--ids` it prints; if they fail again, say the sample is smaller and go on |
+| `Gemini is rate-limiting this key` | wait a minute and rerun the same command (done videos are cached) |
 | `yt-dlp not found` | run `fetch.py doctor` and fix what it lists |
 | some videos fail to transcribe | retry with `--ids`, then say which failed; never fill the gap |
 

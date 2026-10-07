@@ -8,6 +8,7 @@ creator-teardowns/<handle>/
   videos.json                 stats for every video pulled
   transcripts/<id>.json       verbatim, word-level timings
   transcripts/<id>.txt        flat text + role/views/duration/wpm header
+  transcripts/<id>.timed.txt  a line a sentence or pause, "[m:ss.s] words" (beat maps, video-analyst)
   metrics.json                measured pace, pauses, fillers per video
   video/<id>.mp4              the picked videos (visual pass)
   video/<id>.visual.json      cut times, shot lengths, zoom events per video

@@ -8,10 +8,10 @@ the Step 0 parts question in the question box if it is still open. Blend:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/editplan.py" blend <name> --from alice,bob \
-    --captions alice --pace bob --visuals bob        # or --weights alice=0.7,bob=0.3
+    --captions alice --pace bob --visuals bob --sound bob   # or --weights alice=0.7,bob=0.3
 ```
 
 Writes `creator-teardowns/<name>/style.json` (and its `look.md`). A named owner gives its whole
 part; otherwise numbers are averaged by weight and words come from the heaviest. Parts: `captions`;
-`pace` = pace, zoom, motion; `visuals` = graphics, face, look, card events. `--take` (Step 3c)
+`pace` = pace, zoom, camera, motion; `visuals` = graphics, face, look, hook, card events; `sound`. `--take` (Step 3c)
 works on a blend too. style-edit takes the blend like any creator.

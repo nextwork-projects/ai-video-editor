@@ -4,6 +4,40 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- creator-teardown ran every video one after another. Transcription, downloads, the Gemini look calls and the
+  visual, look and graphics measures now run several videos at once (a quarter of the cores, 1-4; `CT_JOBS=1`
+  turns it off), and SKILL.md starts `gemini.py look --no-merge` beside `transcribe`. Measured on a 14-core
+  Mac, `--top 3` (5 videos), every script step: a TikTok creator 425 s -> 119 s, a YouTube Shorts creator
+  364 s -> 167 s. Test: `parallel.py demo` (via `fetch.py demo`).
+- creator-teardown ships a `video-analyst` agent (haiku): one per video, launched together, each returns a JSON
+  beat map (labels, second marks, words, WPM, hook, close, graphics) from the files the scripts wrote. The main
+  session merges summaries instead of reading every transcript; without an Agent tool it reads
+  `transcripts/<id>.timed.txt` (new: a line a sentence or pause with its start). Test: `fetch.py demo`.
+- "Winners" lines compared one video against two and said "every winner on that side". A side with under 2
+  videos is now "not enough" and prints no line. Test: `report.py demo`.
+- The graphics kinds prompt assumed a talking head, so on a vlog or challenge video Gemini called crops of the
+  camera shot (people, ceilings, trees) "b-roll": a measured run reported 16 graphics where there was 1 logo.
+  Crops of the main shot are now "part of the set" and b-roll must be an inserted clip; the same run keeps
+  only the logo. Test: `gemini.py demo`.
+- The AI-tell scan flagged a BAN "flat saturated ground" from the camera footage (a red store wall) when
+  graphics were on screen 1% of the time. Palette tells now need graphics on 5% of the runtime. Test:
+  `report.py demo`.
+- look.md printed `Captions settle in None s.` and Python dicts for cut and sound kinds. It prints
+  `hard 56%, jump 7%` and leaves out unmeasured numbers. Test: `look.py demo`.
+- YouTube transcripts said `0s - 0 wpm` (a YouTube listing carries no durations) and the cost line said
+  `~0s audio`. The header takes the transcript's own length. Test: `fetch.py demo`.
+- A download that failed (YouTube 403, TikTok "unexpected response") was printed and skipped, so the teardown
+  silently measured 4 videos of 5. Each download now retries once and a failure ends with the ids and the
+  `--ids` retry line, exit 1. Both failures from the measured runs recovered on the retry.
+- A private TikTok account (or one TikTok hides from yt-dlp) and a misspelt handle both said "update yt-dlp".
+  The hint now names the cause: private, missing account, rate limit, Instagram login wall. Test: `fetch.py demo`.
+- Gemini: a 429 after the retries said only `Gemini HTTP 429`, and a network drop was a traceback. Both now say
+  what to do (wait a minute and rerun, cached videos are skipped; check the connection).
+- Blending creators: `camera` stayed with the heaviest creator even when `--pace` named another, `hook` and
+  `sound` belonged to no part, and kind percentages averaged only where both had the key (cut kinds summed to
+  114%). `camera` goes with pace, `hook` with visuals, `--sound` is a part, and a missing kind counts as 0%.
+  Test: `editplan.py demo`.
+
 - Skills ran the venv as `~/.ai-video-editor/venv/bin/python` (ignoring `AI_EDITOR_HOME`) or
   `%USERPROFILE%\...\python.exe` (which Git Bash does not expand). Every skill now runs scripts with
   `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" <script>` (`py` on Windows; creator-teardown ships the
@@ -20,7 +54,7 @@ What changed for every user, newest first.
   leaves every pick null and no highlight).
 - creator-teardown quick mode said "about a minute per creator". It now lists exactly what it runs (Step 1
   `list`, Step 2 with `--top 5`, Step 3b, Step 3c; no `metrics.py` or written passes, which settles the clash
-  with Step 3's "always run") and the measured time: about 15 minutes for 7 videos.
+  with Step 3's "always run") and the measured time (now about 3 minutes, see the parallel entry above).
 - `agents/template-filler.md` read `${CLAUDE_PLUGIN_ROOT}/...`, which may reach an agent unexpanded. The caller
   (style-edit step 3) now passes the full path of `shapes.md`. Test: `check_plugins.py` FAILs an agent that uses
   `${CLAUDE_...}`.

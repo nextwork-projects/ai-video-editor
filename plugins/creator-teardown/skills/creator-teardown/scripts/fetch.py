@@ -312,12 +312,7 @@ def cmd_list(args):
                  "--playlist-end", str(args.limit), url])
 
     if not r.stdout.strip():
-        hint = ("\n\nUpdate yt-dlp and try again, or pass links to single videos "
-                "with --urls. Run doctor for the update command.")
-        if args.platform == "instagram":
-            hint = ("\n\nInstagram profiles are login-walled for yt-dlp. Single reel links "
-                    "work: paste them one per line into a file and run `list <name> --urls "
-                    "file`. Or use the creator's TikTok or YouTube handle.")
+        hint = list_hint(args.platform, r.stderr)
         sys.exit(f"yt-dlp returned nothing.\n{r.stderr.strip()[:800]}{hint}")
 
     vids = []
@@ -384,6 +379,54 @@ def download_audio(v, audio_dir):
     return existing[0]
 
 
+def list_hint(platform, err):
+    """What to do when a profile listing comes back empty, read off yt-dlp's error."""
+    e = err.lower()
+    if platform == "instagram" or "instagram" in e and "login" in e:
+        return ("\n\nInstagram profiles are login-walled for yt-dlp. Single reel links "
+                "work: paste them one per line into a file and run `list <name> --urls "
+                "file`. Or use the creator's TikTok or YouTube handle.")
+    if "private" in e:
+        return ("\n\nThe platform says this account is private (TikTok also says this when it hides a "
+                "profile from yt-dlp). Check the handle, or paste links to single videos (one a line in a "
+                "file) and run `list <name> --urls file`.")
+    if "429" in e or "too many requests" in e or "rate" in e and "limit" in e:
+        return "\n\nRate-limited by the platform. Wait 10-15 minutes and rerun, or use --urls with single links."
+    if "does not exist" in e or "404" in e or "not found" in e or "unable to find" in e \
+            or "secondary user id" in e:
+        return "\n\nNo account by that name, or the platform hid it. Check the handle's spelling (no @ needed) and the --platform."
+    return ("\n\nUpdate yt-dlp and try again, or pass links to single videos "
+            "with --urls. Run doctor for the update command.")
+
+
+def flat_text(v, role, data):
+    """transcripts/<id>.txt: a stats header and the words. The duration comes from the transcript when
+    the listing has none (a YouTube flat listing carries no durations)."""
+    text = data.get("text") or " ".join(w.get("text", "") for w in data.get("words", []))
+    text = re.sub(r"\s+", " ", text).strip()
+    dur = v.get("duration") or data.get("audio_duration_secs") or max(
+        (w.get("end", 0) for w in data.get("words", [])), default=0)
+    dur = round(dur, 1)
+    wpm = round(len(text.split()) / dur * 60) if dur else 0
+    return (f"# {v['id']} - {role} - {v.get('view_count') or 0:,} views - {dur}s - {wpm} wpm\n"
+            f"# {v['webpage_url']}\n\n{text}\n")
+
+
+def timed_text(data, gap=0.6):
+    """transcripts/<id>.timed.txt: one line a sentence (or a pause over `gap` s), "[m:ss.s] words".
+    What a beat map is built from: second marks without reading the word-level JSON."""
+    words = [w for w in data.get("words", []) if w.get("type", "word") == "word" and w.get("text", "").strip()]
+    lines, cur = [], []
+    for k, w in enumerate(words):
+        cur.append(w)
+        nxt = words[k + 1] if k + 1 < len(words) else None
+        if nxt is None or w["text"].rstrip()[-1:] in ".?!" or nxt["start"] - w["end"] > gap:
+            t = cur[0]["start"]
+            lines.append(f"[{int(t // 60)}:{t % 60:04.1f}] " + " ".join(x["text"].strip() for x in cur))
+            cur = []
+    return "\n".join(lines) + "\n"
+
+
 def cmd_transcribe(args):
     handle = slug(args.handle)
     outdir = OUT_ROOT / handle
@@ -415,17 +458,22 @@ def cmd_transcribe(args):
     engine = args.engine or ("scribe" if find_key()[0] else "whisper")
     total_sec = sum(v.get("duration") or 0 for v, _ in todo)
     cost = f"~{total_sec/60*0.37:.1f}c" if engine == "scribe" else "free"
-    print(f"{len(todo)} videos, ~{total_sec}s audio, {engine}, {cost}\n", file=sys.stderr)
+    length = f"~{total_sec}s audio" if total_sec else "length not listed"
+    if engine == "scribe" and not total_sec:
+        cost = f"about {len(todo) * 0.4:.0f}c at 60 s a video"
+    print(f"{len(todo)} videos, {length}, {engine}, {cost}\n", file=sys.stderr)
 
-    done, failed = [], []
-    for i, (v, role) in enumerate(todo, 1):
+    def one(job):
+        """(vid, ok) for one video. Runs in a thread: whisper is a subprocess, several run at once."""
+        i, (v, role) = job
         vid = v["id"]
         tag = f"[{i}/{len(todo)}] {vid} ({role}, {v.get('view_count') or 0:,} views)"
         tj = tdir / f"{vid}.json"
         if tj.exists() and not args.force:
             print(f"{tag} cached", file=sys.stderr)
-            done.append(vid)
-            continue
+            if not (tdir / f"{vid}.timed.txt").exists():   # a teardown from before the timed file
+                (tdir / f"{vid}.timed.txt").write_text(timed_text(json.loads(tj.read_text())))
+            return vid, True
 
         print(f"{tag} transcribing", file=sys.stderr)
         eng = ["--engine", engine]
@@ -433,13 +481,11 @@ def cmd_transcribe(args):
         if engine == "whisper":
             media = local[0] if local else download_audio(v, outdir / "audio")
             if not media:
-                failed.append(vid)
-                continue
+                return vid, False
             r = run([tool_python(), str(TRANSCRIBE), str(media), str(tj)] + eng)
             if r.returncode != 0 or not tj.exists():
-                print(f"  {r.stderr.strip()[-300:]}", file=sys.stderr)
-                failed.append(vid)
-                continue
+                print(f"  {vid}: {r.stderr.strip()[-300:]}", file=sys.stderr)
+                return vid, False
         else:
             # Scribe fetches TikTok and YouTube links itself: no download, no ffmpeg.
             r = run([sys.executable, str(TRANSCRIBE), v["webpage_url"], str(tj)] + eng)
@@ -449,29 +495,26 @@ def cmd_transcribe(args):
                 # A key problem fails every video the same way, so stop here.
                 sys.exit(f"{err[:400]}\n\nFix the key, then rerun. "
                          f"Check it with: {PY} \"{SELF}\" doctor")
-            print("  ElevenLabs couldn't fetch the link, downloading the audio instead",
+            print(f"  {vid}: ElevenLabs couldn't fetch the link, downloading the audio instead",
                   file=sys.stderr)
             audio = download_audio(v, outdir / "audio")
             if not audio:
-                failed.append(vid)
-                continue
+                return vid, False
             r = run([sys.executable, str(TRANSCRIBE), str(audio), str(tj)] + eng)
             if r.returncode != 0 or not tj.exists():
-                print(f"  {r.stderr.strip()[:300]}", file=sys.stderr)
-                failed.append(vid)
-                continue
+                print(f"  {vid}: {r.stderr.strip()[:300]}", file=sys.stderr)
+                return vid, False
 
         # Flat text + words-per-minute, the two things the analysis reads.
         data = json.loads(tj.read_text())
-        text = data.get("text") or " ".join(
-            w.get("text", "") for w in data.get("words", []))
-        text = re.sub(r"\s+", " ", text).strip()
-        dur = v.get("duration") or 0
-        wpm = round(len(text.split()) / dur * 60) if dur else 0
-        (tdir / f"{vid}.txt").write_text(
-            f"# {vid} - {role} - {v.get('view_count') or 0:,} views - {dur}s - {wpm} wpm\n"
-            f"# {v['webpage_url']}\n\n{text}\n")
-        done.append(vid)
+        (tdir / f"{vid}.txt").write_text(flat_text(v, role, data))
+        (tdir / f"{vid}.timed.txt").write_text(timed_text(data))
+        return vid, True
+
+    from parallel import pmap
+    res = pmap(one, enumerate(todo, 1), threads=True)
+    done = [vid for vid, ok in res if ok]
+    failed = [vid for vid, ok in res if not ok]
 
     print(f"\n{len(done)} ok, {len(failed)} failed -> {tdir}")
     if failed:
@@ -490,6 +533,23 @@ def demo():
     views = [100, 100, 100, 900]
     med = statistics.median(views)
     assert med == 100 and (900 >= 3 * med) and not (100 >= 3 * med)
+
+    import parallel
+    parallel.demo()
+    # An empty listing names its cause: a private account is not "update yt-dlp"
+    assert "private" in list_hint("tiktok", "ERROR: [tiktok:user] x: This user's account is private.")
+    assert "No account" in list_hint("tiktok", "ERROR: [tiktok:user] zz: Unable to extract secondary user ID.")
+    assert "--urls" in list_hint("instagram", "") and "update" not in list_hint("youtube", "HTTP Error 429").lower()
+    # A YouTube listing has no duration: the transcript's own length goes in the header
+    hdr = flat_text({"id": "a", "webpage_url": "u", "view_count": 5}, "top",
+                    {"text": "one two three", "words": [{"text": "three", "end": 30.0}]})
+    assert "30.0s - 6 wpm" in hdr, hdr
+
+    # The timed transcript: a line per sentence or pause, with its start
+    tw = [{"text": "Stop.", "start": 0.0, "end": 0.4}, {"text": " ", "start": 0.4, "end": 0.5, "type": "spacing"},
+          {"text": "Do", "start": 0.5, "end": 0.7}, {"text": "this", "start": 0.7, "end": 1.0},
+          {"text": "now", "start": 1.9, "end": 2.2}, {"text": "today", "start": 62.3, "end": 62.6}]
+    assert timed_text({"words": tw}) == "[0:00.0] Stop.\n[0:00.5] Do this\n[0:01.9] now\n[1:02.3] today\n", timed_text({"words": tw})
 
     # A Linux fix line uses the package manager this computer has
     lin = {"apt": "A", "dnf": "D", "pacman": "P"}

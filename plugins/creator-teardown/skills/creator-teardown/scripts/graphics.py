@@ -830,6 +830,24 @@ def crop_palette(outdir, rows, k=6):
     return [{"hex": hexc(cen[j]), "pct": round(100 * cnt[j] / len(lab))} for j in np.argsort(-cnt)]
 
 
+def measure_one(job):
+    """One video's graphics.json (worker process)."""
+    p, crop_dir = job
+    look_p, vis_p = p.with_suffix(".look.json"), p.with_suffix(".visual.json")
+    look = json.loads(look_p.read_text()) if look_p.exists() else None
+    vis = json.loads(vis_p.read_text()) if vis_p.exists() else None
+    if not look:
+        print(f"  {p.stem}: no look.json (run look.py measure first): no speaker mask", file=sys.stderr)
+    cap = (look or {}).get("captions") or {}
+    band = ((cap["y_pct"] - 4) / 100, (cap["y_pct"] + 4) / 100) if cap.get("y_pct") else None
+    print(f"{p.stem} measuring", file=sys.stderr)
+    r = measure_video(p, look, vis, band, crop_dir)
+    p.with_suffix(".graphics.json").write_text(json.dumps(r, indent=1))
+    print(f"  {p.stem}: {len(r['graphics'])} graphics: " + ", ".join(
+        f"{g['t_in']}s {g['kind']} {(g['entrance'] or {}).get('kind')}/{(g['entrance'] or {}).get('ease')}"
+        for g in r["graphics"][:6]), file=sys.stderr)
+
+
 def cmd_measure(a):
     outdir = OUT_ROOT / slug(a.handle)
     vids = sorted((outdir / "video").glob("*.mp4"))
@@ -837,24 +855,12 @@ def cmd_measure(a):
         vids = [p for p in vids if p.stem in a.ids.split(",")]
     if not vids:
         sys.exit(f"no videos in {outdir / 'video'}. Run visual.py download first.")
+    todo = [p for p in vids if a.force or not p.with_suffix(".graphics.json").exists()]
     for p in vids:
-        cache = p.with_suffix(".graphics.json")
-        if cache.exists() and not a.force:
+        if p not in todo:
             print(f"{p.stem} cached", file=sys.stderr)
-            continue
-        look_p, vis_p = p.with_suffix(".look.json"), p.with_suffix(".visual.json")
-        look = json.loads(look_p.read_text()) if look_p.exists() else None
-        vis = json.loads(vis_p.read_text()) if vis_p.exists() else None
-        if not look:
-            print(f"  {p.stem}: no look.json (run look.py measure first): no speaker mask", file=sys.stderr)
-        cap = (look or {}).get("captions") or {}
-        band = ((cap["y_pct"] - 4) / 100, (cap["y_pct"] + 4) / 100) if cap.get("y_pct") else None
-        print(f"{p.stem} measuring", file=sys.stderr)
-        r = measure_video(p, look, vis, band, outdir / "graphics")
-        cache.write_text(json.dumps(r, indent=1))
-        print(f"  {len(r['graphics'])} graphics: " + ", ".join(
-            f"{g['t_in']}s {g['kind']} {(g['entrance'] or {}).get('kind')}/{(g['entrance'] or {}).get('ease')}"
-            for g in r["graphics"][:6]), file=sys.stderr)
+    from parallel import pmap
+    pmap(measure_one, [(p, outdir / "graphics") for p in todo])
     g = merge(outdir)
     if a.json:
         print(json.dumps({k: g.get(k) for k in ("kinds", "layout", "entrances", "secondary_motion")}, indent=1))
