@@ -38,7 +38,7 @@ HyperFrames talking-head-recut set (`cardLife`):
 
 | beat | move |
 |---|---|
-| entrance | drops in 0.3 s x k before its word: falls ~70 px (1080 frame), tipped back 16 degrees, blurred 10 px, scale 0.94 to 1 on `expo.out` over 0.62 s x k |
+| entrance | drops in 0.1 s + 0.07 s x k before its word (motion.ts CARD_LEAD_S, OVERLAY_LEAD_S), so it carries half its ink 0.1 s before the word: falls ~70 px (1080 frame), tipped back 16 degrees, blurred 10 px, scale 0.94 to 1 on `expo.out` over 0.62 s x k |
 | hit | on each hit word (a mark landing, an app reply, a command's output): a punch to 1.025 in 0.1 s, then `elastic.out(1, 0.5)` back |
 | under it | the camera's slow push (1 + `push`) and drift for the card's whole life |
 | exit | upward ~50 px, scale 0.97, blurring, on the personality's `.in` ease over 0.7 x `out` (faster than the entrance) |

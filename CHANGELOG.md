@@ -4,6 +4,49 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The no-creator path renders a lively edit (backlog Now 1). "No creator" is the recommended answer, so it
+  has a style of its own: `profile.py style edits/<name>` writes `DEFAULT_STYLE` when the profile has no
+  creators (it used to exit `no creator style.json found`), and `plan.py` plans with it when style.json is
+  missing or empty, with a one-line note instead of a `FileNotFoundError`. The default follows PRINCIPLES
+  (smooth, overlay-first) and takes each number from the median of three measured styles: punch zooms to
+  1.18 that the renderer eases (never a one-frame snap), 9.5 a minute on sentence starts, the smooth
+  personality, 3-word lower-case captions at 5.5%, no stroke unless the footage needs one (style-edit
+  `references/plan.md` "No creator"). New `zoom.max_hold_s` (5 s in the default): a long sentence still
+  gets a zoom change on the word nearest its middle. A zoom change never lands during a card's entrance
+  (`plan.clear_entrances`), and cards are placed off the head as drawn under the zooms, inside the same
+  14% side margins `check.py plan` holds (logos could land under the right rail or behind a zoomed head).
+  A slow push was tried first: the render check read the speaker's own movement during a 0.8 s push as a
+  surge. The outline-jitter check skips frames where a cut or zoom moves everything. Tests:
+  `profile.py demo` (no creators writes the default; now in `tests/demos.sh`), `plan.py demo` (a missing
+  style plans with a note, the default puts a zoom change at least every 5 s on a 47 s cut where `{}`
+  planned none, a logo beside a zoomed head clears it). Sample take, no creator, end to end: 7 zooms and
+  4 cards, `check.py render` 0 FAIL and no "nothing moves" (was 0 zooms and "nothing moves for 32.4 s").
+- plan.py's output passes check.py render (backlog Now 2). Contrast: plan.py aims at `CONTRAST_TARGET`
+  3.3:1, the FAIL line plus 10%, and quality.py takes its FAIL line (`CONTRAST_MIN`, 3.0) from plan.py, so
+  the two cannot drift. "Plan again" now changes something: `check.py render` lists the caption pages it
+  read under 3.3:1 (`caption_contrast.low_at`), and the next plan.py run gives each one the next step
+  (shadow, stroke, backing), kept in `contrast.json` and read once per check. Card timing: plan.py,
+  the renderer and the render check share one lead model: an overlay starts `CARD_LEAD_S` + `OVERLAY_LEAD_S`
+  x k before its word (0.1 + 0.07 s, the time the drop-in takes to carry half its ink), and motion.ts
+  starts the drop-in there from the same two numbers (it was 0.3 s x k, so captures landed 0.19-0.28 s
+  early). `plan.py demo` fails if motion.ts drifts from plan.py. Tests: `plan.py demo` (a grey the shadow
+  lifts only to 3.15:1 now gets a stroke, every pick reaches 3.3:1, a low page steps up once per check).
+  Sample take: captures land 0.12 and 0.13 s before their words, no "before its word" WARN. Golden
+  stills (darwin) updated: the terminal card starts 0.23 s later, so its typing is one letter behind at
+  the still. Linux goldens need the CI `golden-out` artifact.
+- Misheard names are not cut errors (backlog Now 3). `verify_cut.py` matches the second pass to the cut's
+  words by time (`textnorm.pair_by_time`): a kept word heard differently at the same time is listed
+  under HEARD DIFFERENTLY ("jev -> jeff x4, claude -> cloud"), never MISSING, so there is no `--pad`
+  rebuild for it. New `retakes.py captions edits/<name>` builds captions.json (and captions.txt to
+  proofread) from the second pass's words and times, with each word it heard differently spelled as the
+  approved cut text has it, the profile's `names` spellings, and every `retakes.py fix` applied (fix now
+  keeps its pairs in `fixes.json`). style-edit step 2 runs it instead of copying cut.transcript.json and
+  proofreads captions.txt, the file captions are built from. `check.py render` no longer LOOKs at a
+  caption that matches the cut text. Tests: `test_retakes.py` (captions take "Jev" and "Claude" with no
+  fix call; a fix applies to a later captions run; a misheard name is HEARD DIFFERENTLY, a word with
+  nothing heard at its time is still MISSING). Sample take: verify prints 0 MISSING (was 6), and
+  captions.json holds "Jev" x4 and "Claude" with no fix.
+
 - No half-cut text at the frame edge (backlog Now 1). `record.mjs --states` records each state's
   text line boxes from the DOM (Range.getClientRects per text node, one box per line inside one
   block, overflow-clipped and hidden text left out) and its pictures' boxes; OCR reads text inside

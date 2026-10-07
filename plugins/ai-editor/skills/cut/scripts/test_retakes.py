@@ -97,6 +97,41 @@ def test_text_and_fix():
         assert words[2:4] == ["Claude", "code."] and words[4] == "Claude,", words
 
 
+def test_fix_is_remembered_and_captions_use_the_cut_spelling():
+    """A re-transcription that heard "Jev" as "Jeff" and "Claude" as "cloud": captions keep the cut's spelling
+    with no fix call, and a fix made earlier applies to every later captions run."""
+    cut = take("I built it with Jev and Claude | then haiku ran")
+    heard = [dict(w) for w in cut]
+    heard[4]["text"], heard[6]["text"] = "Jeff", "cloud."
+    words, changed = R.caption_words(heard, cut, names=["Haiku"])
+    assert [w["text"] for w in words] == "I built it with Jev and Claude. then Haiku ran".split(), words
+    assert ("Jeff", "Jev") in changed and ("cloud.", "Claude.") in changed, changed
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "words.json").write_text(json.dumps(take("then haiku ran")))
+        R.fix(d, [("haiku", "Haiku")])
+        (Path(d) / "cut.transcript.json").write_text(json.dumps(take("then haiku ran")))
+        words, _ = R.captions(d)
+        assert words[1]["text"] == "Haiku" and (Path(d) / "captions.txt").exists(), words
+
+
+def test_verify_counts_a_misheard_name_as_heard_differently():
+    """Same audio, two passes: 'jev' at 1.2 s heard as 'jeff' is not a missing word; a word gone from the
+    audio (nothing heard at its time) still is."""
+    import contextlib
+    import io
+    import verify_cut as V
+    from textnorm import pair_by_time, timed_words
+    base = take("I built a router with jev that picks")
+    exp = timed_words(base)
+    misheard = [{**w, "text": "jeff" if w["text"] == "jev" else w["text"]} for w in base]
+    for act, missing in ((timed_words(misheard), False), (timed_words([w for w in base if w["text"] != "jev"]), True)):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), tempfile.TemporaryDirectory() as d:
+            code = V.report(Path(d), [t for t, _, _ in exp], [t for t, _, _ in act], set(), *pair_by_time(exp, act))
+        assert ("MISSING" in out.getvalue()) == missing and code == int(missing), out.getvalue()
+        assert ("jev -> jeff" in out.getvalue()) != missing, out.getvalue()
+
+
 def test_no_key_falls_back():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")))

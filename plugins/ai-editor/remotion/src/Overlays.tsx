@@ -6,7 +6,7 @@
 // on a faster .in ease (cardLife). Shared primitives: cursor + click ripple, zoom into a region (Capture's `zoom`).
 import React from "react";
 import { Img, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
-import { Motion, cardLife, dropIn, exitUp, fitIn, fitOut, gsap, prog, punch, rng, useTl, wordTl, landAt, camera } from "./motion";
+import { CARD_LEAD_S, Motion, OVERLAY_LEAD_S, cardLife, dropIn, exitUp, fitIn, fitOut, gsap, prog, punch, rng, useTl, wordTl, landAt, camera } from "./motion";
 import { Look } from "./look";
 import { Capture, Mark } from "./Capture";
 import type { TP } from "./Templates";
@@ -89,7 +89,7 @@ const Shot: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const [cw, ch] = head ? fitBox(p.size, w * 0.98 - 2 * r.pad, h * 0.98 - 2 * r.pad - r.h - r.gap) : fitBox(p.size, w * 0.96, h * 0.92);
   const ref = useTl((tl, q, root) => {
     const { land } = cardLife(tl, q, root, p, m, dur, u, U, markHits(p));
-    sourceIn(tl, q, Math.max(0, land - 0.3 * m.k));
+    sourceIn(tl, q, Math.max(0, land - CARD_LEAD_S - OVERLAY_LEAD_S * m.k));   // with the drop-in
   }, [p.src, w, h, dur, m.name, JSON.stringify([p.enter, p.exit, p.ambient, p.word_at])]);
   const cap = <Capture src={p.src} size={p.size} marks={p.marks} highlight={p.highlight} bw={cw} bh={ch} dur={dur} look={look} m={m} font={fonts.body}
     light zoom={p.zoom ?? 1.45} chrome={false} />;
@@ -175,7 +175,7 @@ const Sticker: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const rot = Number(p.rotate ?? 0);
   const ref = useTl((tl, q, root) => {
     const { land } = cardLife(tl, q, root, p, m, dur, u, U, markHits(p));
-    sourceIn(tl, q, Math.max(0, land - 0.3 * m.k));
+    sourceIn(tl, q, Math.max(0, land - CARD_LEAD_S - OVERLAY_LEAD_S * m.k));   // with the drop-in
   }, [p.src, JSON.stringify(p.crop), w, h, dur, m.name, JSON.stringify([p.enter, p.exit, p.ambient, p.word_at])]);
   return (
     <div ref={ref} style={center}>
@@ -402,7 +402,7 @@ const SideBySide: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
       const el = q(`.sb-${i}`)[0];
       // a then b drop in just before the word, each settling a little toward the other; marks punch their side
       if (p.enter) fitIn(tl, el, L("in", i * 0.14), p.enter, U);   // the creator's measured entrance
-      else dropIn(tl, el, L("in", -0.3 * m.k + i * 0.14), m, U * 6.5);
+      else dropIn(tl, el, L("in", -(CARD_LEAD_S + OVERLAY_LEAD_S * m.k) + i * 0.14), m, U * 6.5);
       (x.marks ?? []).slice(0, 2).forEach((mk: object) => punch(tl, q(`.sb-hit-${i}`)[0], L(mk)));
       const tag = q(`.sb-tag-${i}`)[0];
       if (tag) tl.fromTo(tag, { autoAlpha: 0, y: u * 2 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: m.pop }, L("in", 0.15 + i * 0.14));

@@ -324,7 +324,7 @@ def slivers(spans, fps):
 
 def caption_looks(heard, shown, known):
     """Words in captions.json that differ from what cut.transcript.json heard, minus names
-    the edit uses on purpose (visuals.json)."""
+    the edit uses on purpose (visuals.json) and the cut's own spelling (words.json, fixes.json)."""
     norm = lambda w: re.sub(r"[^\w']+", "", w["text"].replace("’", "'")).lower()
     tok = lambda ws: [w for w in ws if w.get("type", "word") == "word" and norm(w)]
     a, b = tok(heard), tok(shown)
@@ -663,7 +663,9 @@ def main():
             f, extra["audio"] = check_audio(edit, shown or heard)
             found += f
         if heard and shown:
-            known = {s.lower() for s in re.findall(r"[\w']+", json.dumps(rd("visuals.json") or []))}
+            # names the edit uses on purpose, and the approved cut text captions take a misheard name from
+            known = {s.lower() for s in re.findall(r"[\w']+", json.dumps([rd("visuals.json") or [], rd("words.json") or [],
+                                                                        rd("fixes.json") or {}]))}
             found += caption_looks(heard, shown, known)
     n = report(found, a.mode)
     out = edit / f"check{tag}.json"

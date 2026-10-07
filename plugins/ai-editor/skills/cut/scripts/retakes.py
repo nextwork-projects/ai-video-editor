@@ -5,6 +5,7 @@ reviews only what Jev was unsure of.
     python3 retakes.py text    <edit_dir>              transcript.txt, one line per phrase
     python3 retakes.py propose <edit_dir> [--force]    spans.json + review.md (needs a TypeSafe key)
     python3 retakes.py fix     <edit_dir> cloud=Claude [jiv=Jev ...]   fix misheard words
+    python3 retakes.py captions <edit_dir>             captions.json + captions.txt for style-edit
 
 text     words.raw.json as "[start-end] words" per phrase, about a fifth of its size. Read
          this, never the raw JSON.
@@ -21,7 +22,12 @@ propose  1. Code finds every candidate: a restart (words said again within 40 s:
          the cut yourself from those (references/retake-detection.md).
 fix      Replaces one whole word everywhere in words.raw.json, words.json, cut.transcript.json
          and captions.json (style-edit's caption text), keeping
-         punctuation and timings. A misheard name costs one command, not a rewrite.
+         punctuation and timings. A misheard name costs one command, not a rewrite. Each pair is
+         kept in fixes.json, so captions applies it again.
+captions The caption words: what the verify pass heard in cut.mp4 (cut.transcript.json), timed to
+         it, with every word it heard differently at the same time (textnorm.pair_by_time) taken
+         from the approved cut text (words.json), names spelled as the profile's `names`, and
+         every fix in fixes.json applied. Writes captions.json and captions.txt (proofread this).
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (fall back to deciding yourself)
 """
@@ -36,8 +42,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[2] / "lib"))
-from textnorm import load_words, nwords  # noqa: E402
-from ai_editor import jev, keys  # noqa: E402
+from textnorm import load_words, norm, nwords, pair_by_time  # noqa: E402
+from ai_editor import jev, keys, profile  # noqa: E402
 
 PHRASE_GAP_S = 0.5        # a silence this long ends a phrase
 WINDOW_S = 40.0           # a restart this far back is still a retake
@@ -80,10 +86,12 @@ def say(toks, a, b):
     return " ".join(t["text"].strip() for t in toks[a:b + 1])
 
 
-def text_view(toks, name=""):
+SPANS_HINT = "Quote words from here in spans.json; use \"after\": <a start time> when a phrase repeats."
+
+
+def text_view(toks, name="", hint=SPANS_HINT):
     lines = [f"# {name} {len(toks)} tokens. [start-end] seconds, then the words. "
-             "(+N.Ns) = the pause before a phrase. Quote words from here in spans.json; "
-             "use \"after\": <a start time> when a phrase repeats."]
+             f"(+N.Ns) = the pause before a phrase. {hint}"]
     prev = None
     for a, b in phrases(toks):
         gap = toks[a]["start"] - prev if prev is not None else 0
@@ -389,9 +397,18 @@ def propose(d, key=None, canned=None, force=False):
 
 # --- fix -------------------------------------------------------------------------
 
+def swap(text, old, new):
+    """`old` -> `new` as a whole word (case-insensitive), the token's punctuation kept."""
+    return re.sub(rf"(?i)(?<![\w']){re.escape(old)}(?![\w'])", lambda _: new, text)
+
+
 def fix(d, pairs):
-    """Replace whole words (case-insensitive), keeping each token's punctuation."""
+    """Replace whole words (case-insensitive), keeping each token's punctuation. Remembered in fixes.json."""
     d, n = Path(d), 0
+    fj = d / "fixes.json"
+    kept = json.loads(fj.read_text()) if fj.exists() else {}
+    kept.update({old.lower(): new for old, new in pairs})
+    fj.write_text(json.dumps(kept, indent=1))
     for name in ("words.raw.json", "words.json", "cut.transcript.json", "captions.json"):
         f = d / name
         if not f.exists():
@@ -400,16 +417,58 @@ def fix(d, pairs):
         toks = data["words"] if isinstance(data, dict) else data
         for t in toks:
             for old, new in pairs:
-                s = re.sub(rf"(?i)(?<![\w']){re.escape(old)}(?![\w'])", new, t["text"])
+                s = swap(t["text"], old, new)
                 if s != t["text"]:
                     t["text"], n = s, n + 1
         f.write_text(json.dumps(data, indent=1))
     return n
 
 
+def caption_words(heard, cut, names=(), fixes=None):
+    """heard: cut.transcript.json words; cut: words.json (the approved cut text, timed on the cut). The heard
+    words and times, each word heard differently at the same time spelled as the cut has it, then the fixes
+    and the profile's name spellings. Returns (words, [(was, now)])."""
+    strip = lambda t: re.sub(r"^\W+|\W+$", "", t)
+    hw = [dict(w) for w in heard if w.get("type", "word") == "word" and norm(w["text"])]
+    cw = [w for w in cut if w.get("type", "word") == "word" and norm(w["text"])]
+    key = lambda ws: [(norm(w["text"]), w["start"], w["end"]) for w in ws]
+    was = [w["text"] for w in hw]
+    _, differ, _, _ = pair_by_time(key(cw), key(hw))
+    got = {}
+    for i, js in differ:            # the first heard word carries the cut word; two cut words in one are joined
+        got.setdefault(js[0], []).append(strip(cw[i]["text"]))
+        for j in js[1:]:
+            got.setdefault(j, [])
+    for j, ws in got.items():
+        core = strip(hw[j]["text"])
+        new = " ".join(ws)
+        hw[j]["text"] = hw[j]["text"].replace(core, new, 1) if core and ws else new
+    spell = {n.lower(): n for n in names}
+    for w in hw:
+        for old, new in (fixes or {}).items():
+            w["text"] = swap(w["text"], old, new)
+        core = strip(w["text"])
+        if core.lower() in spell:
+            w["text"] = w["text"].replace(core, spell[core.lower()], 1)
+    changed = [(a, w["text"]) for a, w in zip(was, hw) if a != w["text"]]
+    return [w for w in hw if w["text"].strip()], changed
+
+
+def captions(d):
+    d = Path(d)
+    heard = load_words(d / "cut.transcript.json")
+    cut = load_words(d / "words.json") if (d / "words.json").exists() else []
+    fj = d / "fixes.json"
+    names = [n["name"] for n in profile.load().get("names") or [] if isinstance(n, dict) and n.get("name")]
+    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text()) if fj.exists() else {})
+    (d / "captions.json").write_text(json.dumps(words, indent=1))
+    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."))
+    return words, changed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["text", "propose", "fix"])
+    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions"])
     ap.add_argument("edit_dir")
     ap.add_argument("pairs", nargs="*", help="fix: old=new")
     ap.add_argument("--force", action="store_true")
@@ -425,6 +484,16 @@ def main():
         if not pairs:
             sys.exit("usage: retakes.py fix <edit_dir> old=new [old=new ...]")
         print(f"{fix(d, pairs)} token(s) changed")
+    elif a.cmd == "captions":
+        if not (d / "cut.transcript.json").exists():
+            sys.exit(f"ERROR: no cut.transcript.json in {d}: run the cut skill's verify step first")
+        words, changed = captions(d)
+        n = {}
+        for x in changed:
+            n[x] = n.get(x, 0) + 1
+        print(f"{d / 'captions.json'}: {len(words)} words" + (": " + ", ".join(
+            f"{w} -> {v}" + (f" x{k}" if k > 1 else "") for (w, v), k in n.items()) if n else ""))
+        print(f"{d / 'captions.txt'}: proofread this; a misheard word is retakes.py fix {d} old=new")
     else:
         key, _ = keys.get("typesafe")
         try:

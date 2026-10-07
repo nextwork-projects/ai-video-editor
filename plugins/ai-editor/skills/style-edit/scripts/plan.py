@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Turn a creator's style.json + a cut's words.json into plan.json for the Remotion render.
 
-    python3 plan.py <style.json> <edits/NAME/words.json> [--images images.json (default: next to words.json)]
+    python3 plan.py <style.json> <edits/NAME/captions.json> [--images images.json (default: next to it)]
                     [--aspect auto|9:16|16:9] [--layout overlay|split] [--out edits/NAME/plan.json]
     python3 plan.py demo      self-check
 
-cut.mp4 is read from the words.json folder (ffprobe gives its size, fps and length).
+cut.mp4 is read from the words' folder (ffprobe gives its size, fps and length). A missing or empty
+style.json plans with the default style (profile.py DEFAULT_STYLE) and says so.
 images.json, optional: [{"src": "images/a.png", "word": "notion"}, ...]. src is relative
 to the edit folder. Optional per image: "nth" (which time the word is said, default the
 next one after the previous card), "box" [x, y, w, h] in percent, "entrance", "hold_s".
@@ -86,9 +87,11 @@ TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
 # A scene's transition in takes about 0.62 s x the personality's k (Scene.tsx). The scene starts this
 # much earlier than a box card, so the ground has mostly grown by the word.
 SCENE_LEAD_S = 0.3
-# An overlay's entrance (tilt-in, slide, slap) takes about 0.6 s x k; it starts this much earlier than a
-# plain card so the picture has landed when the word is said.
-OVERLAY_LEAD_S = 0.3
+# An overlay's entrance (motion.ts dropIn: expo.out over 0.62 s x k) carries half its ink, what quality.py counts as
+# landed (LAND_SHARE), this long x k after it starts: 0.06 and 0.08 s on the sample take's captures. plan.py starts
+# the card this much (x k) before CARD_LEAD_S ahead of its word, the renderer starts the drop-in there (motion.ts
+# reads the same two numbers; the demo checks they match) and quality.py's word model reads it (scene_land).
+OVERLAY_LEAD_S = 0.07
 MOTION_K = {"punchy": 0.7, "snappy": 0.8, "smooth": 1.0, "calm": 1.35}
 # Personality from the copied creator's median shot length (references/motion.md "Personalities").
 PERSONALITY = ((1.4, "punchy"), (2.4, "snappy"), (4.0, "smooth"), (1e9, "calm"))
@@ -174,6 +177,16 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None):
     for t in cands:
         if not picked or t - picked[-1] >= gap:
             picked.append(t)
+    hold = zoom.get("max_hold_s")
+    starts = [w["start"] for w in words]
+    while hold and picked:
+        # the default style: a long sentence still gets a zoom change, on the word start nearest its middle
+        add = {min(mids, key=lambda t: abs(t - (a + b) / 2))
+               for a, b in zip(picked, picked[1:] + [duration]) if b - a > hold
+               for mids in [[t for t in starts if a + 1 < t < b - 1]] if mids}
+        if not add:
+            break
+        picked = sorted(set(picked) | add)
     kind = zoom.get("kind", "punch")
     ease = 0.0 if kind == "punch" else (zoom.get("duration_s") or 0.4)
     # Alternate in / out so the frame never creeps tighter: every other change goes back to 1x.
@@ -182,6 +195,26 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None):
     return [{"start": round(s, 3), "end": round(e, 3), "scale": zoom.get("scale", 1.15),
              "kind": kind, "ease_s": ease, **named}
             for i, (s, e) in enumerate(zip(picked, ends)) if i % 2 == 0 and e > s]
+
+
+ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start to when it has settled
+
+
+def clear_entrances(zooms, cards):
+    """A zoom change never lands while a card is entering: it moves to just before the card starts (a zoom that
+    gets shorter than 0.5 s, or runs into the one before, is dropped). Two moves at once compete for the eye,
+    and the render check cannot time a card's landing while the footage under it jumps."""
+    for c in cards:
+        a, b = c["start"] - ENTER_S[0], c["start"] + ENTER_S[1]
+        for z in zooms:
+            for k in ("start", "end"):
+                if a < z[k] < b:
+                    z[k] = round(max(0.0, a), 3)
+    out = []
+    for z in zooms:
+        if z["end"] - z["start"] >= 0.5 and (not out or z["start"] >= out[-1]["end"]):
+            out.append(z)
+    return out
 
 
 def card_defaults(style):
@@ -589,11 +622,13 @@ def head_during(heads, step, start, end):
 
 def avoid_heads(cards, face, cap_y, aspect):
     """Keep every card off the speaker's head (face.json from face.py). A top card shrinks to
-    the band above the head; a logo drops below the chin or moves beside the head. A card
+    the band above the head; a logo drops below the chin or moves beside or above the head. A card
     that cannot fit is dropped: covering the face is worse than losing the visual."""
     if not face:
         return cards
-    l_safe, _, r_safe, _ = SAFE[aspect]
+    l_safe, t_safe, r_safe, _ = SAFE[aspect]
+    if aspect == "9:16":    # vertical cards keep the wider side margin on both sides, as check.py plan does
+        l_safe = r_safe = max(l_safe, r_safe)
     out = []
     for c in cards:
         if (c.get("anim") or {}).get("type") == "logo_cluster":   # the whole frame, its logos placed round the head
@@ -613,6 +648,8 @@ def avoid_heads(cards, face, cap_y, aspect):
                 new = [right + HEAD_GAP, (top + bottom - h) / 2, w, h]
             elif left - HEAD_GAP - l_safe >= w:
                 new = [left - HEAD_GAP - w, (top + bottom - h) / 2, w, h]
+            elif top - HEAD_GAP - h >= t_safe:
+                new = [(left + right - w) / 2, top - HEAD_GAP - h, w, h]
         elif top - HEAD_GAP - y >= MIN_CARD_H:
             new = [x, y, w, top - HEAD_GAP - y]
         if new is None:
@@ -1148,6 +1185,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards = place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect),
                         words, duration, style, aspect)
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
+    zooms = clear_entrances(zooms, cards)
     scenes = [c for c in cards if c["_f"] == "scene"]
     rest = [c for c in cards if c["_f"] != "scene"]
     if split_now:
@@ -1162,8 +1200,13 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     else:
         rest = [c for c in rest if c.get("lane") != "logo"
                 or not any(sc["start"] - 0.5 < c["end"] and c["start"] < sc["end"] + 0.5 for sc in scenes)]
-        rest = place_overlays(rest, face, cap["y_pct"], aspect, graphics(style, "layout").get("layout"))
-        rest = avoid_heads(rest, face, cap["y_pct"], aspect)
+        # the head as it is drawn: grown by the zooms (and moved by the pans), as check.py plan measures it
+        from check import on_screen
+        moved = {"zooms": zooms, "pans": place_pans((style.get("camera") or {}) if took(style, "pace") else {}, duration)}
+        seen = face and {**face, "heads": [{**h, "box": on_screen(h["box"], h["t"], moved) if h.get("box") else None}
+                                           for h in face["heads"]]}
+        rest = place_overlays(rest, seen, cap["y_pct"], aspect, graphics(style, "layout").get("layout"))
+        rest = avoid_heads(rest, seen, cap["y_pct"], aspect)
         if behind:
             rest = tuck_behind(rest, face, aspect)
         out = dict(head)
@@ -1213,7 +1256,10 @@ def probe(video):
 
 
 # --- caption contrast: the footage behind each caption page, measured on the cut --------------------------
-CONTRAST_MIN = 3.0     # WCAG 1.4.3 for large text; quality.py fails a caption under it
+CONTRAST_MIN = 3.0     # WCAG 1.4.3 for large text; quality.py fails a caption under it (its CONTRAST_FAIL)
+# What plan.py aims at: the FAIL line plus 10%. Plan estimates the footage in the caption's box at a quarter size;
+# the render check reads the ring round the real glyphs at full size, which came out 0.1-0.2 lower on the sample.
+CONTRAST_TARGET = 3.3
 # How far each step pulls the footage round the glyphs toward treat_color (alpha-composite in sRGB), as
 # quality.py's contrast check sees it: fitted to renders of white captions on a bright (#E6E1D8) and a
 # grey (#9A9A9A) desk, which agree to 0.04, rounded down. The renderer's default soft shadow, the
@@ -1247,7 +1293,7 @@ def treat_for(pixels, fill, pull, tc):
 
 def pick_treat(pixels, style):
     """(treat or None, treat colour, contrast it reaches) for one caption page over these footage pixels.
-    The creator's look first; then the smallest step that reaches CONTRAST_MIN."""
+    The creator's look first; then the smallest step that reaches CONTRAST_TARGET."""
     fill = hex_rgb(style.get("color") or "#FFFFFF")
     light = lum(fill) > 0.18
     # the treatment colour: the darkest (or lightest, for dark text) of the creator's palette that
@@ -1262,11 +1308,11 @@ def pick_treat(pixels, style):
         got = treat_for(pixels, fill, plain, (0, 0, 0))
     else:
         got = treat_for(pixels, fill, 0.0, tc)
-    if got >= CONTRAST_MIN:
+    if got >= CONTRAST_TARGET:
         return None, hexc, got
     for t in TREATS:
         got = treat_for(pixels, fill, PULL[t], tc)
-        if got >= CONTRAST_MIN:
+        if got >= CONTRAST_TARGET:
             break
     return t, hexc, got
 
@@ -1319,22 +1365,51 @@ def caption_backdrops(plan, edit_dir, meta):
     return out
 
 
-def treat_captions(plan, edit_dir, meta):
-    """Every caption page that would read under CONTRAST_MIN on the footage behind it gets the smallest
+def treat_captions(plan, edit_dir, meta, floors=None):
+    """Every caption page that would read under CONTRAST_TARGET on the footage behind it gets the smallest
     treatment that fixes it, in "treat" (Captions.tsx). The creator's own stroke or box already is one.
-    Returns [(chunk index, treat, contrast)] for the pages it changed."""
-    cs = plan["captions"]["style"]
-    if not plan["captions"]["chunks"] or cs.get("stroke") or cs.get("box"):
-        return []
-    done = []
-    for i, px in caption_backdrops(plan, edit_dir, meta).items():
-        if not px:
-            continue
-        t, colour, got = pick_treat(px, cs)
-        if t:
-            plan["captions"]["chunks"][i].update(treat=t, treat_color=colour)
-            done.append((i, t, round(got, 2)))
-    return done
+    floors: {page start "%.2f": treat} from contrast_floors, the least a page gets.
+    Returns [(chunk index, treat, contrast or None)] for the pages it changed."""
+    cs, chunks = plan["captions"]["style"], plan["captions"]["chunks"]
+    floors = floors or {}
+    done = {}
+    if chunks and not (cs.get("stroke") or cs.get("box")):
+        for i, px in caption_backdrops(plan, edit_dir, meta).items():
+            if not px:
+                continue
+            t, colour, got = pick_treat(px, cs)
+            if t:
+                chunks[i].update(treat=t, treat_color=colour)
+                done[i] = (i, t, round(got, 2))
+    for i, c in enumerate(chunks):
+        least = floors.get(f"{c['start']:.2f}")
+        if least and STEPS.index(least) > STEPS.index(c.get("treat")):
+            c.update(treat=least, treat_color=c.get("treat_color") or pick_treat([(128, 128, 128)], cs)[1])
+            done[i] = (i, least, None)
+    return sorted(done.values())
+
+
+STEPS = (None,) + TREATS
+
+
+def contrast_floors(edit_dir, out):
+    """{page start: treat}: the caption pages the last render check (check<tag>.json, caption_contrast.low_at)
+    read under CONTRAST_TARGET get one treatment past the one that render drew (the plan at `out`). Kept in
+    contrast.json, so every later plan keeps them; each check is read once. This is what "plan again" does."""
+    f, ck = edit_dir / "contrast.json", edit_dir / f"check{out.stem[len('plan'):]}.json"
+    doc = json.loads(f.read_text()) if f.exists() else {"pages": {}, "read": []}
+    low = ((json.loads(ck.read_text()).get("render") or {}).get("caption_contrast") or {}).get("low_at") \
+        if ck.exists() else None
+    stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
+    if low and out.exists() and stamp not in doc["read"]:
+        for c in json.loads(out.read_text())["captions"]["chunks"]:
+            if any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in low):
+                key, nxt = f"{c['start']:.2f}", STEPS[min(len(STEPS) - 1, STEPS.index(c.get("treat")) + 1)]
+                if STEPS.index(nxt) > STEPS.index(doc["pages"].get(key)):
+                    doc["pages"][key] = nxt
+        doc["read"].append(stamp)
+        f.write_text(json.dumps(doc, indent=1))
+    return doc["pages"]
 
 
 def cut_points(edit_dir):
@@ -1356,8 +1431,19 @@ def demo():
     tiny = {"start": 0.0, "end": 1.0, "box": [10, 25, 74, 22], "trigger_word": "c"}
     got = avoid_heads([top, logo, tiny], face, 68, "9:16")
     assert got[0]["box"] == [10, 15, 74, 13], got[0]["box"]           # shrunk to above the head
-    lx, _, lw, _ = got[1]["box"]
-    assert (lx + lw <= 30 or lx >= 70) and len(got) == 2, got         # logo beside the head; tiny dropped
+    lx, ly, lw, lh = got[1]["box"]
+    # logo off the head (no room beside it inside the 14% side margins check.py plan holds: above it); tiny dropped
+    assert (lx + lw <= 30 or lx >= 70 or ly + lh <= 30) and 14 <= lx and lx + lw <= 86 and len(got) == 2, got
+    # placed off the head as drawn: a 1.2 zoom while the card is up grows the head past where face.json has it
+    from check import check_plan, on_screen
+    zs = [{"start": 0.0, "end": 2.0, "scale": 1.2, "kind": "punch", "ease_s": 0.0}]
+    right = {"step_s": 0.5, "heads": [{"t": 0.0, "box": [36, 30, 30, 30]}]}      # room only on its right
+    seen = {**right, "heads": [{**h, "box": on_screen(h["box"], h["t"], {"zooms": zs})} for h in right["heads"]]}
+    for f, fails in ((right, True), (seen, False)):
+        lg = avoid_heads([{**logo, "box": [42, 50, 16, 9]}], f, 68, "9:16")
+        pl = {"width": 1080, "height": 1920, "fps": 30, "durationInFrames": 60, "zooms": zs, "cards": lg,
+              "captions": {"style": {"y_pct": 68}, "chunks": []}}
+        assert any("covers the head" in x["what"] for x in check_plan(pl, right)) == fails, (f, lg)
     assert safe_box([6, 3, 88, 27], "9:16") == [14.0, 14, 72, 22], safe_box([6, 3, 88, 27], "9:16")
     assert safe_box([50, 90, 20, 10], "9:16")[1] == 68
     words = []
@@ -1541,6 +1627,25 @@ def demo():
     # her sound: none a minute -> no cues; impact only -> no whooshes
     assert place_sfx(sp, sw, kit, {"sfx_per_min": 0}) == []
     assert all("whoosh" not in c["src"] for c in place_sfx(sp, sw, kit, {"kinds": {"impact": 100}}))
+    # one lead model for plan, renderer and check: motion.ts carries the same two numbers
+    ts = (Path(__file__).resolve().parents[3] / "remotion" / "src" / "motion.ts").read_text()
+    assert f"CARD_LEAD_S = {CARD_LEAD_S};" in ts and f"OVERLAY_LEAD_S = {OVERLAY_LEAD_S};" in ts, "motion.ts lead drifted"
+    # the default style (no creator) on a 47 s cut whose sentences run 2-7 s: a zoom change at least every 5 s,
+    # so check.py render never finds 6 s with nothing moving (the editorial {} planned 0 zooms here)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor.profile import DEFAULT_STYLE
+    t, words = 0.0, []
+    for n in [5, 4, 3, 7, 2, 4, 3, 2, 4, 3, 2, 3, 3] * 2:
+        for k in range(int(n / 0.3)):
+            words.append({"text": "word." if k == int(n / 0.3) - 1 else "word", "start": round(t, 2), "end": round(t + 0.25, 2)})
+            t += 0.3
+        t += 0.1
+        if t > 47:
+            break
+    z = place_zooms(DEFAULT_STYLE["zoom"], words, t, [])
+    moves = sorted([x["start"] for x in z] + [x["end"] for x in z if x["end"] < t])
+    assert len(z) >= t / 10 and max(b - a for a, b in zip([0.0] + moves, moves + [t])) <= 5.0 + 1e-6, (t, moves)
+    assert place_zooms({}, words, t, []) == []
     demo_contrast()
     print("demo ok")
 
@@ -1548,9 +1653,24 @@ def demo():
 def demo_contrast():
     """Caption contrast: the ladder on flat colours, then measured on real clips (ffmpeg)."""
     import tempfile
+    from pathlib import Path
     white = {"color": "#FFFFFF"}
     assert pick_treat([(38, 38, 38)] * 9, white)[0] is None                   # dark: the creator's look
-    assert pick_treat([(160, 160, 160)] * 9, white)[:2] == ("shadow", "#111111")
+    assert pick_treat([(156, 156, 156)] * 9, white)[:2] == ("shadow", "#111111")
+    # a grey the shadow lifts only to 3.15:1 (over the FAIL line, under the margin the render needs) gets a stroke
+    assert treat_for([(160, 160, 160)] * 9, (255, 255, 255), PULL["shadow"], (17, 17, 17)) > CONTRAST_MIN
+    assert pick_treat([(160, 160, 160)] * 9, white)[0] == "stroke"
+    assert all(pick_treat([(g, g, g)] * 9, white)[2] >= CONTRAST_TARGET for g in range(0, 256, 8))
+    # "plan again" after a render check read a page too low: that page gets the next step, once per check
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "plan.json").write_text(json.dumps({"captions": {"chunks": [{"start": 1.0, "end": 2.0, "treat": "shadow"},
+                                                                          {"start": 2.0, "end": 3.0}]}}))
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5]}}}))
+        assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}
+        assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
+        pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
+        assert treat_captions(pl, d, None, {"1.00": "stroke"}) == [(0, "stroke", None)]
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("stroke", "#111111")  # a bright desk
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
@@ -1568,6 +1688,13 @@ def demo_contrast():
             treat_captions(pl, d, meta)
             got = {c.get("treat") for c in pl["captions"]["chunks"]}
             assert got == want, (colour, pl["captions"]["chunks"])
+        # no style.json (the no-creator path): a note and the default style, never a traceback
+        import os
+        (Path(d) / "captions.json").write_text(json.dumps(words))
+        r = subprocess.run([sys.executable, __file__, f"{d}/style.json", f"{d}/captions.json"], capture_output=True,
+                           text=True, env={**os.environ, "AI_EDITOR_HOME": d})
+        assert r.returncode == 0 and "default style" in r.stderr, r.stderr
+        assert json.loads((Path(d) / "plan.json").read_text())["zooms"], r.stdout
 
 
 def main():
@@ -1595,14 +1722,22 @@ def main():
     # The user's own settings (taste skill) win over the creator's measured style.
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import taste, profile
-    style = taste.merge(json.loads(Path(a.style).read_text()), taste.load_json())
     prof = profile.load()   # the start skill's answers: brand kit, what to avoid, sound
+    sp = Path(a.style)
+    style = json.loads(sp.read_text() or "{}") if sp.is_file() else None
+    if not style:
+        print(f"note: {sp} {'is empty' if style == {} else 'not found'}; planning with the default style. To keep it "
+              f"with the edit: python3 {Path(profile.__file__)} style {edit_dir}", file=sys.stderr)
+        style = profile.default_style(prof)
+    style = taste.merge(style, taste.load_json())
     plan = build(style, json.loads(Path(a.words).read_text()),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
-    for i, t, got in treat_captions(plan, edit_dir, probe(video)):
-        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast (reaches {got}:1 "
-              "on the footage behind it)", file=sys.stderr)
+    out = Path(a.out) if a.out else edit_dir / "plan.json"
+    for i, t, got in treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)):
+        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast " +
+              (f"(reaches {got}:1 on the footage behind it)" if got else "(the last render check read it too low)"),
+              file=sys.stderr)
     if a.no_sfx or (prof.get("sound") or {}).get("sfx") is False:
         plan["sfx"] = []
     if (edit_dir / ".sfx" / "music.wav").exists() and (prof.get("sound") or {}).get("music") is not False:
@@ -1611,7 +1746,6 @@ def main():
     if music.get("present_pct") and "music" not in plan:   # guidance only: the renderer lays no music (references/visuals.md "From the teardown")
         print(f"music: the creator runs a bed under {music['present_pct']}% of her videos, {abs(music.get('level_db') or 0):.0f} dB "
               "under the voice; sfx.py music lays one at that level (the style-edit Sound step)", file=sys.stderr)
-    out = Path(a.out) if a.out else edit_dir / "plan.json"
     from preview import apply_overrides   # edits/<name>/overrides.json, written by the preview page
     plan = apply_overrides(plan, edit_dir, out.name)
     out.write_text(json.dumps(plan, indent=1))

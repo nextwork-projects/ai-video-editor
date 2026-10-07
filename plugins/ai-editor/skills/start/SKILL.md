@@ -130,8 +130,9 @@ Do each step in order, skipping what is already done. Read each skill's SKILL.md
    several creators in parallel when the platform allows.
 3. **Blend the style**: `python3 "$P" style edits/<name>` writes `edits/<name>/style.json`, each part
    (captions, pace, visuals) from the creator the user picked for it, with the caption and sound
-   answers laid over. With no creator, skip it and give style-edit the plain defaults. If it stops
-   with `no creator style.json found`, step 2 did not finish for a creator: run it again.
+   answers laid over. With no creator it writes the default style (smooth zooms about every 5 s,
+   3-word captions). If it stops with `no creator style.json found`, step 2 did not finish for a
+   creator: run it again.
 4. **cut** on the raw take, from its step 0b (start has already decided: cut, wait for the cut page
    approval, then style). The user approves the cut page. This is approval 1 of 2.
 5. **style-edit** with `edits/<name>/style.json`. Its stills sheet is approval 2 of 2. It reads the

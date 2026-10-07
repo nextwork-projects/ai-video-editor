@@ -113,6 +113,11 @@ edits/<name>/
   cut-check.html    the transcript with removed words struck through (the user approves this)
   cut.mp4           the rendered cut, source resolution, H.264 + AAC
   words.json        words re-timed onto cut.mp4's timeline (same shape as Transcription)
+  cut.transcript.json  verify_cut.py's transcript of cut.mp4 (same shape)
+  fixes.json        {"cloud": "Claude"}: every retakes.py fix, applied again by retakes.py captions
+  captions.json     retakes.py captions: cut.transcript.json's words and times, the cut's spelling (style-edit step 2)
+  captions.txt      the same as text, to proofread
+  contrast.json     {"pages": {"12.22": "stroke"}, "read": [...]}: caption pages a render check read too low (plan.py)
 ```
 
 ## profile.json (start -> every skill)

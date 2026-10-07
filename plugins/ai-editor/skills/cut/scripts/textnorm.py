@@ -43,11 +43,16 @@ def norm(s):
 
 def canon(toks):
     """Fold number phrases to digits and expand same-sound contractions."""
+    return [t for t, _ in canon_src(toks)]
+
+
+def canon_src(toks):
+    """canon, with the index in `toks` each output token came from: [(token, index)]."""
     out, i = [], 0
     while i < len(toks):
         t = toks[i]
         if t in SPOKEN_SAME:
-            out.extend(SPOKEN_SAME[t].split())
+            out.extend((x, i) for x in SPOKEN_SAME[t].split())
             i += 1
             continue
         if t in UNITS or t in TENS:
@@ -71,13 +76,13 @@ def canon(toks):
             # statistic. Folding it turns "one of the greats" into "1 of the
             # greats", which is wrong even if it diffs symmetrically.
             if j - i == 1 and value < BARE_FOLD_MIN and t in UNITS:
-                out.append(t)
+                out.append((t, i))
                 i += 1
             else:
-                out.append(str(value))
+                out.append((str(value), i))
                 i = j
             continue
-        out.append(t)
+        out.append((t, i))
         i += 1
     return out
 
@@ -94,6 +99,42 @@ def transcript_words(words, types=("word",)):
             continue
         out.extend([x for x in norm(w["text"]).split() if x])
     return canon(out)
+
+
+def timed_words(words):
+    """transcript_words with times: [(token, start, end)], each token timed by the word it came from."""
+    toks, owner = [], []
+    for w in words:
+        if w.get("type", "word") != "word":
+            continue
+        for x in norm(w["text"]).split():
+            toks.append(x)
+            owner.append(w)
+    return [(t, owner[i]["start"], owner[i]["end"]) for t, i in canon_src(toks)]
+
+
+def pair_by_time(a, b, tol=0.25):
+    """Two transcripts of the same audio, each [(key, start, end)] on the same timeline. difflib lines up the
+    keys; inside a replaced run, an `a` item and the `b` items it overlaps in time (within tol s) are the same
+    sound heard differently (a re-transcription that wrote "Jev" as "Jeff"). Returns
+    (same [(i, j)], differ [(i, [j, ...])], gone [i] (only in a), new [j] (only in b))."""
+    import difflib
+    sm = difflib.SequenceMatcher(a=[x[0] for x in a], b=[x[0] for x in b], autojunk=False)
+    same, differ, gone, new = [], [], [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            same += list(zip(range(i1, i2), range(j1, j2)))
+            continue
+        used = set()
+        for i in range(i1, i2):
+            js = [j for j in range(j1, j2) if b[j][1] < a[i][2] + tol and a[i][1] < b[j][2] + tol] if tag == "replace" else []
+            if js:
+                differ.append((i, js))
+                used.update(js)
+            else:
+                gone.append(i)
+        new += [j for j in range(j1, j2) if j not in used]
+    return same, differ, gone, new
 
 
 def load_words(path):

@@ -58,7 +58,7 @@ EDGE_IN = (0.008, 0.025)   # strip inside a card's edge (share of its width/heig
 EDGE_ROWS = 0.06       # content in more than this share of the strip's length = runs into the edge
 CORNER = 0.12          # strip ends skipped: rounded corners show the footage
 CAP_EDGE = 0.015       # captions this close to the frame's side are cut off by it
-CONTRAST_FAIL = 3.0    # WCAG 1.4.3 minimum for large text (captions and card text are large, bold)
+from plan import CONTRAST_MIN as CONTRAST_FAIL, CONTRAST_TARGET   # noqa: E402  WCAG 1.4.3 for large text; one line for plan and check
 CONTRAST_WARN = 4.5    # WCAG AA for body text: the margin moving footage needs
 ZOOM_MIN_LOG = 0.03    # a zoom changing log-scale less than this (3%) is too small to judge
 SNAP_SHARE = 0.6       # one frame carrying this share of a zoom's change is a snap. A 0.16 s power2.out punch
@@ -761,7 +761,9 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         # the box was empty before it (in split, the panel opening fills the box first)
         L, ent = len(st["bbox"]), 3 + int(0.8 * fps)
         empty = st["area"][2] <= 0.25 * max(st["area"])
-        bb = [b if (k < ent or k >= L - int(0.5 * fps)) and empty else None for k, b in enumerate(st["bbox"])]
+        # a cut or a zoom moves everything at once, the card's outline as read here too: the run breaks there
+        moved = {k for k in range(L) for tt in skip_t if abs(first[i] - 3 + k - tt * fps) <= 3}
+        bb = [b if (k < ent or k >= L - int(0.5 * fps)) and empty and k not in moved else None for k, b in enumerate(st["bbox"])]
         bw, bh = boxes[i][2] - boxes[i][0], boxes[i][3] - boxes[i][1]
         worst = []
         for axis in range(4):
@@ -876,12 +878,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         lo = min(worst_cap)
         meas["caption_contrast"] = {"worst": lo[0], "at": round(lo[1], 2), "median": float(np.median([c for c, _ in worst_cap])),
                                     "samples": len(worst_cap)}
+        meas["caption_contrast"]["low_at"] = [round(t, 2) for c, t in worst_cap if c < CONTRAST_TARGET]
         bad = [x for x in worst_cap if x[0] < CONTRAST_WARN]
         if bad:
             out.append(F("FAIL" if lo[0] < CONTRAST_FAIL else "WARN", lo[1],
                          f"captions read at {lo[0]}:1 against what is around them ({len(bad)} of {len(worst_cap)} samples under {CONTRAST_WARN}:1)",
-                         "plan again (plan.py adds a shadow, stroke or backing to each caption the footage drowns); "
-                         "for more, captions.stroke or captions.box true in style.json"))
+                         f"plan again: plan.py reads this check and gives each page under {CONTRAST_TARGET}:1 the next treatment "
+                         "(shadow, stroke, backing; contrast.json keeps it); then render"))
     for t in edge_hits[:1]:
         out.append(F("FAIL", t, f"a caption touches the frame's side ({len(edge_hits)} sample(s)): cut off",
                      "fewer words_per_caption or a smaller size_pct in style.json, then plan again"))

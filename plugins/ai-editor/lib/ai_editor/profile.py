@@ -5,6 +5,7 @@
     python3 profile.py missing                    the intake questions still unanswered, one id per line
     python3 profile.py set <key.path> <value>     value parsed as JSON if it can be
     python3 profile.py style <edits/NAME> [--out]  blend the profile's creators into edits/NAME/style.json
+                                                  (no creators: the default style, DEFAULT_STYLE)
     python3 profile.py demo                       self-check
 
 File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
@@ -21,7 +22,7 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "behind": true}                                     cards sit behind the speaker (style-edit matte.py)
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
-`editorial` preset. Stdlib only.
+`editorial` preset. No creator: DEFAULT_STYLE (style-edit references/plan.md "No creator"). Stdlib only.
 """
 import colorsys
 import json
@@ -192,6 +193,31 @@ def resolve_look(style, prof=None, warn=print):
     return look
 
 
+# ---------- no creator: the default style ----------
+# The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Motion"): the smooth
+# personality, punch zooms the renderer eases (0.16 s power2.out, never a one-frame snap), captions the footage
+# decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor was
+# built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
+# creator teardown): punch zooms in all three, scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 a minute; median shot 2.4 /
+# 2.4 / 3.98 s; 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three.
+# max_hold_s: a sentence longer than this still gets a zoom change (plan.py place_zooms), so nothing holds still
+# past check.py's 6 s. A push (eased over 0.8 s) was tried first: on a talking head the render check reads the
+# speaker's own movement during a slow 1.12 push as a surge (6 WARNs on the sample take).
+DEFAULT_STYLE = {
+    "handle": "default",
+    "pace": {"median_shot_s": 2.4, "max_pause_s": 0.25},
+    "motion": "smooth",
+    "zoom": {"per_min": 9.5, "kind": "punch", "scale": 1.18, "duration_s": 0.0, "on": "sentence_start", "max_hold_s": 5.0},
+    "captions": {"present": True, "words_per_caption": 3, "y_pct": 66, "size_pct": 5.5, "case": "lower",
+                 "weight": 800, "color": "#FFFFFF", "stroke": False, "box": False, "animation": "pop"},
+}
+
+
+def default_style(prof=None):
+    """DEFAULT_STYLE with the profile's caption and sound answers laid over."""
+    return answers(json.loads(json.dumps(DEFAULT_STYLE)), prof or {})
+
+
 # ---------- blending creators ----------
 PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion"),
          "visuals": ("graphics", "look", "layout", "cats", "events")}
@@ -215,6 +241,11 @@ def blend(styles, creators, prof=None):
                 out[k] = json.loads(json.dumps(styles[src][k]))
     if order:
         out.setdefault("aspect", styles[order[0]].get("aspect"))
+    return answers(out, prof)
+
+
+def answers(out, prof):
+    """The profile's caption and sound answers over a style."""
     cap = prof.get("captions") or {}
     if cap.get("on") is False:
         out["captions"] = {**out.get("captions", {}), "present": False}
@@ -234,9 +265,12 @@ def write_style(edit_dir, root=Path("."), out=None):
             styles[c["handle"]] = json.loads(p.read_text())
         else:
             print(f"warning: no {p}; run creator-teardown on @{c['handle']} first", file=sys.stderr)
-    if not styles:
+    if not prof.get("creators"):
+        style = default_style(prof)
+    elif not styles:
         sys.exit("ERROR: no creator style.json found for the profile's creators")
-    style = blend(styles, prof.get("creators") or [], prof)
+    else:
+        style = blend(styles, prof["creators"], prof)
     out = Path(out or Path(edit_dir) / "style.json")
     out.write_text(json.dumps(style, indent=1))
     return out, style
@@ -249,6 +283,11 @@ def demo():
         assert missing() == list(QUESTIONS) and missing(VIDEO_QUESTIONS) == ["audience", "names"]
         save({"platform": "youtube", "creators": [{"handle": "a"}]})
         assert load()["aspect"] == "16:9" and "creators" not in missing() and "audience" in missing()
+        # no creators (the recommended answer): the default style is written, never an exit
+        save({"creators": [], "captions": {"style": "karaoke"}})
+        out, st = write_style(d, out=Path(d) / "style.json")
+        assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
+        assert json.loads(out.read_text())["handle"] == "default"
     styles = {"a": {"captions": {"size_pct": 4}, "zoom": {"per_min": 6}, "graphics": {"palette": [
                   {"hex": "#000000", "pct": 14}, {"hex": "#DEDACC", "pct": 8}, {"hex": "#E5482C", "pct": 3}]}},
               "b": {"captions": {"size_pct": 7, "font_match": "Inter"}, "pace": {"median_shot_s": 1.2}}}
@@ -293,7 +332,8 @@ def main():
         print(f"set {a[1]} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
-        print(f"{out}: {style['handle']}, parts from {style['blend']}")
+        print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else
+                                              "no creator: the default style (DEFAULT_STYLE)"))
     else:
         print(__doc__)
         sys.exit(2)

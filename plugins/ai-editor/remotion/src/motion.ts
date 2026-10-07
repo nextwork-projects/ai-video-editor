@@ -141,10 +141,14 @@ const said = (node: unknown, out: { word: string; at: number; node: object }[] =
   return out;
 };
 
-/** When the card's own word is said, seconds after it lands. plan.py starts a card 0.1 s before its word
- *  (CARD_LEAD_S), an overlay a further 0.3 s x k (OVERLAY_LEAD_S); props.word_at wins when it is passed. */
+/** plan.py CARD_LEAD_S and OVERLAY_LEAD_S (plan.py's demo checks they match): a card lands 0.1 s before its
+ *  word, and the drop-in carries half its ink (what check.py render calls landed) 0.07 s x k after it starts. */
+export const CARD_LEAD_S = 0.1;
+export const OVERLAY_LEAD_S = 0.07;
+/** When the card's own word is said, seconds after its start. plan.py starts a card CARD_LEAD_S before its word,
+ *  an overlay a further OVERLAY_LEAD_S x k; props.word_at wins when it is passed. */
 export const landAt = (p: Record<string, any>, m: Motion, overlay = true) =>
-  typeof p.word_at === "number" ? p.word_at : 0.1 + (overlay ? 0.3 * m.k : 0);
+  typeof p.word_at === "number" ? p.word_at : CARD_LEAD_S + (overlay ? OVERLAY_LEAD_S * m.k : 0);
 
 export type Pos = string | number;
 /** One timeline per card, labelled with the beat's words. Defaults live in the constructor; "in" is the
@@ -241,7 +245,7 @@ export const cardLife = (timeline: gsap.core.Timeline, q: Q, root: Element, p: R
   camera(tl, q, root, m, dur, u, p.ambient);
   // the creator's measured entrance and exit (props.enter / exit) replace the default drop and lift
   if (p.enter) fitIn(tl, q(".cv-in")[0], L("in"), p.enter, U);
-  else dropIn(tl, q(".cv-in")[0], L("in", -0.3 * m.k), m, U * 6.5);
+  else dropIn(tl, q(".cv-in")[0], L("in", -(CARD_LEAD_S + OVERLAY_LEAD_S * m.k)), m, U * 6.5);   // lands CARD_LEAD_S early
   for (const x of hits) if (x !== undefined) punch(tl, q(".cv-hit")[0], L(x));
   if (p.exit) fitOut(tl, q(".cv-in")[0], dur, p.exit, U);
   else exitUp(tl, q(".cv-in")[0], m, dur, U * 4.6);

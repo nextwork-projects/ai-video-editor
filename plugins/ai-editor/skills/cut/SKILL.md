@@ -132,7 +132,8 @@ A misheard word (a name the transcriber spelled wrong) is one command, never a r
 python3 "$S/retakes.py" fix edits/<name> cloud=Claude jiv=Jev
 ```
 
-It fixes `words.raw.json` and `words.json` in place, whole words only, timings untouched.
+It fixes `words.raw.json` and `words.json` in place, whole words only, timings untouched, and keeps
+the pair in `fixes.json` so style-edit's captions get it too.
 
 ## 3. Build
 
@@ -183,6 +184,9 @@ Re-transcribes cut.mp4 and diffs it against the words the cut meant to keep.
 - **SURVIVED**: printed as phrases in context. A repeat or stumble there is real: map its cut time
   back to source time with `decisions.json`, quote the raw tokens at that time in a new span. Clean
   speech there only means the raw transcript misheard that line.
+- **HEARD DIFFERENTLY**: a kept word the second pass spelled another way at the same time in the cut
+  ("jev -> jeff"). Matched by time, so a misheard name is never MISSING. Not a cut error: no
+  rebuild. Captions take the cut's spelling (style-edit step 2).
 - Notes about fillers or other small differences are transcriber variance, not errors.
 
 One fix cycle, then show the user whatever is left.

@@ -22,7 +22,7 @@ and Linux, `py` on Windows. `S="${CLAUDE_SKILL_DIR}/scripts"`,
 `VPY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
 
 ```
-edits/<name>/cut.mp4 + cut.transcript.json + paper-edit.md   (the cut skill)
+edits/<name>/cut.mp4 + cut.transcript.json + words.json       (the cut skill)
 edits/<name>/style.json                                       (start: the profile's creators blended)
   or creator-teardowns/<handle>/style.json                    (one creator, from creator-teardown)
 ~/.ai-video-editor/profile.json                               (start: brand kit, names, assets, avoid, sound)
@@ -47,11 +47,11 @@ Follow every taste rule; the scripts read the settings themselves. When the user
 ## 1. Check the inputs
 
 - **No cut.mp4?** Run the cut skill first. Never style a raw take.
-- **No style.json?** With a profile: `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" style edits/<name>`.
-  If it stops with `no creator style.json found`, run creator-teardown in quick mode for the
-  profile's creators, then run it again. No profile: ask in the question box **No creator: the clean
-  editorial look (Recommended)** / **Copy a creator** (then creator-teardown quick mode). No creator
-  is fine: plan.py uses the editorial defaults.
+- **No style.json?** `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" style edits/<name>`.
+  With no creators in the profile (or no profile) it writes the default style: smooth eased zooms
+  about every 5 s, 3-word captions (`references/plan.md` "No creator"). If it stops with
+  `no creator style.json found`, run creator-teardown in quick mode for the profile's creators,
+  then run it again. plan.py also plans with the default style when style.json is missing, and says so.
 - **The user's images:** everything in the profile's `assets_dir` that fits a line, plus anything
   they hand over, goes in `edits/<name>/images/` and `images.json`:
   `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `hold_s`,
@@ -60,12 +60,15 @@ Follow every taste rule; the scripts read the settings themselves. When the user
 ## 2. Captions text
 
 ```bash
-cp edits/<name>/cut.transcript.json edits/<name>/captions.json
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" captions edits/<name>
 ```
 
-`cut.transcript.json` is the verify step's transcript of the finished cut. Never read either JSON:
-proofread from `paper-edit.md` (the cut as text). A misheard name (check the profile's `names`) is one
-command that fixes captions.json too, timings untouched:
+Writes `captions.json` and `captions.txt`: the words heard in the finished cut (the verify step's
+`cut.transcript.json`), timed to it, with every word that pass heard differently ("Jeff" for "Jev")
+spelled as the approved cut text has it, names spelled as the profile's `names`, and every earlier
+`retakes.py fix` applied. It prints each word it changed. Never read either JSON: proofread
+`captions.txt`, the file captions are built from. A word still wrong is one command, which fixes
+captions.json in place, timings untouched, and is kept in `fixes.json` for every later captions run:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" fix edits/<name> cloud=Claude jiv=Jev
@@ -185,7 +188,8 @@ $VPY "$S/check.py" render edits/<name> [--plan plan.json] [--style edits/<name>/
 ```
 
 FAILs go back to the plan or the cut; at most two fix rounds, then show the render with what is
-still listed. The full list: `references/plan.md`.
+still listed. A caption contrast FAIL: plan again, then render (plan.py reads the check and steps
+those pages up). The full list: `references/plan.md`.
 
 ## 8. Hand over
 
@@ -210,6 +214,8 @@ so). Tell the user which file to open and how: `references/render.md` "Export to
 |---|---|
 | `no cut.mp4 in ...` (plan.py, face.py) or `cut.mp4 missing` (edit.py) | run the cut skill first |
 | `no creator style.json found for the profile's creators` | creator-teardown quick mode, then `profile.py style` again |
+| `note: ... style.json not found; planning with the default style` | fine with no creator; `profile.py style edits/<name>` keeps it with the edit |
+| `no cut.transcript.json` (retakes.py captions) | run the cut skill's verify step |
 | `the split layout is vertical only` | plan again with `--layout overlay` |
 | `check.py plan found a FAIL` (edit.py stills) | fix the FAIL in the plan, plan again |
 | `... missing (run matte.py)` | run matte.py, then stills or render again |
