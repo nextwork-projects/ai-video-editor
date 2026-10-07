@@ -84,10 +84,14 @@ def main():
         seg = tmp / f"{i:05d}.mp4"
         # -copyts is load-bearing: without it the input seek rebases timestamps
         # to zero and the absolute trim picks the wrong footage at the right length.
+        # Frame-numbered timestamps at an explicit -r: after setpts the frames carry no duration,
+        # so without -r the muxer gives the last one ~0 s and FFmpeg 7's edit list ends on it,
+        # dropping it on read. N/fps keeps the constant-rate clock from duplicating or dropping
+        # frames over a 1/600 s source's jittered timestamps.
         cmd = ["ffmpeg", "-v", "error", "-y", "-copyts", *(["-hwaccel", "videotoolbox"] if hw else []),
                "-ss", f"{max(0.0, t0 - fstart - LEAD_S):.6f}", "-i", src, "-an",
-               "-vf", f"trim=start={max(0.0, t0):.6f}:end={t1:.6f},setpts=PTS-STARTPTS",
-               "-c:v", "libx264", "-crf", str(a.crf), "-preset", "veryfast",
+               "-vf", f"trim=start={max(0.0, t0):.6f}:end={t1:.6f},setpts=N/({fps})/TB",
+               "-r", str(fps), "-c:v", "libx264", "-crf", str(a.crf), "-preset", "veryfast",
                "-pix_fmt", "yuv420p", "-g", "15", str(seg)]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode:
