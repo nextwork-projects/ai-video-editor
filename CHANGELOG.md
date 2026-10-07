@@ -4,6 +4,19 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Drop in any link (backlog item 1): `start` routes every pasted link, @handle or file path before
+  anything else, with no question about what it is. `lib/ai_editor/links.py` classifies offline
+  (own footage to cut + style-edit, a creator to tear down, a long video or podcast to clips, a
+  website or app store page to product-video, music to the rights question), reads a single
+  video's length with yt-dlp (8 min and over goes to clips), groups several videos from one
+  creator into one teardown, and orders the work (questions, creators, own footage, long videos,
+  websites, music). One question in the question box only when a short video could be the
+  user's own or a creator's. `links.py fetch` downloads the user's footage (yt-dlp, Google
+  Drive, Dropbox dl=1, OneDrive, plain HTTP) into the edit folder with a plain sentence for a
+  private link, a folder link, a web page instead of a file, or a file over 4 GB; iCloud links
+  are explained (they open a page, not the file). Cookies only after a yes in the question box
+  (exit 3). `links.py demo` checks 62 URL shapes; evals paste-website-link and
+  paste-tiktok-profile
 - Fresh install, reproducible (backlog item 1): Python packages install from one hashed lock for
   every OS (`plugins/ai-editor/requirements/requirements.lock`, `uv pip compile --universal`,
   Python 3.10+); the renderer installs with `npm ci` from its package-lock.json; the whisper

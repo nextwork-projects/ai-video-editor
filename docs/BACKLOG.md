@@ -5,21 +5,26 @@ and passes after. Done items move to CHANGELOG.md.
 
 ## Now
 
-1. **Drop in any link.** `start` routes a pasted link to the right skill without questions about
-   what it is: a video file or video URL (YouTube, TikTok, Instagram reel, Drive/Dropbox share) to
-   cut + style-edit; a creator profile or several video links to creator-teardown; a website to
-   product-video; a long video or podcast to clips. A small classifier with a test table of real
-   URL shapes.
-2. **Captions never fail contrast.** When the copied creator's caption style (e.g. white, no
+1. **Captions never fail contrast.** When the copied creator's caption style (e.g. white, no
    stroke) drops under 3:1 on the real footage, add a stroke or soft shadow automatically. Test:
    check.py render passes on a bright background.
-3. **Cut bugs.** `render.py` "span 0: N frames, wanted N+1" with custom pause settings; the silence
+2. **Cut bugs.** `render.py` "span 0: N frames, wanted N+1" with custom pause settings; the silence
    threshold clipping words over a music bed. Tests on synthetic audio.
-4. **Skill quality pass.** Every SKILL.md read against PRINCIPLES.md: one decision path, under 250
+3. **Skill quality pass.** Every SKILL.md read against PRINCIPLES.md: one decision path, under 250
    lines, references for detail, trigger phrases that fire (claude plugin eval, 3 runs each), no
    step that makes Claude read raw data a script can summarise.
 
 ## Next
+
+- Links: creator-teardown lists YouTube creators by @handle only, so a `/channel/UC...` link
+  needs the user to read the @name off the channel. Resolve it with yt-dlp (`channel_url` ->
+  `uploader_id`) in `links.py route`.
+- Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download
+  path, untested live (no public OneDrive sample). Test with a real share; if Microsoft has
+  closed it, say "download it in the browser" instead.
+- Links: Spotify episodes are DRM for most shows; `links.py` says to paste the Apple Podcasts,
+  YouTube or RSS link. Find the RSS feed from the Spotify show name automatically (the Apple
+  Podcasts search API is free).
 
 - The matting image on Modal (`matte.py` run_modal) installs numpy, opencv and onnxruntime
   unpinned. Take the versions from requirements.lock.

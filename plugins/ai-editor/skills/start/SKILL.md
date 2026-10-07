@@ -1,6 +1,6 @@
 ---
 name: start
-description: The front door of the AI video editor. Takes the user's video and a few multiple-choice answers (platform, creators they like and what to take from each, audience and goal, brand kit, their own photos and screenshots, the products and people they will name, what to avoid, captions, sound), saves them once to a profile so they are never asked twice, then runs the whole edit in order (setup if a tool is missing, creator-teardown for a new creator, cut, style-edit) so the user only drops a video, answers, approves the cut and approves the stills. Use when the user says "edit my video", "make my video look like @creator", "make this look like <creator>'s videos", "I want my videos edited", "start", "new video", drops a video file with no other instruction, or asks how to use the editor. Not for a single step the user names on its own ("just cut it" is cut, "tear down @handle" is creator-teardown, "captions too small" is taste).
+description: The front door of the AI video editor. Takes the user's video and a few multiple-choice answers (platform, creators they like and what to take from each, audience and goal, brand kit, their own photos and screenshots, the products and people they will name, what to avoid, captions, sound), saves them once to a profile so they are never asked twice, then runs the whole edit in order (setup if a tool is missing, creator-teardown for a new creator, cut, style-edit) so the user only drops a video, answers, approves the cut and approves the stills. Use when the user says "edit my video", "make my video look like @creator", "make this look like <creator>'s videos", "I want my videos edited", "start", "new video", drops a video file or pastes any link (video, Drive or Dropbox share, creator profile, website, podcast) with no other instruction, or asks how to use the editor. Not for a single step the user names on its own ("just cut it" is cut, "tear down @handle" is creator-teardown, "captions too small" is taste).
 license: MIT
 compatibility: Python 3.9+, standard library only for the intake. The steps it runs need what the setup skill installs. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -16,10 +16,41 @@ Everything else is this skill's job.
 
 `P="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py"`. Run it with `python3` on Mac and Linux, `py` on Windows.
 
+## 0. Links first
+
+If the message has any link, @handle or file path, route it before anything else. Never ask what a
+link is; the classifier knows.
+
+```bash
+L="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/links.py"
+python3 "$L" route "<the user's whole message>" [--own]
+```
+
+Pass `--own` only when the user says the video link is theirs ("my video", "my TikTok", "I posted
+this"). It prints a list, already in the order to handle it: questions, creators, own footage, long
+videos, websites, music. Each item has a `kind`:
+
+| kind | do |
+|---|---|
+| `ask` | One question in the question box for all `ask` items together (at most four), the `options` labels in the order given, the first marked "(Recommended)". The answer becomes the kind. |
+| `creator` | creator-teardown quick mode on `handle` and `platform` (no platform: ask, TikTok first). With `urls`, write them to `picks.txt` and use `list <handle> --urls picks.txt`. Save it as the profile creator. |
+| `own` | `python3 "$L" fetch "<url>" edits/<name>` (`name` is in the item). It prints the file path; that is the video for step 1. |
+| `long` | the clips skill, with this link as its source. |
+| `product` | the product-video skill with this URL. |
+| `music` | the music question with rights (style-edit, or product-video's `music` step). |
+| `unsupported` | say its `note` to the user, word for word, and go on with the rest. |
+
+An item with a `note` (Instagram profiles, Spotify, app stores, OneDrive): say the note once.
+fetch exit 3 means the site wants a login: ask in the question box "Use your browser's login for
+this one download?" (No, I'll download it myself (Recommended) / Yes, Chrome / Yes, another
+browser), and only on a yes re-run with `--cookies-from-browser <browser>`. Exit 1: say its message.
+Only download what the user has the right to edit; a creator's video is for the teardown, not to
+re-edit.
+
 ## 1. The video
 
-If the user has not given a video path, ask for it (or offer the cut skill's sample take). Name the
-edit folder after the file (`IMG_1234.MOV` -> `edits/img-1234`).
+If the user has not given a video path (or a link step 0 fetched), ask for it (or offer the cut
+skill's sample take). Name the edit folder after the file (`IMG_1234.MOV` -> `edits/img-1234`).
 
 ## 2. Intake: only what is missing
 
@@ -112,5 +143,7 @@ are never needed again; a change of brand, creators or platform goes back into t
 
 ## Files
 
+- `../../lib/ai_editor/links.py`: pasted links to a kind and a skill (`route`, `classify`), and the
+  downloader for the user's own footage (`fetch`). `links.py demo` self-checks 60 URL shapes.
 - `../../lib/ai_editor/profile.py`: the profile (load, save, missing questions), the creator blend
   and the look resolution plan.py uses. `profile.py demo` self-checks.

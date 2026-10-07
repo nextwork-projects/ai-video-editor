@@ -26,6 +26,8 @@ EVALS = [("plugins/ai-editor/evals/setup-plan-first", "tool: AskUserQuestion"),
          ("plugins/ai-editor/evals/render-unapproved", "Approve"),
          ("plugins/ai-editor/evals/captions-too-small", "help everyone"),
          ("plugins/ai-editor/evals/improve-from-feedback", "improve"),
+         ("plugins/ai-editor/evals/paste-website-link", "product-video"),
+         ("plugins/ai-editor/evals/paste-tiktok-profile", "creator-teardown"),
          ("plugins/creator-teardown/evals/tear-down-handle", "tool: AskUserQuestion")]
 
 

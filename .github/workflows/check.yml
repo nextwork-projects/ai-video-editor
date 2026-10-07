@@ -66,6 +66,7 @@ jobs:
           python $A/cut/scripts/test_retakes.py
           python plugins/ai-editor/lib/ai_editor/keys.py
           python plugins/ai-editor/lib/ai_editor/jev.py
+          python plugins/ai-editor/lib/ai_editor/links.py demo
           python $A/style-edit/scripts/plan.py demo
           python $A/style-edit/scripts/edit.py demo
           python $A/style-edit/scripts/export_nle.py demo
