@@ -1,10 +1,19 @@
 # AI Video Editor
 
-Edit your own talking-head video in the style of a creator you like.
+Edit your own talking-head video in the style of a creator you like. Open the folder in Claude Code
+and say **edit my video**, or paste a link.
 
 1. Give it your video. It cuts out the retakes, false starts and pauses.
-2. Give it a creator. It measures how they edit: cut speed, zooms, caption look.
+2. Give it a creator. It measures how they edit: cut speed, zooms, captions, graphics, transitions.
 3. It renders your video in that style, on your laptop or in the cloud, after you approve each step.
+
+It also makes three other things:
+
+- **Shorts from a long video or podcast.** Paste the link; it finds the clips and edits each one.
+- **A product video from a website.** Paste the URL; it asks what to show, records the real product
+  and cuts a launch film with its own music.
+- **A creator teardown.** Paste a profile; you get what makes their videos work and a style you can
+  edit with.
 
 <!-- TODO(owner): drop a 10-second before/after demo GIF at docs/demo.gif, then replace this comment with: ![Before and after](docs/demo.gif) -->
 
@@ -141,6 +150,17 @@ published prices, not measured on a bill.
 - **AWS Lambda**: many machines at once on your own AWS account. One-time setup of about 20 minutes.
   Say **set up Lambda rendering**.
 
+## Your data
+
+- Everything runs on your computer unless you pick a cloud render. After a cloud render your footage
+  is deleted from the service, unless you said to keep it.
+- A product video of a logged-in site uses its own browser profile, never your main one. You log in
+  by hand, and Claude asks to delete the login when the video is done.
+- Names, emails and account details on screen are blurred by default, your own included.
+- It never clicks anything that creates, deletes, pays, publishes or invites unless you said yes
+  for that video.
+- A suggestion you share to help everyone has your names, handles and web addresses removed first.
+
 ## Troubleshooting
 
 | Problem | What to do |
@@ -150,6 +170,8 @@ published prices, not measured on a bill.
 | You skipped a key or step | Say **finish setup**. Only the skipped steps run. |
 | Claude does not know "edit my video" | The editor is not loaded. Type `/reload-plugins`, or install it with Way 2. |
 | `python3` not found | Mac: `brew install python`. Windows: `winget install -e --id Python.Python.3.12`, then open a new terminal. Linux: `sudo apt install -y python3 python3-venv`. |
+| Node is too old on Debian or Ubuntu | Doctor prints the fix: it adds NodeSource's signed package source, then installs Node. |
+| Chrome or Chromium installed as a Flatpak | Only logged-in product videos need your Chrome, and a Flatpak one cannot be used. Install Google Chrome or your distro's `chromium` package; doctor says which it found. |
 | A tool installed on Windows is still "not found" | Close and reopen Claude Code: a `winget` install only shows up in a new terminal. |
 | `yt-dlp returned nothing` | The site changed. Doctor shows how to update yt-dlp, or paste single video links. |
 | An Instagram profile fails | Instagram has no free way to list a profile. Paste 10 or more reel links. |
