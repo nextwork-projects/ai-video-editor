@@ -12,7 +12,8 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
 
 This runs in a checkout of the repo, for the person who maintains it. A fix here reaches every user on
-their next plugin update. `S="${CLAUDE_SKILL_DIR}/scripts"`.
+their next plugin update. `S="${CLAUDE_SKILL_DIR}/scripts"`. Run the scripts with `python3` on Mac
+and Linux, `py` on Windows.
 
 ## 1. Collect
 

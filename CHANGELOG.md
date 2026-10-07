@@ -4,6 +4,18 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The renderer copy in `~/.ai-video-editor/remotion/src` kept components deleted from the plugin:
+  edit.py copied over it with `dirs_exist_ok`. `mirror()` now removes files and folders gone from the
+  plugin's `remotion/src`, inside that folder only. Test: `edit.py demo`.
+- product-video's brief asked 11 questions over three calls. It now asks the four that change what gets
+  built, then one question confirming the defaults for the rest (style, length, login, music, sound,
+  voice), with "Change some" asking only the ones named.
+- cut's step 0 told Claude to ask "cut first or everything" even after "edit my video like @creator",
+  a request that routes to start, which decides that itself. The line now says so.
+  `tests/check_plugins.py` fails a skill that quotes another skill's trigger without naming that skill.
+- cut, clips, product-video and improve ran `python3` scripts with no line saying `py` on Windows; each
+  now has the line the other skills use. `tests/check_plugins.py` fails a skill that runs a
+  `python3 "<script>"` command without one.
 - A suggestion sent as a public GitHub issue kept the names, domains and creator handles from the user's
   profile, and any bare domain (`acme.io`): `taste.py scrub` only caught full URLs, emails, @handles,
   paths and media files. Every `names` entry (name and domain) and every creator handle in profile.json

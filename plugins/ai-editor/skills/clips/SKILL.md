@@ -27,6 +27,7 @@ clips/<name>/
 edits/<name>-clip<N>/ one edit per chosen clip: source.mp4, words.raw.json (re-timed), clip.json
 ```
 
+Run the scripts with `python3` on Mac and Linux, `py` on Windows.
 `$PY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
 If it is missing, run the `setup` skill first. `K="${CLAUDE_SKILL_DIR}/scripts/clips.py"`,
 `C="${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts"`, `S="${CLAUDE_PLUGIN_ROOT}/skills/style-edit/scripts"`.

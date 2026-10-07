@@ -15,6 +15,7 @@ Every question to the user goes in the question box: call the AskUserQuestion to
 
 A URL in. A product video out, made only of the site's real UI, real recorded click-throughs of it, its own
 colours and type, and its own words, scored and mixed for this cut. `S="${CLAUDE_SKILL_DIR}/scripts"`,
+Run the scripts with `python3` on Mac and Linux, `py` on Windows.
 `$PY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
 Work in `product/<name>/` under the folder Claude Code was started in.
 
@@ -41,10 +42,10 @@ It installs the Chrome Headless Shell the crawl and the recordings drive. Read t
 
 Start the crawl (step 2) in the background (Bash `run_in_background`), then `python3 "$S/product.py" copy product/<name>`:
 it waits for the home page (about 50 s; the inner pages load while the questions are asked). Its `tagline:`
-and `nav:` lines and the headings under them are the options, in the site's own words. Never read `site.json` (about 20 KB). Then three AskUserQuestion calls (at most four questions each), the
+and `nav:` lines and the headings under them are the options, in the site's own words. Never read `site.json` (about 20 KB). Then two AskUserQuestion calls, the
 recommended option first and marked "(Recommended)", "Other" always open for their own words.
 
-**Call 1, the video's job:**
+**Call 1, what gets built** (four questions):
 
 1. **What it does, in one line**: the `tagline:` line of `product.py copy` / Other.
 2. **The 2-3 things the video must show** (multi-select): the jobs in `product.py copy`'s headings
@@ -52,30 +53,28 @@ recommended option first and marked "(Recommended)", "Other" always open for the
 3. **Who will watch**: new users (Recommended) / existing users / investors / developers.
 4. **The one action at the end**: visit the URL (Recommended) / sign up / try a feature.
 
-**Call 2, the shape:**
+**Call 2, one question to confirm the defaults.** List them in the question, then: Use these
+(Recommended) / Change some (ask only the ones they name, with the options below).
 
-5. **A page or flow that must be in it**: none (Recommended) / Other (a URL).
-6. **Style**: Linear (Recommended: tilted plane, slow drift, blur-dissolves, small low-left words) /
-   Apple / Stripe / Arc / Raycast (`references/style.md`, one line each).
-7. **Length and shape**: 30 s 16:9 (Recommended) / 30 s 9:16 / both / 15 s. (`--fps 60` on request:
-   smoother camera moves, twice the render time.)
-8. **Show the logged-in product?** Yes, log in now (Recommended when the use cases live behind a login) /
-   Public pages only / Later.
+- **A page or flow that must be in it**: none / a URL.
+- **Style**: Linear (tilted plane, slow drift, blur-dissolves, small low-left words) / Apple / Stripe /
+  Arc / Raycast (`references/style.md`, one line each).
+- **Length and shape**: 30 s 16:9 / 30 s 9:16 / both / 15 s. (`--fps 60` on request: smoother camera
+  moves, twice the render time.)
+- **Logged-in product**: public pages only (default to log in now when a must-show item needs a login) /
+  log in now / later.
+- **Music**: generated here for this cut (synthesised, nothing to licence) / ElevenLabs Music (only with
+  their key) / their own track (a file) / a link (YouTube, SoundCloud, Bandcamp) / none. A link or a
+  file: ask who holds the rights, then `product.py music` (`references/brief.md` "Music").
+- **Sound effects**: subtle UI sounds (clicks and key ticks where the UI acts, a swell into the logo) / none.
+- **Voice**: none, on-screen words only / their own recording / text to speech (only with an ElevenLabs key).
 
-**Call 3, the sound:**
-
-9. **Music**: generated here for this cut (Recommended: synthesised, nothing to licence) / ElevenLabs
-   Music (only with their key) / their own track (a file) / a link (YouTube, SoundCloud, Bandcamp) /
-   none. A link or a file: ask who holds the rights, then `product.py music` (`references/brief.md` "Music").
-10. **Sound effects**: subtle UI sounds (Recommended: clicks and key ticks where the UI acts, a swell into
-    the logo) / none.
-11. **Voice**: none, on-screen words only (Recommended) / their own recording / text to speech (only with
-    an ElevenLabs key).
+The first option of each is the default.
 
 Write the answers to `product/<name>/brief.json` (shape: `references/shapes.md`). `plan` refuses without it. Example brief for nextwork.ai: must_show = the Create button (prompt your
 own project), search other people's projects, roadmaps, step-by-step guides, the portfolio in Your Library.
 
-**Logging in** (on "Yes"): follow `references/brief.md` "Logging in": say where the login is kept
+**Logging in** (on "log in now"): follow `references/brief.md` "Logging in": say where the login is kept
 first, then `node "$S/login.mjs" login <url>` opens a separate Chrome window they log in to by hand.
 Recording stays read-only (no create, delete, pay, publish or invite without a yes in the question
 box) and blurs personal data; show the user the `flows/<id>-blurred.png` sheets before rendering.

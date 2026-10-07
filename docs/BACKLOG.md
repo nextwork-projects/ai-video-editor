@@ -29,12 +29,6 @@ Sources:
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
   SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
 
-Skill wording:
-- cut step 0 says ask "even if they said 'edit my video like @creator'", which routes to start.
-- cut and clips use `python3` with no "`py` on Windows" line.
-- product-video brief: 11 questions over three calls; ask call 1, default the rest in one confirm.
-- `edit.py:43` copies the renderer with `dirs_exist_ok`, so deleted components stay in the user's copy.
-
 Windows and Linux:
 - The apt Node fix line pipes NodeSource's remote script to `sudo bash` (Debian and Ubuntu ship a Node
   older than 20). Flatpak Chromium is not found (no plain binary).

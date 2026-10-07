@@ -41,9 +41,17 @@ def sync_renderer():
     same_deps = (REMOTION / lock).exists() and (REMOTION / lock).read_bytes() == (SRC / lock).read_bytes()
     if not (REMOTION / "node_modules" / "remotion").exists() or not same_deps:
         subprocess.run([sys.executable, str(SETUP), "remotion"], check=True)
-    shutil.copytree(SRC / "src", REMOTION / "src", dirs_exist_ok=True, copy_function=copy_changed)
+    mirror(SRC / "src", REMOTION / "src")
     for f in ("render.mjs", "tsconfig.json"):
         copy_changed(SRC / f, REMOTION / f)
+
+
+def mirror(src, dst):
+    """Make dst an exact copy of src: changed files copied, files gone from src removed from dst."""
+    shutil.copytree(src, dst, dirs_exist_ok=True, copy_function=copy_changed)
+    for p in sorted(dst.rglob("*"), reverse=True):     # children before their folder
+        if not (src / p.relative_to(dst)).exists():    # missing_ok: parallel stills may race to the same file
+            shutil.rmtree(p, ignore_errors=True) if p.is_dir() and not p.is_symlink() else p.unlink(missing_ok=True)
 
 
 def copy_changed(src, dst):
@@ -647,6 +655,14 @@ def demo():
         a.write_text("new")
         copy_changed(a, b)
         assert b.read_text() == "new" and not list(Path(t).glob("b.ts.*.tmp"))
+        # the renderer copy is exact: a component deleted upstream leaves the user's copy too
+        up, mine = Path(t) / "up", Path(t) / "mine"
+        (up / "keep").mkdir(parents=True), (mine / "old").mkdir(parents=True)
+        (up / "keep" / "A.tsx").write_text("a"), (mine / "Gone.tsx").write_text("x"), (mine / "old" / "B.tsx").write_text("b")
+        (Path(t) / "outside.txt").write_text("user")
+        mirror(up, mine)
+        assert sorted(str(p.relative_to(mine)) for p in mine.rglob("*")) == ["keep", "keep/A.tsx"], list(mine.rglob("*"))
+        assert (Path(t) / "outside.txt").exists()
         wf = (repo / ".github/workflows/render.yml").read_text()
         assert "-p 'github-render-media.zip*'" in wf
         for job in ("  plan:", "  render:", "  join:", "name: render\n", "render.mjs chunk", '"concat"'):

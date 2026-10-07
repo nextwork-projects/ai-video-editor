@@ -24,7 +24,8 @@ edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (wha
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
 started in. Never modify, move or copy the source file. Pass its path.
 
-`$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows), the tool venv.
+`$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`, the tool venv. On Windows, use `py`
+wherever these commands say `python3`.
 No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ## No video yet?
@@ -38,8 +39,7 @@ curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/
 
 ## 0. Ask: the cut first, or everything at once
 
-Before anything else, ask the user one question in the question box, even if they said "edit my
-video like @creator":
+Before anything else, ask one question in the question box (start decides this itself for a whole edit):
 
 > Do you want just the cut first, or the cut and the styled edit in one go?
 > - **Just the cut first (Recommended).** You approve the cut before I add captions, zooms or
@@ -157,7 +157,7 @@ rushed or slow: rebuild with another `--max-pause`. After any change: build, ren
 `hooks.json` exists: after approval, ask about hook variants (`references/retake-detection.md`).
 
 Only the user's approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
-cut first", stop after approval and say they can ask for the style. Never start style-edit on your own.
+cut first", say they can ask for the style. Never start style-edit on your own.
 
 ## If a script stops
 

@@ -106,6 +106,21 @@ def check_skill(path):
             errors.append(f"{agents / (ref + '.md')}: {path.parent.name} launches it, so it needs model and tools set")
 
 
+def check_body(path):
+    """Runs after every skill's triggers are in TRIGGERS."""
+    _, body = frontmatter(path)
+    # Quoting another skill's trigger without naming that skill acts on a request the router sends elsewhere.
+    for m in re.finditer(r'"([^"]{3,80})"', body):
+        key = re.sub(r"\s+", " ", m.group(1).lower().strip(" .,"))
+        lines = body[body.rfind("\n", 0, m.start()) + 1:body.find("\n", m.end())]
+        for phrase, owner in TRIGGERS.items():
+            if owner != path.parent.name and (key == phrase or key.startswith(phrase + " ")) and not re.search(rf"\b{owner}\b", lines):
+                errors.append(f"{path}: quotes \"{key}\", which routes to {owner}; name {owner} or drop it")
+    # A `python3 "<script>"` command (not the run.py launcher) needs the Windows line the other skills have.
+    if re.search(r'python3 "[^"\n]*(?<!run\.py)"', body) and not re.search(r"`python3`[^.]*`py`|`py`[^.]*`python3`", body):
+        errors.append(f"{path}: runs `python3` with no line saying `py` on Windows")
+
+
 def check_agent(path):
     fm, _ = frontmatter(path)
     for key in ("name", "description", "model", "tools"):
@@ -141,6 +156,8 @@ def main():
                           f"!= skill folders {sorted(map(str, found))}")
         for skill in plugin.glob("skills/*/SKILL.md"):
             check_skill(skill)
+        for skill in plugin.glob("skills/*/SKILL.md"):
+            check_body(skill)
         for agent in plugin.glob("agents/*.md"):
             check_agent(agent)
         if (plugin / "hooks" / "hooks.json").exists():
