@@ -356,6 +356,51 @@ def iou(a, b):
     return iw * ih / u if u else 0.0
 
 
+def overlay_dets(F, band):
+    """Graphics on moving footage: per sample, the regions that hold still for +-0.4 s while most of
+    the frame changes (a cut or a moving camera under them), rectangular enough and not flat (a
+    sky that happens to hold still is not a graphic). A sample whose footage is still gives none."""
+    import cv2
+    n, H, W = F.shape[:3]
+    G = F.astype(np.float32)
+    k5 = np.ones((5, 5), np.uint8)
+    out = []
+    for i in range(n):
+        js = [j for j in range(max(0, i - 2), min(n, i + 3)) if j != i]
+        d = np.max([np.abs(G[j] - G[i]).mean(-1) for j in js], axis=0) if js else None
+        if d is None or (d >= 25).mean() < 0.4:
+            out.append([])
+            continue
+        m = (d < 12).astype(np.uint8)
+        if band:
+            m[int(band[0] * H):int(band[1] * H) + 1] = 0
+        m = cv2.morphologyEx(cv2.morphologyEx(m, cv2.MORPH_OPEN, k5), cv2.MORPH_CLOSE, k5)
+        keep = []
+        for b in boxes(m):
+            x, y, w, h = b["box"]
+            if b["fill"] < 0.6 or w * h > 0.6:
+                continue
+            patch = G[i][int(y * H):int((y + h) * H), int(x * W):int((x + w) * W)]
+            if cv2.cvtColor(patch.astype(np.uint8), cv2.COLOR_RGB2GRAY).std() >= 8:
+                keep.append(b)
+        out.append(keep)
+    return out
+
+
+def grow_track(tr, F):
+    """The track's run of samples widened to every neighbouring sample showing the same picture in
+    its box: the footage under it stood still there, so the moving-footage test could not see it."""
+    box = tr["boxes"][len(tr["boxes"]) // 2]
+    ref = own_crop(F[tr["idx"][len(tr["idx"]) // 2]], box)
+    same = [float(np.abs(own_crop(F[i], box) - ref).mean()) < 14 for i in range(len(F))]
+    a, b = tr["idx"][0], tr["idx"][-1]
+    while a > 0 and same[a - 1]:
+        a -= 1
+    while b + 1 < len(F) and same[b + 1]:
+        b += 1
+    return {**tr, "idx": list(range(a, b + 1)), "boxes": [box] * (b - a + 1), "last": b}
+
+
 # ---------- motion of one graphic ----------
 
 def component(m, roi, fb):
@@ -510,10 +555,23 @@ def faces_at(look):
     return at
 
 
+def colour_count(img):
+    """Colours (8 levels a channel) that cover 90% of a picture: an icon or a text card has a
+    handful, a photo hundreds."""
+    q = (np.asarray(img).reshape(-1, 3) // 32).astype(np.int32)
+    n = np.sort(np.bincount(q[:, 0] * 64 + q[:, 1] * 8 + q[:, 2]))[::-1]
+    return int(np.searchsorted(np.cumsum(n), 0.9 * len(q)) + 1)
+
+
 def guess_kind(g, look):
     """Code's guess at the kind. gemini.py kinds replaces it."""
     if g["moving"] >= 6:
         return "UI recording" if g["text_lines"] >= 2 else "b-roll"
+    # an app or brand icon: small, near-square on screen, a few flat colours, a name at most, and no
+    # line of text running out of it (then it is a piece of a wider card)
+    if (g.get("colours") or 99) <= 8 and 0.75 <= (g.get("aspect") or 0) <= 1.33 and g.get("area_pct", 100) <= 8 \
+            and g["text_lines"] <= 1 and not g.get("text_crossing"):
+        return "logo"
     if g["text_lines"] >= 4:
         return "real screenshot"
     if g["text_lines"] >= 1 and g["flat"]:
@@ -535,6 +593,22 @@ def text_lines_in(box, t0, t1, look):
     return int(statistics.median(counts)) if counts else 0
 
 
+def text_crossing(box, t0, t1, look):
+    """OCR lines (not captions) that run across the box's edge while it is up: the box is part of a
+    wider text item."""
+    if not look:
+        return 0
+    x, y, w, h = box
+    n = 0
+    for s in look.get("samples") or []:
+        if t0 <= s["t"] <= t1:
+            for tx, b, cap in s["lines"]:
+                inside = x - 0.02 <= b[0] + b[2] / 2 <= x + w + 0.02 and y - 0.02 <= b[1] + b[3] / 2 <= y + h + 0.02
+                ov = max(0.0, min(x + w, b[0] + b[2]) - max(x, b[0])) * max(0.0, min(y + h, b[1] + b[3]) - max(y, b[1]))
+                n += not cap and not inside and ov > 0
+    return n
+
+
 def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
     w0, h0, src_fps, dur = probe(path)
     W = AW
@@ -548,10 +622,15 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
                        + [round(b * SFPS) for a, b in pushes] + [n]))
     segs = [(a, b) for a, b in zip(edges, edges[1:]) if b - a >= 2]
     plate_of = plates(F, segs or [(0, n)])
+    # No speaker most of the time and no clean plate (a vlog, a walk, b-roll): the plate method would
+    # call the moving footage a graphic. Find what holds still while the footage moves instead.
+    fit_share = float(np.mean([block_median(F[i], plate_of[i]) <= PLATE_FIT for i in range(n)]))
+    face_share = sum(1 for i in range(n) if face(i / SFPS)) / n
+    overlay = fit_share < 0.5 and face_share < 0.5
 
     # Per sample: changed regions that are not the speaker or the captions.
     dets, blurred = [], np.zeros(n, bool)
-    for i in range(n):
+    for i in range(n) if not overlay else ():
         t = i / SFPS
         f, pl = F[i], plate_of[i]
         fc = face(t)
@@ -566,6 +645,8 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
         else:
             m = changed(f, pl, body, band)
         dets.append([b for b in boxes(m) if b["fill"] >= 0.35 and real_graphic(f, pl, b["box"], blurred[i])])
+    if overlay:
+        dets = overlay_dets(F, band)
 
     # Link boxes across samples into tracks; a gap of up to 0.6 s (a skipped push frame, a
     # cut under the graphic) is bridged.
@@ -578,8 +659,9 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
                 best["boxes"].append(d["box"])
                 best["idx"].append(i)
                 best["last"] = i
+                best["fill"] = max(best["fill"], d["fill"])
             else:
-                tracks.append({"boxes": [d["box"]], "idx": [i], "last": i})
+                tracks.append({"boxes": [d["box"]], "idx": [i], "last": i, "fill": d["fill"]})
     def jitter(tr):
         """How irregularly its edges move: a laid-over graphic holds still or drifts on a line,
         a hand jumps about. The median distance of each edge from a straight-line fit."""
@@ -607,9 +689,19 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
         mid = tr["idx"][len(tr["idx"]) // 2]
         c = like_plate(F[mid], plate_of[mid], tr["boxes"][len(tr["idx"]) // 2])
         return c > 0.65 or (c > 0.5 and not abrupt(tr))
-    tracks = [tr for tr in tracks if (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS >= MIN_HOLD
-              and len(tr["idx"]) >= 0.5 * (tr["idx"][-1] - tr["idx"][0] + 1) and jitter(tr) <= 0.015
-              and not background(tr)]
+    if overlay:
+        # Grown over the samples where the footage stood still, then kept when it is a laid-on graphic:
+        # text in it or a hard rectangular edge, and not up for most of the video (a watermark, a frame).
+        tracks = [grow_track(tr, F) for tr in tracks]
+        tracks = [tr for tr in tracks if MIN_HOLD <= (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS <= 0.6 * dur
+                  and jitter(tr) <= 0.015 and (tr["fill"] >= 0.85 or text_lines_in(
+                      tr["boxes"][0], tr["idx"][0] / SFPS, (tr["idx"][-1] + 1) / SFPS, look) >= 1)]
+        tracks = [tr for k, tr in enumerate(tracks)   # two tracks grown into one graphic: keep the first
+                  if not any(iou(tr["boxes"][0], o["boxes"][0]) >= 0.5 and set(tr["idx"]) & set(o["idx"]) for o in tracks[:k])]
+    else:
+        tracks = [tr for tr in tracks if (tr["idx"][-1] - tr["idx"][0] + 1) / SFPS >= MIN_HOLD
+                  and len(tr["idx"]) >= 0.5 * (tr["idx"][-1] - tr["idx"][0] + 1) and jitter(tr) <= 0.015
+                  and not background(tr)]
 
     out = []
     for k, tr in enumerate(sorted(tracks, key=lambda tr: tr["idx"][0])):
@@ -633,11 +725,13 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
         pl = plate_of[i0]
         fc = face(t_in)
         body = body_mask(fc, H, W)
-        win = list(decode(path, W, H, None, max(0.0, t_in - 0.6), 1.4))
         blur = bool(blurred[i0:i1 + 1].mean() >= 0.5)
+        # ponytail: no entrance or exit fit in overlay mode (it needs a plate); fit against the
+        # shot before the graphic lands if overlay creators need their motion.
+        win = list(decode(path, W, H, None, max(0.0, t_in - 0.6), 1.4)) if not overlay else []
         ent = motion(win, pl, body, box, src_fps, max(0.0, t_in - 0.6), blur) if len(win) > 6 else None
         ext = None
-        if t_out < dur - 0.3:
+        if t_out < dur - 0.3 and not overlay:
             win = list(decode(path, W, H, None, max(0.0, t_out - 0.9), 1.4))
             if len(win) > 6:
                 ext = reverse_ease(motion(win[::-1], plate_of[min(i1, n - 1)], body_mask(face(t_out), H, W),
@@ -647,7 +741,10 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
                "box": [round(v, 4) for v in box], "area_pct": round(100 * box[2] * box[3], 1),
                "entrance": ent, "exit": ext, "secondary": sec, "drift_pct_s": round(drift, 2),
                "grow_pct": round(grow, 1), "moving": round(moving, 1), "flat": flat,
-               "text_lines": text_lines_in(box, t_in, t_out, look)}
+               "colours": colour_count(own_crop(F[tr["idx"][len(tr["idx"]) // 2]], tr["boxes"][len(tr["idx"]) // 2])),
+               "aspect": round(box[2] * w0 / max(1e-6, box[3] * h0), 2),
+               "text_lines": text_lines_in(box, t_in, t_out, look),
+               "text_crossing": text_crossing(box, t_in, t_out, look)}
         if rec["box"][3] < 0.05 and rec["box"][2] > 4 * rec["box"][3] and not rec["text_lines"] and look:
             continue      # a thin strip with no text in it: a shelf edge or the ceiling line
         rec["kind"] = guess_kind(rec, look)
@@ -656,7 +753,8 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
             rec["crop"] = save_crop(path, (t_in + min(t_out, t_in + 2.0)) / 2 + 0.3, box, crop_dir,
                                     f"{path.stem}_{k}.jpg")
         out.append(rec)
-    return {"id": path.stem, "duration_s": round(dur, 2), "width": w0, "height": h0, "graphics": out}
+    return {"id": path.stem, "duration_s": round(dur, 2), "width": w0, "height": h0,
+            "mode": "overlay" if overlay else "plate", "graphics": out}
 
 
 def save_crop(path, t, box, crop_dir, name):
@@ -806,8 +904,25 @@ def merge(outdir):
         save_heatmap(grid, outdir / "graphics" / "heatmap.png", frame if frame and frame.exists() else None)
     gfx["crop_palette"] = crop_palette(outdir, rows)
     style["graphics"] = gfx
+    split = split_layout(s["layout"], style.get("face"), portrait)
+    if split:
+        style["layout"] = split
+    elif (style.get("layout") or {}).get("source") == "graphics.py":
+        style.pop("layout")
     sp.write_text(json.dumps(style, indent=2))
     return gfx
+
+
+def split_layout(layout, face, portrait):
+    """style.json "layout" for style-edit's split screen (vertical only): the graphics sit in the
+    top panel 60%+ of their time, end above 55% of the height, keep off the face, and the face
+    is in the lower half. seam: just under the usual graphic. None for an overlay creator."""
+    if not portrait or not layout or not (face or {}).get("y_pct"):
+        return None
+    x, y, w, h = layout["median_box"]
+    if layout["zones_pct"].get("top", 0) < 60 or y + h > 55 or layout.get("covers_face_pct", 0) > 10 or face["y_pct"] < 50:
+        return None
+    return {"mode": "split", "seam": int(min(60, max(35, round(y + h + 2)))), "source": "graphics.py"}
 
 
 def crop_palette(outdir, rows, k=6):
@@ -877,6 +992,106 @@ def summary_line(g, path):
 
 
 # ---------- self-check ----------
+
+def moving_clip(mp4, W=360, H=640, FPS=30):
+    """An 8 s vlog-style fixture, no speaker: the camera pans the whole time over three shots (cuts at
+    2.5 s and 5.5 s), with a flat sky band in the second shot and a bright ball moving through
+    the third. Hand-labelled truth, (t_in, t_out, box as fractions):
+      a product card (border, text bars) 1.0-4.0 s across the first cut,
+      an app tile 4.5-7.0 s across the second cut,
+      a screenshot 6.2-7.8 s over the panning third shot."""
+    from PIL import Image, ImageDraw
+    rng = np.random.default_rng(5)
+
+    def shot(seed, sky=False):
+        r = np.random.default_rng(seed)
+        big = np.asarray(Image.fromarray((r.random((H // 16, (W + 400) // 16, 3)) * 170 + 40).astype(np.uint8))
+                         .resize((W + 400, H), Image.BICUBIC)).astype(np.float32)
+        if sky:
+            big[:150] = (150, 190, 235)
+        return big
+    shots = [shot(11), shot(12, sky=True), shot(13)]
+    card = Image.new("RGB", (280, 160), "white")
+    d = ImageDraw.Draw(card)
+    d.rectangle((0, 0, 279, 159), outline=(30, 30, 30), width=4)
+    for k in range(4):
+        d.rectangle((20, 24 + 30 * k, 20 + 220 - 40 * (k % 2), 36 + 30 * k), fill=(40, 40, 40))
+    tile = Image.new("RGB", (90, 90), (255, 92, 40))
+    ImageDraw.Draw(tile).ellipse((25, 25, 65, 65), fill="white")
+    page = Image.new("RGB", (200, 140), (245, 246, 248))
+    d = ImageDraw.Draw(page)
+    d.rectangle((0, 0, 199, 22), fill=(60, 64, 72))
+    for k in range(5):
+        d.rectangle((14, 34 + 20 * k, 180 - 25 * (k % 3), 42 + 20 * k), fill=(120, 124, 130))
+    over = [(np.asarray(card, np.float32), 40, 60, 1.0, 4.0), (np.asarray(tile, np.float32), 240, 420, 4.5, 7.0),
+            (np.asarray(page, np.float32), 20, 470, 6.2, 7.8)]
+    truth = [(t0, t1, [x / W, y / H, im.shape[1] / W, im.shape[0] / H]) for im, x, y, t0, t1 in over]
+    frames = []
+    for i in range(8 * FPS):
+        t = i / FPS
+        k = 0 if t < 2.5 else 1 if t < 5.5 else 2
+        off = int(40 + 45 * t) % 400
+        img = shots[k][:, off:off + W].copy()
+        if k == 2:   # a bright ball rolling through the shot
+            cx, cy = int(60 + 60 * (t - 5.5)), 300
+            img[cy - 25:cy + 25, max(0, cx - 25):cx + 25] = 250
+        for im, x, y, t0, t1 in over:
+            if t0 <= t < t1:
+                img[y:y + im.shape[0], x:x + im.shape[1]] = im
+        frames.append(np.clip(img + rng.normal(0, 2, img.shape), 0, 255).astype(np.uint8))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+                    "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "16", str(mp4)],
+                   input=b"".join(f.tobytes() for f in frames), check=True)
+    return truth
+
+
+def precision_recall(found, truth):
+    """A found graphic is right when its box overlaps a true one (IoU 0.5) while that one is up."""
+    def hit(g, tr):
+        return iou(g["box"], tr[2]) >= 0.5 and min(g["t_out"], tr[1]) - max(g["t_in"], tr[0]) > 0.3
+    right = sum(any(hit(g, tr) for tr in truth) for g in found)
+    seen = sum(any(hit(g, tr) for g in found) for tr in truth)
+    return (right / len(found) if found else 0.0), seen / len(truth)
+
+
+def demo_moving():
+    """No speaker, a moving camera: the overlay mode finds the three graphics and nothing else."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mp4 = Path(tmp) / "m.mp4"
+        truth = moving_clip(mp4)
+        r = measure_video(mp4, None, {"cuts": [2.5, 5.5], "zooms": []}, None, None)
+        p, rc = precision_recall(r["graphics"], truth)
+        print(f"  moving footage ({r.get('mode')} mode): precision {p:.2f}, recall {rc:.2f}, "
+              + "; ".join(f"{g['t_in']}-{g['t_out']} {[round(v, 2) for v in g['box']]} {g['kind']}" for g in r["graphics"]))
+        assert r.get("mode") == "overlay" and p >= 0.75 and rc == 1.0, (p, rc, r["graphics"])
+        tile = next(g for g in r["graphics"] if iou(g["box"], truth[1][2]) >= 0.5)
+        assert tile["kind"] == "logo", tile
+
+
+def demo_kinds():
+    """An app icon with its name under it is a logo, not a text card; a text card stays one."""
+    from PIL import Image, ImageDraw, ImageFont
+    icon = Image.new("RGB", (64, 64), (70, 110, 60))            # a crop round it: the wall shows at the corners
+    d = ImageDraw.Draw(icon)
+    d.rounded_rectangle((2, 2, 62, 62), radius=14, fill=(255, 92, 40))
+    d.ellipse((18, 18, 46, 46), fill="white")
+    card = Image.new("RGB", (600, 300), "white")
+    d = ImageDraw.Draw(card)
+    for k, line in enumerate(["3 things nobody", "tells you about", "pricing pages"]):
+        d.text((30, 30 + 80 * k), line, fill=(20, 20, 20), font=ImageFont.load_default(size=56))
+    photo = Image.fromarray((np.random.default_rng(1).random((64, 64, 3)) * 255).astype(np.uint8))
+    ic, cc, pc = (colour_count(np.asarray(im)) for im in (icon, card, photo))
+    print(f"  colours: icon {ic}, text card {cc}, photo {pc}")
+    g = {"moving": 0.5, "flat": True, "secondary": "still"}
+    assert guess_kind({**g, "text_lines": 1, "colours": ic, "aspect": 1.0, "area_pct": 2.2}, None) == "logo"
+    assert guess_kind({**g, "text_lines": 3, "colours": cc, "aspect": 2.0, "area_pct": 14}, None) == "text card"
+    assert guess_kind({**g, "flat": False, "text_lines": 0, "colours": pc, "aspect": 1.0, "area_pct": 3}, None) == "photo"
+    # the corner of a wide red title banner (measured case): its title line runs out of the box
+    corner = {**g, "text_lines": 0, "colours": 7, "aspect": 0.83, "area_pct": 1.3}
+    look = {"samples": [{"t": 4.0, "lines": [["BUSINESS OR KIDS?", [0.1, 0.2, 0.8, 0.05], False]]}]}
+    assert text_crossing([0.07, 0.18, 0.14, 0.09], 3.8, 4.8, look) == 1
+    assert guess_kind({**corner, "text_crossing": 1}, None) != "logo"
+
 
 def demo():
     """6 s, 360 x 640, 30 fps, a still textured room. A white card with grey lines slides up
@@ -952,6 +1167,13 @@ def demo():
         assert max(map(max, grid)) == 100 and len(grid) == GRID[0]
         line = summary_line(s, "style.json")   # measure prints one line, not the JSON block
         assert "\n" not in line and "{" not in line and len(line) < 300 and "slide/" in line, line
+    demo_kinds()
+    demo_moving()
+    # style-edit's split layout when the graphics own the top panel and the speaker sits below it
+    top = {"zones_pct": {"top": 82, "middle": 10, "bottom": 0, "full": 8}, "median_box": [8, 9, 84, 33], "covers_face_pct": 0}
+    assert split_layout(top, {"y_pct": 71}, True) == {"mode": "split", "seam": 44, "source": "graphics.py"}
+    assert split_layout(top, {"y_pct": 38}, True) is None and split_layout(top, {"y_pct": 71}, False) is None
+    assert split_layout({**top, "zones_pct": {"top": 30, "middle": 60, "bottom": 10, "full": 0}}, {"y_pct": 71}, True) is None
     print("ok")
 
 

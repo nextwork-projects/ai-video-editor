@@ -73,6 +73,7 @@ SCHEMA = {"type": "OBJECT", "properties": {
     "font_class": enum("geometric sans", "grotesk", "serif", "condensed", "handwritten", "mono",
                        "rounded", "no captions"),
     "closest_google_font": enum(*FONTS),
+    "font_confidence": enum("high", "medium", "low"),
     "weight_class": enum(*WEIGHT),
     "caption_case": enum("lower", "upper", "sentence"),
     "caption_animation": enum("pop", "word_highlight", "slide", "typewriter", "fade", "none"),
@@ -86,14 +87,15 @@ SCHEMA = {"type": "OBJECT", "properties": {
                         "social post", "stock video", "photo", "meme", "news clip", "green screen",
                         "animation", "none"),
     "not_generic": {"type": "ARRAY", "items": {"type": "STRING"}},
-}, "required": ["font_class", "closest_google_font", "weight_class", "caption_case",
+}, "required": ["font_class", "closest_google_font", "font_confidence", "weight_class", "caption_case",
                 "caption_animation", "graphics_style", "motion_personality", "transitions",
                 "broll_types", "not_generic"]}
 
 PROMPT = """You are describing the editing look of a short-form video so another editor can copy it.
 Judge only what is on screen. Captions are the words burned in that follow the speech.
 - font_class, closest_google_font, weight_class, caption_case, caption_animation: the captions.
-  closest_google_font is the nearest free font in the list, by letter shapes.
+  closest_google_font is the nearest free font in the list, by letter shapes. font_confidence: high only
+  when the letter shapes (a, g, t, R) clearly match that font, low when it is a generic sans guess.
 - graphics_style: every kind of visual laid over or cut in, besides the speaker.
 - motion_personality: snappy (fast, instant), smooth (eased, gliding), punchy (hard hits, zooms
   on beats), calm (few cuts, long holds).
@@ -190,6 +192,13 @@ def merge_rows(rows, source):
                 seen.add(x.lower())
                 ng.append(x)
     look["not_generic"] = ng[:6]
+    # The font is a guess by eye. It counts as measured only when 3+ videos agree on it (75%) and most of
+    # those say high confidence; report.py words a font tell as a guess otherwise.
+    font = look["closest_google_font"]
+    agree = [r for r in rows if r.get("closest_google_font") == font]
+    look["font_votes"] = len(agree)
+    look["font_confident"] = bool(font) and n >= 3 and len(agree) >= 0.75 * n and \
+        sum(r.get("font_confidence") == "high" for r in agree) > len(agree) / 2
     return look
 
 
@@ -220,8 +229,9 @@ KINDS_PROMPT = """Each image is a crop a detector flagged as a graphic laid over
 in order from 0. Many are false alarms: a patch of the camera shot itself. Name its kind:
 - real screenshot: a still capture of a real web page, post, app, document or table
 - UI recording: a moving screen recording of an app or site
-- logo: a brand or product logo on its own
-- text card: words set on a plain ground by the editor (a title, a list, a quote)
+- logo: a brand, product or app logo or app icon on its own, usually small and near-square (an app icon is a
+  rounded square of a few flat colours); a name under it does not make it a text card
+- text card: words set on a plain ground by the editor (a title, a list, a quote), mostly words
 - photo: a real photograph
 - meme: a reaction image or meme template
 - chart: a graph or data chart
@@ -230,6 +240,8 @@ in order from 0. Many are false alarms: a patch of the camera shot itself. Name 
 - part of the set: not a graphic at all, a piece of the main camera shot: the room, ceiling, sky, trees,
   furniture, props, the speaker or other people in the scene, their body or hands. When unsure between
   this and b-roll, pick this.
+Each image's label gives its size on the video: a crop is enlarged to the same size here, so a small
+near-square on screen is likely a logo, a wide one a card or page.
 what: under 8 words, what it shows ("Reddit post about ad copy", "Claude pricing table")."""
 
 
@@ -243,10 +255,18 @@ def image_part(path):
     return {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}}
 
 
-def kinds_body(paths):
+def size_label(g, width, height):
+    """"on screen 9% x 5% of a 1080 x 1920 frame, near-square": what a crop enlarged for the model hides."""
+    x, y, w, h = g["box"]
+    ar = w * width / max(1e-6, h * height)
+    shape = "near-square" if 0.75 <= ar <= 1.33 else "wide" if ar > 1.33 else "tall"
+    return f"on screen {round(100 * w)}% x {round(100 * h)}% of a {width} x {height} frame, {shape}"
+
+
+def kinds_body(paths, labels=None):
     parts = []
     for i, p in enumerate(paths):
-        parts += [{"text": f"image {i}"}, image_part(p)]
+        parts += [{"text": f"image {i}" + (f" ({labels[i]})" if labels and labels[i] else "")}, image_part(p)]
     return {"contents": [{"parts": parts + [{"text": KINDS_PROMPT}]}],
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json",
                                  "responseSchema": KINDS_SCHEMA, "mediaResolution": "MEDIA_RESOLUTION_LOW"}}
@@ -268,7 +288,9 @@ def cmd_kinds(a):
     total = 0
     for k in range(0, len(todo), 12):
         batch = todo[k:k + 12]
-        resp, model = call(key, kinds_body([outdir / g["crop"] for _, g in batch]))
+        resp, model = call(key, kinds_body([outdir / g["crop"] for _, g in batch],
+                                           [size_label(g, docs[f].get("width") or 1080, docs[f].get("height") or 1920)
+                                            if g.get("box") else None for f, g in batch]))
         got, tokens = parse(resp)
         total += tokens
         for it in got.get("items", []):
@@ -381,6 +403,13 @@ def demo():
     r3 = dict(r1, graphics_style=["memes"])
     look = merge_rows([r1, r2, r3], MODEL)
     assert look["closest_google_font"] == "TikTok Sans" and look["graphics_style"] == ["real screenshots"]
+    # a font counts as measured only when 3+ videos agree (75%) and most say high confidence
+    assert look["font_votes"] == 2 and look["videos"] == 3 and look["font_confident"] is False, look
+    sure = merge_rows([dict(r1, font_confidence="high")] * 3 + [dict(r1, closest_google_font="Inter")], MODEL)
+    assert sure["font_votes"] == 3 and sure["font_confident"] is True, sure
+    unsure = merge_rows([dict(r1, font_confidence="low")] * 4, MODEL)
+    assert unsure["font_confident"] is False, unsure
+    assert "font_confidence" in SCHEMA["required"]
     assert look["not_generic"] == ["white one-word captions low on the chest", "screenshots slide up"]
     style = apply({"captions": {"present": True, "weight": 600, "size_pct": 4.4}}, look)
     c = style["captions"]
@@ -394,6 +423,11 @@ def demo():
         kb = kinds_body([p, p])
         parts = kb["contents"][0]["parts"]
         assert parts[0] == {"text": "image 0"} and parts[1]["inlineData"]["mimeType"] == "image/jpeg"
+        # the model sees how big the crop was on screen: an app icon is small and near-square
+        lab = size_label({"box": [0.4, 0.3, 0.12, 0.068]}, 1080, 1920)
+        assert lab == "on screen 12% x 7% of a 1080 x 1920 frame, near-square", lab
+        assert kinds_body([p], [lab])["contents"][0]["parts"][0]["text"] == f"image 0 ({lab})"
+        assert "app icon" in KINDS_PROMPT and "near-square" in KINDS_PROMPT
         assert len(parts) == 5 and KIND_SET in json.dumps(kb["generationConfig"]["responseSchema"])
     print("ok")
 

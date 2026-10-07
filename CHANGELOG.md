@@ -4,6 +4,36 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- creator-teardown did not measure how a caption's words change as they are said (`highlight None` on a
+  grey-to-dark karaoke). look.py now reads every source frame inside the caption box of up to 8 captions a
+  video, times each word from the transcript, and names the style from what a word looks like before it is
+  said: `reveal`, `karaoke`, `highlight`, `pill`, `none`, with how far the change lands from the word. It
+  writes `captions.effect` in style-edit's names (karaoke + `inactive_opacity`, reveal, word_highlight for a
+  box behind the word; a said word that only changes colour keeps the entrance and its `highlight_color`)
+  and `captions.shadow`. A moving yellow word used to become `word_highlight`, which style-edit draws as a
+  box. A highlight colour that never follows the words is now `emphasis_color`: on a real talking-head
+  creator (5 videos, frames checked) the old style.json would have turned every said word yellow; the
+  frames show whole captions with one static yellow keyword. Test: `look.py demo` (five fixture clips, one
+  per style, the timing within 0.1 s).
+- App icons were labelled "text card". A small, near-square graphic of 8 colours or fewer with a line of
+  text at most (none running out of it) is now a logo in the code's guess, and the Gemini kinds pass gets
+  each crop's size and shape on screen. A real red title banner stays a text card. Test: `graphics.py demo`,
+  `gemini.py demo`.
+- On creators with no steady speaker or plate (vlogs, walks, b-roll) the graphics detector called the
+  moving footage a graphic and missed the real ones. graphics.py now switches to an overlay mode there: what
+  holds still while the footage moves, rectangular and not flat, with text or a hard edge. Hand-labelled
+  fixture (3 graphics, a still sky and a moving ball over a panning 3-shot clip): precision / recall 0.00 /
+  0.00 before, 1.00 / 1.00 after. Test: `graphics.py demo`.
+- The AI-tell scan raised a font BAN ("Inter") from Gemini's closest-font guess on one look. Gemini now
+  rates its confidence; a font tell stays a BAN only when 3+ videos agree (75%) and most rate it high,
+  otherwise it is a WARN worded as a guess with the vote count, and look.md marks the font as a guess. Test:
+  `report.py demo`, `gemini.py demo`, `look.py demo`.
+- The teardown wrote no top-level `transitions` or `layout`, so style-edit used its defaults. visual.py
+  writes `transitions` from the creator's transition cuts (whip, match, mask, dissolve as push, match,
+  wipe, fade; absent when they only cut) and graphics.py writes `layout` `{"mode": "split", "seam"}` when
+  the graphics own the top panel over a speaker below it. `editplan.py blend` carries them with pace and
+  layout. Colour already reaches style-edit through `graphics.palette`. Test: `visual.py demo`,
+  `graphics.py demo`, `editplan.py demo`.
 - ai-editor ran its independent work one item at a time. Measured on a 14-core Mac, before -> after, same
   inputs: style-edit `capture.mjs` (6 page captures, 3 logos, a repo card, a YouTube thumbnail) 28.5 s -> 8.9 s;
   product-video `crawl.mjs` on a public site (home page and 17 inner pages) 150.5 s -> 48.1 s; `record.mjs

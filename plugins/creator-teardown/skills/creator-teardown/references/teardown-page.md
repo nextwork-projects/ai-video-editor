@@ -35,9 +35,19 @@ else `cut`. A grid search fits start, duration and ease family to the progress c
 Exits: the same fit on the reversed clip, `.in` names. While up: `video` (the picture inside
 changes), `push` (the box grows), `drift` (the box moves), `still`.
 
-**Kinds.** Code guesses first (moving: b-roll or a UI recording; 4+ OCR lines: a screenshot;
-text on a flat ground: a text card). `gemini.py kinds` replaces the guess and drops crops it
-calls `part of the set`. Without a key: one Agent call, `model: "haiku"`, reads the crops in
+**Moving footage.** When the speaker is on screen under half the time and under half the samples fit
+their plate (a vlog, a walk, b-roll), `graphics.json` says `"mode": "overlay"` and a graphic is what holds
+still for +-0.4 s while most of the frame changes (a cut or the camera moving under it), rectangular
+and not flat (a still sky is not one), grown over the samples where the footage stood still, with text
+in it or a hard rectangular edge, and up for under 60% of the video. Fixture (`graphics.py demo`, a
+panning 3-shot clip with a card, an app tile, a screenshot, a still sky and a moving ball): precision
+and recall 0.00 / 0.00 in plate mode, 1.00 / 1.00 in overlay mode. No entrance or exit fit there yet.
+
+**Kinds.** Code guesses first (moving: b-roll or a UI recording; small, near-square, 8 colours or
+fewer, a line of text at most and none running out of it: a logo; 4+ OCR lines: a screenshot; text
+on a flat ground: a text card). `gemini.py kinds` replaces the guess and drops crops it calls
+`part of the set`; each crop goes with its size on screen ("9% x 5% of a 1080 x 1920 frame,
+near-square"), which the enlarged crop hides. Without a key: one Agent call, `model: "haiku"`, reads the crops in
 `graphics/` and writes `kind` and `what` into each `video/<id>.graphics.json`, then
 `graphics.py merge <handle>`.
 
@@ -81,6 +91,9 @@ printed next to every number.
 `report.py` loads ai-editor's `ai_tells.py` (this repo, `AI_EDITOR_STYLE_SCRIPTS`, or an
 installed plugin) and runs `check_look` on the creator's measured font and the graphics'
 own colours, `check_plan` on their caption style, and `check_still` on every text card crop.
+The font is Gemini's closest match by eye. A font tell stays a BAN only when 3+ videos name the
+same font (75%) and most of them say `font_confidence: high` (`look.font_confident`); otherwise it
+is a WARN that says it is a guess and how many videos agree.
 Real screenshots are skipped: a capture is the real page. Without ai-editor installed the
 page says so.
 

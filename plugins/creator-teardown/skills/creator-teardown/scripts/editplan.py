@@ -174,7 +174,7 @@ def render(plan_path):
 
 
 # camera goes with pace and hook with visuals, as style-edit reads them (took "pace" / "graphics")
-PARTS = {"captions": ["captions"], "pace": ["pace", "zoom", "camera", "motion"],
+PARTS = {"captions": ["captions"], "pace": ["pace", "zoom", "camera", "motion", "transitions"],
          "visuals": ["graphics", "face", "look", "cats", "per_min", "first_in_s", "gap_s", "events",
                      "layout", "hook"],
          "sound": ["sound"]}
@@ -228,13 +228,13 @@ def blend(styles, weights, owners):
 # What each box on the teardown page (and the question in SKILL.md) copies: top-level keys,
 # or "graphics.<key>" for one part of the graphics block.
 TAKE = {"captions": ["captions"],
-        "pace": ["pace", "zoom", "camera", "motion"],
+        "pace": ["pace", "zoom", "camera", "motion", "transitions"],
         "graphics": ["graphics.kinds", "graphics.kinds_source", "graphics.per_min", "graphics.share_pct",
                      "graphics.hold_s", "graphics.palette", "graphics.crop_palette", "graphics.per_min_measured",
                      "graphics.hold_s_measured", "graphics.measured", "graphics.blur_behind_pct", "cats", "events",
                      "per_min", "first_in_s", "gap_s"],
         "entrances": ["graphics.entrances", "graphics.exits", "graphics.secondary_motion", "graphics.ease_in_s"],
-        "layout": ["graphics.layout", "face"],
+        "layout": ["graphics.layout", "face", "layout"],
         "sound": ["sound"]}
 
 
@@ -327,6 +327,12 @@ def demo():
                  ["captions", "entrances"])
         assert set(t) == {"captions", "graphics", "sfx", "blend"} and set(t["graphics"]) == {"entrances"}, t
         assert t["sfx"] is True and t["blend"]["take"] == ["captions", "entrances"]
+        # top-level transitions go with pace, the split layout with layout
+        t = take({"pace": {}, "transitions": ["push"], "layout": {"mode": "split"}, "graphics": {}}, ["captions"])
+        assert "transitions" not in t and "layout" not in t, t
+        t = take({"pace": {}, "transitions": ["push"], "layout": {"mode": "split"}, "graphics": {}}, ["pace", "layout"])
+        assert t["transitions"] == ["push"] and t["layout"] == {"mode": "split"}, t
+        assert "transitions" in PARTS["pace"] and "layout" in PARTS["visuals"]
         args = argparse.Namespace(name="mix", sources="@A,b", weights="a=2", captions="b",
                                   pace=None, visuals=None, sound=None, take=None)
         out = cmd_blend(args, Path(d))

@@ -474,6 +474,11 @@ def cmd_measure(a):
     })
     ck = Counter(k for r in rows for k in r.get("cut_kinds", []))
     style["pace"]["cut_kinds"] = {k: round(100 * v / sum(ck.values())) for k, v in ck.most_common()} if ck else {}
+    tr = transitions_of(style["pace"]["cut_kinds"])
+    if tr:
+        style["transitions"] = tr
+    else:
+        style.pop("transitions", None)
     eases = Counter(z.get("ease") for r in rows for z in r["zooms"] if z["kind"] == style["zoom"].get("kind"))
     style["zoom"]["ease"] = eases.most_common(1)[0][0] if eases else None
     style_path.write_text(json.dumps(style, indent=2))
@@ -483,6 +488,17 @@ def cmd_measure(a):
     if not sp:
         print("no transcripts yet: wpm and max_pause_s are empty. Transcribe, then rerun.",
               file=sys.stderr)
+
+
+# A cut kind -> style-edit's scene transition (Scene.tsx). Hard, jump and zoom-punch cuts have none.
+TRANSITION = {"whip": "push", "match": "match", "mask": "wipe", "dissolve": "fade"}
+
+
+def transitions_of(cut_kinds):
+    """style.json "transitions", the list style-edit cycles through its scene cards: the creator's
+    own transition cuts (5% of cuts or more), most used first. Empty: they only cut."""
+    return [TRANSITION[k] for k, v in sorted((cut_kinds or {}).items(), key=lambda kv: -kv[1])
+            if k in TRANSITION and v >= 5]
 
 
 def summary_line(style, path):
@@ -557,6 +573,9 @@ def demo():
     line = summary_line({"pace": {"wpm": 180, "cuts_per_10s": 2.1, "median_shot_s": 3.4},
                          "zoom": {"kind": "punch", "per_min": 6.0}, "camera": {"pan_per_min": 0.5}}, "style.json")
     assert "\n" not in line and "{" not in line and "punch 6.0/min" in line, line   # measure prints one line
+    # style-edit's scene transitions, from the cut kinds the creator uses (a hard cut has none)
+    assert transitions_of({"hard": 60, "whip": 25, "dissolve": 10, "mask": 3, "jump": 2}) == ["push", "fade"]
+    assert transitions_of({"hard": 90, "match": 10}) == ["match"] and transitions_of({"hard": 100}) == []
     print("ok")
 
 

@@ -398,6 +398,7 @@ def caption_colours(crops, long_side, k=6):
     moving = sum(1 for (s1, t1, c1), (s2, t2, c2) in zip(cx, cx[1:])
                  if s2 == s1 + 1 and t1 == t2 and len(t1.split()) > 1 and abs(c2 - c1) > 0.15)
     return {
+        "shadow": shadow_of(crops, labs, regs, fill) if stroke is None and box is None and luma(fill) > 150 else None,
         "color": hexc(cen[fill]),
         "stroke": stroke is not None,
         "stroke_color": hexc(cen[stroke]) if stroke is not None else None,
@@ -408,6 +409,25 @@ def caption_colours(crops, long_side, k=6):
         "stem_ratio": round(statistics.median(ratios), 3) if ratios else None,
         "size_pct": round(100 * statistics.median(ems) / long_side, 2) if ems else None,
     }
+
+
+def shadow_of(crops, labs, regs, fill):
+    """A soft drop shadow under light text: the ring just outside the letters (past their
+    anti-aliased edge) is darker than the ring a little further out, caption after caption."""
+    import cv2
+    diffs = []
+    for (rgb, core_box, _, h, _), lab, (c, _, _) in zip(crops, labs, regs):
+        fm = ((lab == fill) & c).astype(np.uint8)
+        if fm.sum() < 20:
+            continue
+        r1, r2, r3 = 1, max(3, round(0.18 * h)), max(5, round(0.32 * h))
+        k = np.ones((3, 3), np.uint8)
+        d1, d2, d3 = (cv2.dilate(fm, k, iterations=r) > 0 for r in (r1, r2, r3))
+        lum = rgb.astype(np.float32) @ LUMA
+        near, far = d2 & ~d1, d3 & ~d2
+        if near.sum() > 20 and far.sum() > 20:
+            diffs.append(float(np.median(lum[far]) - np.median(lum[near])))
+    return bool(statistics.median(diffs) > 12) if diffs else None
 
 
 def entrance(path, src_fps, W, H, t0, t1, core, fill_rgb):
@@ -462,6 +482,226 @@ def ease_in(path, W, H, t0, t1, skip_rows):
     if a is None or s is None:
         return None
     return s - a + 1
+
+
+# ---------- the word inside a caption ----------
+
+def caption_runs(samples, caps):
+    """One caption's life from the 3-a-second samples: consecutive one-line samples whose text is
+    the same or grows word by word (a reveal reads "ship", then "ship this"). (first sample,
+    last sample, the fullest text, its box)."""
+    runs = []
+    for i, b in caps:
+        if len(b) != 1:   # ponytail: one-line captions only; split a block into lines if two-line karaoke shows up
+            continue
+        toks = [norm(w) for w in b[0]["text"].split()]
+        r = runs[-1] if runs else None
+        if r and i == r["last"] + 1:
+            a, z = (toks, r["toks"]) if len(toks) <= len(r["toks"]) else (r["toks"], toks)
+            if z[:len(a)] == a:
+                r["last"] = i
+                if len(toks) >= len(r["toks"]):
+                    r.update(toks=toks, text=b[0]["text"], box=b[0]["box"])
+                continue
+        runs.append({"first": i, "last": i, "toks": toks, "text": b[0]["text"], "box": b[0]["box"]})
+    return [r for r in runs if len(r["toks"]) >= 2]
+
+
+def word_times(toks, words, t0, t1):
+    """Start of each caption word from the transcript, in order, near the caption's samples.
+    None when under 2 words match (an untimed caption gets even spacing from the caller)."""
+    out, after = [], t0 - 1.0
+    for tk in toks:
+        hit = next((s for w, s in words if after - 0.05 <= s <= t1 + 0.5 and
+                    (w == tk or difflib.SequenceMatcher(None, w, tk).ratio() >= 0.75)), None)
+        out.append(hit)
+        if hit is not None:
+            after = hit
+    return out if sum(s is not None for s in out) >= 2 else None
+
+
+LUMA = np.array([0.299, 0.587, 0.114], np.float32)
+
+
+def word_effect(path, W, H, run, samples, words, fps=SAMPLE_FPS):
+    """How each word of one caption changes while it is up, from every source frame inside
+    the caption box, timed against the transcript: what a word looks like after the
+    caption appears but before it is said decides the style.
+      gone before its word, there after       reveal
+      a dimmer or other colour before          karaoke (said words fill in)
+      the rest colour before, another while said, the rest colour after   highlight (pill
+          when the colour fills the word's box rather than its letters)
+      the rest colour throughout               none
+    -> {"effect", "timing_err_s", "active", "dim"} or None."""
+    toks = run["toks"]
+    n = len(toks)
+    first_t, last_t = samples[run["first"]]["t"], samples[run["last"]]["t"]
+    st = word_times(toks, words, first_t, last_t) if words else None
+    timed = st is not None
+    if timed:   # a word the transcript missed sits halfway between its neighbours
+        for k in range(n):
+            if st[k] is None:
+                lo = next((st[j] for j in range(k - 1, -1, -1) if st[j] is not None), first_t - 0.5 / fps)
+                hi = next((st[j] for j in range(k + 1, n) if st[j] is not None), last_t)
+                st[k] = (lo + hi) / 2
+    else:
+        st = list(np.linspace(first_t - 0.5 / fps, last_t, n, endpoint=False))
+    # From the first word to just before the sample after this caption's last one.
+    ws, we = max(0.0, min(st[0], first_t) - 0.05), last_t + 1 / fps - 0.02
+    x, y, bw, bh = run["box"]
+    hpx = bh * H
+    X0, X1 = max(0, int(x * W - 0.3 * hpx)), min(W, int((x + bw) * W + 0.3 * hpx))
+    Y0, Y1 = max(0, int(y * H - 0.15 * hpx)), min(H, int((y + bh) * H + 0.15 * hpx))
+    frames = [f[Y0:Y1, X0:X1].astype(np.float32) for f in decode(path, W, H, None, ws, we - ws)]
+    if len(frames) < 6 or X1 - X0 < 8:
+        return None
+    ts = ws + np.arange(len(frames)) * (we - ws) / len(frames)
+    # The last sample shows this caption; after it, stop where most of the box changes (the
+    # next caption), which one word changing colour never does.
+    li = int(np.abs(ts - last_t).argmin())
+    lum0 = frames[li] @ LUMA
+    end = next((i for i in range(li + 1, len(frames)) if np.abs(frames[i] @ LUMA - lum0).mean() > 20), len(frames))
+    frames, ts = frames[:end], ts[:end]
+    we = float(ts[-1]) + 0.01
+    import cv2
+    ref = frames[li]
+    lum = ref @ LUMA
+    # Ink: far from the box's usual brightness and next to a hard edge (letters are sharp; a
+    # bright patch of the wall behind is not).
+    edge = cv2.dilate((np.abs(cv2.Sobel(lum, cv2.CV_32F, 1, 0)) + np.abs(cv2.Sobel(lum, cv2.CV_32F, 0, 1)) > 200)
+                      .astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2) > 0
+    far = (np.abs(lum - np.median(lum)) > 40) & edge
+    # Word spans: split the box by letter count, each boundary moved to the emptiest column
+    # near it (the space between two words).
+    prof = np.convolve(far.sum(0).astype(np.float32), np.ones(3) / 3, "same")
+    chars = [len(t) + 1 for t in toks]
+    edges = np.cumsum([0] + chars) / sum(chars)
+    lo, hi = int(x * W) - X0, int((x + bw) * W) - X0
+    cut = [int(lo + (hi - lo) * e) for e in edges]
+    r = max(2, int(0.5 * hpx))
+    for j in range(1, n):
+        a0, a1 = max(cut[j - 1] + 1, cut[j] - r), min(cut[j + 1] - 1, cut[j] + r)
+        if a1 > a0:
+            w = prof[a0:a1]
+            best = np.nonzero(w == w.min())[0]
+            cut[j] = a0 + int(best[np.abs(best + a0 - cut[j]).argmin()])
+    segs = [(max(0, a), max(a + 1, b)) for a, b in zip(cut, cut[1:])]
+    spans = []
+    for a, b in segs:
+        g = far[:, a:b]
+        if g.sum() < 10:
+            return None
+        # The word's own ink colour. Ink in two tones splits by brightness: a tone wrapped in the
+        # other is the letters inside an outline or box; else the tone farthest from the
+        # box's usual brightness (the bright patches of a wall next to the letters are not).
+        lm = ref[:, a:b] @ LUMA
+        thr = (lm[g].min() + lm[g].max()) / 2
+        hi, lo = g & (lm >= thr), g & (lm < thr)
+        if min(hi.sum(), lo.sum()) >= 0.15 * g.sum() and lm[hi].mean() - lm[lo].mean() > 80:
+            k3 = np.ones((3, 3), np.uint8)
+
+            def wrapped(m, other):
+                ring = (cv2.dilate(m.astype(np.uint8), k3, iterations=2) > 0) & ~m
+                return (ring & other).sum() / max(1, ring.sum())
+            if wrapped(hi, lo) > 0.5:
+                g = hi
+            elif wrapped(lo, hi) > 0.5:
+                g = lo
+            else:
+                g = hi if lm[hi].mean() - np.median(lum) > np.median(lum) - lm[lo].mean() else lo
+        dom = np.median(ref[:, a:b][g], 0)
+        g = g & (np.linalg.norm(ref[:, a:b] - dom, axis=-1) < 50)
+        spans.append((a, b, g if g.sum() >= 10 else far[:, a:b]))
+
+    def look_at(f, k):
+        """(ink colour, contrast with what is round it, colour round it) of word k in frame f."""
+        a, b, g = spans[k]
+        p = f[:, a:b]
+        ink, rest = np.median(p[g], 0), np.median(p[~g], 0) if (~g).any() else np.median(p[g], 0)
+        return ink, abs(float(ink @ LUMA - rest @ LUMA)), rest
+    L = [[look_at(f, k) for k in range(n)] for f in frames]
+    R = L[li][0][0]                       # word 0 at the end: said in every style, so the rest colour
+    final_con = [max(L[li][k][1], 1.0) for k in range(n)]
+    dist = lambda u, v: float(np.linalg.norm(u - v))   # noqa: E731
+
+    def state(i, k):
+        ink, con, _ = L[i][k]
+        if con < max(10.0, 0.15 * final_con[k]):
+            return "gone"
+        return "rest" if dist(ink, R) < 40 else "other"
+
+    votes, errs, act, dims, boxes = [], [], [], [], []
+    # The last word of 3+ is left out: it is never followed inside the caption, and in the
+    # last frame (where its ink is read) a highlight still sits on it.
+    for k in range(1, n if n < 3 else n - 1):
+        # before its word, once the caption is surely up (the transcript can put word 0 before
+        # the caption lands, and the frames before it show the last caption)
+        before = [i for i, t in enumerate(ts) if max(st[0] + 0.1, first_t) <= t <= st[k] - 0.08]
+        nxt = st[k + 1] if k + 1 < n else we
+        during = [i for i, t in enumerate(ts) if st[k] + 0.08 <= t <= nxt - 0.05]
+        if len(before) < 2 or len(during) < 2:
+            continue
+        b = Counter(state(i, k) for i in before).most_common(1)[0][0]
+        d = Counter(state(i, k) for i in during).most_common(1)[0][0]
+        if b in ("gone", "other"):
+            kind = "reveal" if b == "gone" else "karaoke"
+            if kind == "karaoke":   # unsaid ink over its ground, as an opacity of the said ink over it
+                ib, cb, gb = L[before[len(before) // 2]][k]
+                ia, ca, ga = L[during[-1]][k]
+                if ca > 1:
+                    dims.append(float(np.clip((ib - gb) @ LUMA / ((ia - ga) @ LUMA), 0, 1)))
+            onset = next((ts[i] for i in range(before[0], len(ts)) if state(i, k) != b), None)
+        elif d == "other":
+            kind = "highlight"
+            act.append(np.median([L[i][k][0] for i in during], 0))
+            # pill: the colour round the letters changes too (a box behind the said word)
+            gd = np.median([L[i][k][2] for i in during], 0)
+            gb = np.median([L[i][k][2] for i in before], 0)
+            boxes.append(gd if dist(gd, gb) > 60 else None)
+            onset = next((ts[i] for i in range(before[0], len(ts)) if state(i, k) == "other"), None)
+        else:
+            kind, onset = "none", None
+        votes.append(kind)
+        if onset is not None:
+            errs.append(abs(onset - st[k]))
+    if not votes:
+        return None
+    top, c = Counter(votes).most_common(1)[0]
+    if c < 0.6 * len(votes):
+        return None
+    err = round(float(np.median(errs)), 3) if errs else (0.0 if top == "none" else None)
+    if timed and top != "none" and (err is None or err > 0.35):
+        return None     # it changes, but not on the words: not a word-timed style
+    out = {"effect": top, "timing_err_s": err if timed else None}
+    if top == "highlight":
+        pills = [p for p in boxes if p is not None]
+        if len(pills) > len(boxes) / 2:
+            out.update(effect="pill", active=hexc(np.median(pills, 0)))
+        elif act:
+            out["active"] = hexc(np.median(act, 0))
+    if top == "karaoke" and dims:
+        out["dim"] = round(float(np.median(dims)), 2)
+    return out
+
+
+def word_effects(path, W, H, samples, caps, words, fps=SAMPLE_FPS):
+    """The word style over up to 8 captions spread over the video: the one most captions show
+    (at least half of those read), with its timing error, active colour and dim opacity."""
+    runs = [r for r in caption_runs(samples, caps) if samples[r["last"]]["t"] - samples[r["first"]]["t"] >= 0.3]
+    rs = [x for x in (word_effect(path, W, H, r, samples, words, fps) for r in runs[::max(1, len(runs) // 8)][:8]) if x]
+    if not rs:
+        return {}
+    top, c = Counter(r["effect"] for r in rs).most_common(1)[0]
+    if c < len(rs) / 2:
+        return {}
+    pick = [r for r in rs if r["effect"] == top]
+    errs = [r["timing_err_s"] for r in pick if r.get("timing_err_s") is not None]
+    out = {"word_effect": top, "word_effect_n": len(rs),
+           "timing_err_s": round(statistics.median(errs), 3) if errs else None,
+           "active_color": mode(r.get("active") for r in pick)}
+    dims = [r["dim"] for r in pick if r.get("dim") is not None]
+    out["inactive_opacity"] = 0 if top == "reveal" else round(statistics.median(dims), 2) if dims else None
+    return out
 
 
 # ---------- one video ----------
@@ -542,6 +782,7 @@ def measure_video(path, words, ocr=None, faces=None, engine="vision", fps=SAMPLE
                     frames.append(r[1])
             cap["entrance"] = Counter(kinds).most_common(1)[0][0] if kinds else None
             cap["ease_s"] = round(statistics.median(frames) / src_fps, 3) if frames else None
+        cap.update(word_effects(path, W, H, samples, caps, words, fps))
 
     # Face framing.
     fs = [s["face"] for s in samples if s["face"]]
@@ -629,6 +870,39 @@ def personality(cpm, ease, hold, punch_pm):
     return "snappy" if ease is not None and ease <= 0.1 else "smooth"
 
 
+def word_style(cs, cap):
+    """The measured word style in style-edit's caption vocabulary (Captions.tsx `effect`):
+    karaoke (unsaid words at `inactive_opacity`, the said word filling in `highlight_color`),
+    reveal (unsaid words hidden), word_highlight (a box of `highlight_color` behind the said
+    word). A said word that only changes colour keeps the entrance as its effect, with that
+    colour as `highlight_color` (every other effect colours the said word with it). No word
+    style measured: a highlight colour that does not follow the words is an emphasis colour."""
+    fx = [c for c in cs if c.get("word_effect")]
+    if len(fx) < len(cs) / 2 or not fx:
+        return {}
+    top = mode(c["word_effect"] for c in fx)
+    pick = [c for c in fx if c["word_effect"] == top]
+    if len(pick) < len(fx) / 2:
+        return {}
+    active = mode(c.get("active_color") for c in pick)
+    ent = cap.get("entrance") or "none"
+    out = {"word_effect": top, "timing_err_s": med([c.get("timing_err_s") for c in pick], 3)}
+    if top == "karaoke":
+        out.update(effect="karaoke", inactive_opacity=med([c.get("inactive_opacity") for c in pick]) or 0.35,
+                   highlight_color=active or cap.get("color"))
+    elif top == "reveal":
+        out.update(effect="reveal", inactive_opacity=0)
+    elif top == "pill":
+        out.update(effect="word_highlight", animation="word_highlight", highlight_color=active or cap.get("highlight_color"))
+    elif top == "highlight":
+        out.update(effect=ent, animation=ent, highlight_color=active or cap.get("highlight_color"))
+    else:
+        out.update(effect=ent, animation=ent)
+        if cap.get("highlight_color"):
+            out.update(emphasis_color=cap["highlight_color"], highlight_color=cap.get("color"))
+    return out
+
+
 def merge(rows, visuals, style):
     """Per-video look.json rows -> the style.json blocks (medians and majorities)."""
     cs = [r["captions"] for r in rows if r["captions"].get("present")]
@@ -662,8 +936,12 @@ def merge(rows, visuals, style):
                 "ease_s": med([c.get("ease_s") for c in cc], 3),
                 "animation": "word_highlight" if moves else (ent or "none"),
             })
+            shadows = [c["shadow"] for c in cc if c.get("shadow") is not None]
+            if shadows:
+                cap["shadow"] = mode(shadows)
             if weight:
                 cap["weight"] = weight
+        cap.update(word_style(cs, cap))
         cap["source"] = {**(cap.get("source") or {}), "numbers": "ocr"}
     fs = [r["face"] for r in rows]
     face = {"present_pct": med([f["present_pct"] for f in fs], 0),
@@ -722,10 +1000,19 @@ def summary(style, rows_n=None):
         L += [f"Captions: {c.get('words_per_caption')} word(s), {c.get('lines')} line(s), {c.get('case')} case, "
               f"centre at {c.get('y_pct')}% down, {c.get('x_pct')}% across.",
               f"  size {c.get('size_pct')}% of the long side, weight {c.get('weight')}, "
-              f"font {c.get('font_match') or 'not named (no look pass: gemini.py look or the sheet fallback names it)'}",
+              f"font {c.get('font_match') or 'not named (no look pass: gemini.py look or the sheet fallback names it)'}"
+              + (f" (a guess: {lk.get('font_votes')} of {lk.get('videos')} videos agree)" if c.get("font_match") and lk.get("font_votes")
+                 and not lk.get("font_confident") else ""),
               f"  fill {c.get('color')}, stroke {c.get('stroke_color') if c.get('stroke') else 'none'}, "
-              f"box {c.get('box_color') if c.get('box') else 'none'}, highlight {c.get('highlight_color')}",
-              f"  enters: {c.get('entrance')}, animation: {c.get('animation')}"]
+              f"box {c.get('box_color') if c.get('box') else 'none'}, highlight {c.get('highlight_color')}"
+              + (f", stressed words {c['emphasis_color']}" if c.get("emphasis_color") else ""),
+              f"  enters: {c.get('entrance')}, said word: "
+              + (f"{c['word_effect']} (on the word to {c['timing_err_s']} s)" if c.get("word_effect") not in (None, "none")
+                 and c.get("timing_err_s") is not None else "no change" if c.get("word_effect") == "none"
+                 else c.get("word_effect") or "not measured")
+              + f", effect {c.get('effect') or c.get('animation')}"
+              + (f", unsaid at {c['inactive_opacity']} opacity" if c.get("effect") == "karaoke" and c.get("inactive_opacity") is not None else "")
+              + (f", shadow {'yes' if c['shadow'] else 'none'}" if c.get("shadow") is not None else "")]
     else:
         L.append("Captions: not measured (no OCR engine). Run the fallback sheet pass.")
     L.append("")
@@ -753,6 +1040,10 @@ def summary(style, rows_n=None):
     if cam:
         L.append(f"Camera: {cam.get('pan_per_min')} pans, {cam.get('push_per_min')} pushes a minute; "
                  f"cuts {pct((style.get('pace') or {}).get('cut_kinds'))}")
+    if cam or style.get("layout"):
+        lay = style.get("layout") or {}
+        L.append("For the edit: scene transitions " + (", ".join(style.get("transitions") or []) or "none (they only cut)")
+                 + ("; split layout, seam at " + str(lay.get("seam")) + "%" if lay.get("mode") == "split" else "; graphics over the footage"))
     win = style.get("winners") or {}
     for line in (win.get("differs") or [])[:4]:
         L.append("Winners: " + line)
@@ -817,6 +1108,98 @@ def cmd_measure(a):
 
 # ---------- self-check ----------
 
+FIX_WORDS = ["ship", "this", "today", "build", "real", "tools", "every", "single", "day", "with", "your", "team"]
+
+
+def caption_clip(kind, mp4, W=540, H=960, FPS=30):
+    """A 4.8 s fixture: four 3-word captions, one word every 0.4 s, centred at 65% down, drawn
+    in one of the word styles: karaoke (unsaid grey, said near-black, on a light wall), reveal
+    (each word appears on its word), pill (a yellow box behind the said word), highlight (the
+    said word yellow, with a soft drop shadow), static (white, nothing moves). Returns
+    (spoken words [(norm, start)], {frame: [(visible text, box)]} for a stand-in OCR)."""
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    SIZE = 48
+    font = ImageFont.load_default(size=SIZE)
+    rng = np.random.default_rng(3)
+    lo, span = (185, 50) if kind == "karaoke" else (40, 150)
+    bg = Image.fromarray((rng.random((H // 24, W // 24, 3)) * span + lo).astype(np.uint8)).resize((W, H), Image.BICUBIC)
+    starts = [round(0.4 * k, 2) for k in range(12)]
+    drawn = {}
+
+    def frame(i):
+        t = i / FPS
+        c = min(3, int(t / 1.2))
+        ws = FIX_WORDS[3 * c:3 * c + 3]
+        st = starts[3 * c:3 * c + 3]
+        said = [t >= s for s in st]
+        active = max(k for k in range(3) if said[k])
+        im = bg.copy()
+        d = ImageDraw.Draw(im)
+        full = " ".join(ws)
+        x0, y0, x1, y1 = d.textbbox((0, 0), full, font=font)
+        X, Y = (W - (x1 - x0)) / 2 - x0, 0.65 * H - (y1 + y0) / 2
+        xs = [X + d.textlength(" ".join(ws[:k]) + (" " if k else ""), font=font) for k in range(3)]
+        if kind == "highlight":   # soft shadow under the whole line
+            m = Image.new("L", (W, H), 0)
+            ImageDraw.Draw(m).text((X, Y + 3), full, font=font, fill=255)
+            im.paste((0, 0, 0), (0, 0), m.filter(ImageFilter.GaussianBlur(4)).point(lambda v: int(v * 0.6)))
+        vis = []
+        for k, w in enumerate(ws):
+            fill, sw = (255, 255, 255), 0
+            if kind == "karaoke":
+                fill = (20, 20, 20) if said[k] else (154, 154, 154)
+            elif kind == "reveal":
+                if not said[k]:
+                    continue
+                sw = 3
+            elif kind == "pill" and k == active:
+                b = d.textbbox((xs[k], Y), w, font=font)
+                d.rounded_rectangle((b[0] - 6, b[1] - 6, b[2] + 6, b[3] + 6), radius=8, fill=(255, 214, 10))
+                fill = (17, 17, 17)
+            elif kind == "highlight" and k == active:
+                fill = (255, 225, 60)
+            d.text((xs[k], Y), w, font=font, fill=fill, stroke_width=sw, stroke_fill="black")
+            vis.append(k)
+        b0 = d.textbbox((xs[vis[0]], Y), ws[vis[0]], font=font)
+        b1 = d.textbbox((xs[vis[-1]], Y), ws[vis[-1]], font=font)
+        drawn[i] = [(" ".join(ws[k] for k in vis), [b0[0] / W, b0[1] / H, (b1[2] - b0[0]) / W, (b1[3] - b0[1]) / H])]
+        return np.asarray(im)
+
+    raw = b"".join(frame(i).tobytes() for i in range(int(4.8 * FPS)))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+                    "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "16", str(mp4)], input=raw, check=True)
+    return [(norm(w), s) for w, s in zip(FIX_WORDS, starts)], drawn
+
+
+def demo_word_effects():
+    """The word styles from consecutive frames, timed against the transcript, into style-edit's
+    vocabulary. The stand-in OCR knows where each frame's text was drawn."""
+    want = {"karaoke": "karaoke", "reveal": "reveal", "pill": "pill", "highlight": "highlight", "static": "none"}
+    with tempfile.TemporaryDirectory() as tmp:
+        for kind, label in want.items():
+            mp4 = Path(tmp) / f"{kind}.mp4"
+            words, drawn = caption_clip(kind, mp4)
+            ocr = lambda f, t, drawn=drawn: drawn[min(round(t * 30), len(drawn) - 1)]   # noqa: E731
+            r = measure_video(mp4, words, ocr, None, "fake", SAMPLE_FPS)
+            c = r["captions"]
+            print(f"  {kind}: word effect {c.get('word_effect')}, err {c.get('timing_err_s')} s, "
+                  f"active {c.get('active_color')}, dim {c.get('inactive_opacity')}, shadow {c.get('shadow')}")
+            assert c.get("word_effect") == label, (kind, c)
+            assert c["timing_err_s"] is not None and c["timing_err_s"] <= 0.1, (kind, c)
+            cap = merge([r], [], {})["captions"]
+            if kind == "karaoke":
+                assert cap["effect"] == "karaoke" and 0.15 <= cap["inactive_opacity"] <= 0.5, cap
+            elif kind == "reveal":
+                assert cap["effect"] == "reveal" and cap["inactive_opacity"] == 0, cap
+            elif kind == "pill":
+                assert cap["effect"] == "word_highlight" and cap["highlight_color"][1:3] > "E0", cap
+            elif kind == "highlight":   # a coloured said word: the entrance plays, the said word in its colour
+                assert cap["effect"] not in ("karaoke", "reveal", "word_highlight") and cap["highlight_color"][5:7] < "90", cap
+                assert cap["shadow"] is True, cap
+            else:
+                assert cap["effect"] not in ("karaoke", "reveal", "word_highlight") and cap["shadow"] is False, cap
+
+
 def demo():
     """6 s, 540 x 960, 30 fps. Two-word captions centred at 65% down, 48 px, white with a
     black stroke, a yellow highlight that moves word to word, each caption popping in over
@@ -875,7 +1258,7 @@ def demo():
             engine, ocr = "fake", lambda f, t: drawn[min(round(t * FPS), 6 * FPS - 1)]
         r = measure_video(mp4, spoken_words, ocr, None, engine, SAMPLE_FPS)
         c, g = r["captions"], r["graphics"]
-        print(f"engine {engine}: {json.dumps({k: c.get(k) for k in ('y_pct', 'size_pct', 'words_per_caption', 'color', 'stroke_color', 'highlight_color', 'entrance', 'ease_s', 'stem_ratio')})}")
+        print(f"engine {engine}: {json.dumps({k: c.get(k) for k in ('y_pct', 'size_pct', 'words_per_caption', 'color', 'stroke_color', 'highlight_color', 'entrance', 'ease_s', 'stem_ratio', 'word_effect', 'timing_err_s')})}")
         print(f"graphics {json.dumps(g)}")
         assert c["present"], c
         assert c["words_per_caption"] == 2 and c["case"] == "lower", c
@@ -891,7 +1274,11 @@ def demo():
         assert g["ease_in_s"] and 0.1 <= g["ease_in_s"] <= 0.3, g
         assert any(p["hex"][5:7] > "B0" and p["hex"][1:3] < "60" for p in g["palette"]), g["palette"]
         m = merge([r], [{"cuts": [1, 2, 3], "duration_s": 6.0}], {"zoom": {"kind": "punch", "per_min": 6}})
-        assert m["captions"]["animation"] == "word_highlight" and m["motion"]["cuts_per_min"] == 30.0, m
+        # the said word turns yellow (no box behind it): the entrance plays and the said word takes the
+        # colour; style-edit's word_highlight would draw a box
+        mc = m["captions"]
+        assert mc["word_effect"] == "highlight" and mc["effect"] == "pop" and mc["highlight_color"][1:3] > "E0", mc
+        assert m["motion"]["cuts_per_min"] == 30.0, m
         assert m["motion"]["personality"] == "punchy", m["motion"]
         assert personality(4, 0.05, 4, 0) == "calm" and personality(20, 0.4, 1, 0) == "smooth"
         assert weight_of(0.15) == 700 and weight_of(0.09) == 400 and weight_of(0.5) == 900
@@ -911,6 +1298,14 @@ def demo():
                        "pace": {"wpm": 150, "median_shot_s": 2, "max_pause_s": 0.4, "cut_kinds": {"hard": 56, "jump": 7}},
                        "sound": {"sfx_per_min": 2, "kinds": {"pop": 60}, "music": {"present_pct": 0}}})
         assert "None" not in txt and "{" not in txt and "hard 56%, jump 7%" in txt and "pop 60%" in txt, txt
+        txt = summary({"handle": "x", "captions": {"present": True, "entrance": "pop", "word_effect": "karaoke", "timing_err_s": 0.04,
+                                                   "effect": "karaoke", "inactive_opacity": 0.3, "shadow": False}})
+        assert "said word: karaoke (on the word to 0.04 s), effect karaoke, unsaid at 0.3 opacity, shadow none" in txt, txt
+        txt = summary({"handle": "x", "captions": {"present": True, "font_match": "Inter"}, "look": {"font_votes": 2, "videos": 5}})
+        assert "font Inter (a guess: 2 of 5 videos agree)" in txt, txt
+        txt = summary({"handle": "x", "camera": {"pan_per_min": 0}, "transitions": ["push"], "layout": {"mode": "split", "seam": 44}})
+        assert "scene transitions push; split layout, seam at 44%" in txt, txt
+    demo_word_effects()
     print("ok")
 
 

@@ -52,8 +52,30 @@ Old keys keep their meaning, so style-edit reads an old or new file the same way
   0.09 = 400, 0.15 = 700, 0.20 = 900.
 - `entrance`: `pop`, `slide` or `none`, from the fill mask frame by frame at the
   source rate around 8 caption changes a video. `ease_s`: frames to settle.
-- `animation`: `word_highlight` when the highlight moves word to word inside the
-  same caption, else the entrance. Same values as before.
+- `word_effect`: what a word looks like after its caption is up and before it is said, read
+  from every source frame in the caption box of up to 8 captions a video, each word timed from
+  the transcript (`timing_err_s`: how far the change lands from the word; over 0.35 s is not a
+  word style). `reveal` (not there yet), `karaoke` (dimmer or another colour), `highlight` (the
+  rest colour, another while said, back after), `pill` (the same, with the colour filling a box
+  behind the word), `none` (no change).
+- `effect`, in style-edit's `Captions.tsx` names: `karaoke` with `inactive_opacity` (the unsaid
+  ink over its ground as an opacity) and `highlight_color` (the said colour); `reveal` with
+  `inactive_opacity: 0`; `pill` is `word_highlight` with the box colour as `highlight_color`;
+  `highlight` keeps the entrance as the effect with the said colour as `highlight_color`;
+  `none` keeps the entrance, and a highlight colour that does not follow the words becomes
+  `emphasis_color` (the stressed words) with `highlight_color` set to the fill.
+- `animation`: the old name, kept: the effect when it is one of `pop`, `none`, `slide`,
+  `word_highlight`; with no word style measured, `word_highlight` when the highlight moves.
+- `shadow`: light text with no stroke or box: `true` when the ring just outside the letters is
+  darker than the ring a little further out, caption after caption.
+- Top level, for style-edit: `transitions` (visual.py: `whip` -> `push`, `match` -> `match`,
+  `mask` -> `wipe`, `dissolve` -> `fade`, kinds on 5% of cuts or more, most used first; absent
+  when they only cut) and `layout` (graphics.py: `{"mode": "split", "seam"}` when graphics sit in
+  the top zone 60%+ of their time, end above 55% of the height, keep off the face, and the face
+  is in the lower half; absent otherwise).
+- `look.font_votes`, `look.font_confident`: how many videos Gemini gave the same closest font,
+  and whether that counts as measured (3+ videos, 75% agree, most `font_confidence: high`).
+  look.md and the AI-tell scan call the font a guess otherwise.
 - `face.framing`: face height of frame >= 22% `close`, >= 12% `medium`, else `wide`.
 - `graphics.share_pct`: samples showing screen text that is not a caption and not set
   dressing (text on screen more than half the video), or no face in a video that

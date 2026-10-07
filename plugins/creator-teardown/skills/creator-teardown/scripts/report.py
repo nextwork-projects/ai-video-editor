@@ -211,6 +211,14 @@ def scan_tells(style, outdir, gfx_rows, at=None):
     except ImportError:
         pass
     found += stills
+    # The font is Gemini's closest match by eye, not a measurement. Unless the videos agree on it with
+    # high confidence (gemini.py merge sets look.font_confident), a font tell is a WARN worded as a guess.
+    lk = style.get("look") or {}
+    if not lk.get("font_confident"):
+        votes = f"{lk['font_votes']} of {lk['videos']} videos" if lk.get("font_votes") and lk.get("videos") else "unchecked"
+        for f in found:
+            if f["tell"].startswith("default-grotesk"):
+                f.update(level="WARN", where=f"{f['where']} (a guess: Gemini's closest font, {votes} agree, not measured)")
     seen, out = set(), []
     for f in found:
         k = (f["tell"], f["where"].split(":")[0] if f["where"].startswith("graphics/") else f["where"])
@@ -592,6 +600,19 @@ def demo():
     t = scan_tells({"captions": {"font_match": "Inter"}, "graphics": {"palette": [{"hex": "#6A4CF0", "pct": 20}]}},
                    Path("."), [], FakeTells)
     assert t["ran"] and {f["tell"] for f in t["found"]} == {"default-grotesk-body", "purple-blue"}, t
+    # The font is Gemini's closest guess unless its videos agree with high confidence: a font tell is
+    # then a WARN worded as a guess, never a BAN (a measured run raised "Inter" BAN from one guess).
+    class GroteskBan(FakeTells):
+        @staticmethod
+        def check_look(look, table):
+            return [{"level": "BAN", "tell": "default-grotesk-display", "where": "look 'creator': " + look["font"], "fix": "x"}] \
+                if look.get("font") == "Inter" else []
+    guess = scan_tells({"captions": {"font_match": "Inter"}, "look": {"font_votes": 2, "videos": 5}}, Path("."), [], GroteskBan)
+    f = guess["found"][0]
+    assert f["level"] == "WARN" and "guess" in f["where"] and "2 of 5" in f["where"] and guess["bans"] == 0, guess
+    sure = scan_tells({"captions": {"font_match": "Inter"}, "look": {"font_confident": True, "font_votes": 5, "videos": 5}},
+                      Path("."), [], GroteskBan)
+    assert sure["found"][0]["level"] == "BAN" and sure["bans"] == 1, sure
     # A black and brown look whose cards hold a lavender page: no palette tell (the measured audit case).
     dark = {"graphics": {"palette": [{"hex": "#000000", "pct": 30}, {"hex": "#231914", "pct": 10},
                                      {"hex": "#D9C5B0", "pct": 8}, {"hex": "#422720", "pct": 4}],
