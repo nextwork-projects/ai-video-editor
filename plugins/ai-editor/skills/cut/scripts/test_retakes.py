@@ -125,6 +125,25 @@ def test_alternate_hooks_after_the_cta():
     assert B.lead_first([[0, 10], [20, 40]], 30, 40) == [[30, 40], [0, 10], [20, 30]]
 
 
+def test_alternate_hooks_on_the_sample_whisper_words():
+    """The sample take's Whisper words (testdata/sample-whisper.json). In the second audit's pass Whisper
+    put the "I" of the late "I built a model router" into the previous phrase ("more tips I", the "I"
+    stretched to 3 s at 179 s), so no clause opened like the hook and no alternate was found. Matching
+    on the word sequence finds one run of late takes from 179 s, with the stray "I" in it."""
+    toks = [{"text": t, "start": a, "end": b, "type": "word"}
+            for t, a, b in json.loads((Path(__file__).parent / "testdata" / "sample-whisper.json").read_text())]
+    alts = R.alt_hooks(toks)
+    assert [round(toks[a]["start"]) for a, _ in alts] == [186, 191] and alts[-1][1] == len(toks) - 1, alts
+    i = next(k for k, t in enumerate(toks) if t["text"] == "tips.")
+    toks[i]["text"] = "tips"
+    toks[i + 1].update(start=178.85, end=181.85)     # "I": attached to "tips", 3 s long
+    alts = R.alt_hooks(toks)
+    assert alts and alts[0][0] == i + 1 and round(toks[alts[0][0]]["start"]) == 179, [(toks[a]["text"], toks[a]["start"]) for a, _ in alts]
+    assert alts[-1][1] == len(toks) - 1 and "Alternate hooks" in R.candidates_md(R.find(toks))
+    cands = R.find(toks)       # no other candidate reaches into the hook run: the spans quote cleanly
+    assert all(c["cut"][1] < alts[0][0] for c in cands if c["kind"] != "alt_hook"), cands
+
+
 def test_text_and_fix():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "words.raw.json").write_text(json.dumps(take("I use cloud code. | cloud, daily")))

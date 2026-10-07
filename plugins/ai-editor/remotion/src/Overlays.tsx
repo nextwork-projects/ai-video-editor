@@ -346,14 +346,21 @@ const LogoCluster: React.FC<TP> = ({ p, w, h, m, dur }) => {
   const [hx, hy, hw, hh] = p.head ?? [32, 33, 28, 23];
   const cx = ((hx + hw / 2) / 100) * w, cy = ((hy + hh / 2) / 100) * h;
   const R = Math.max((hw / 100) * w, (hh / 100) * h) * 0.92;
-  const S = Math.min(w * 0.15, R * 0.62);
+  // vertical (plan.py sets band and size): readable logos, their outer edges on a band centred on the frame,
+  // so the cluster is as wide as check.py expects; otherwise sized and placed by the head
+  const band: [number, number] | undefined = p.band;
+  const S = band ? (w * (p.size ?? 20)) / 100 : Math.min(w * 0.15, R * 0.62);
   const n = logos.length;
   const r = rng(Number(p.seed ?? 3));
   // spread over the upper arc, from left of the head over the top to the right
   const spots = logos.map((_, i) => {
     const a = (-180 + 20 + (n === 1 ? 70 : (i * 140) / Math.max(1, n - 1))) * (Math.PI / 180);
-    const x = Math.min(w * 0.84 - S / 2, Math.max(S * 0.6, cx + Math.cos(a) * R * 1.15)); // clear of the frame edge and the app rail
-    return [x, Math.max(h * 0.12 + S / 2, cy + Math.sin(a) * R * 1.05), (r() - 0.5) * 16, r() * 6.28];
+    const x = band
+      ? (n === 1 ? w / 2 : (band[0] / 100) * w + S / 2 + ((i / (n - 1)) * ((band[1] - band[0]) / 100) * w - (i / (n - 1)) * S))
+      : Math.min(w * 0.84 - S / 2, Math.max(S * 0.6, cx + Math.cos(a) * R * 1.15)); // clear of the frame edge and the app rail
+    // in the band the big logos stay above the head: never lower than just over its top
+    const y = band ? Math.min(cy + Math.sin(a) * R * 1.05, (hy / 100) * h - S * 0.55) : cy + Math.sin(a) * R * 1.05;
+    return [x, Math.max(h * 0.12 + S / 2, y), (r() - 0.5) * 16, r() * 6.28];
   });
   const { U } = useFrame();
   const ref = useTl((timeline, q) => {

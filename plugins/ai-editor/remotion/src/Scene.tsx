@@ -29,7 +29,7 @@ export const sceneGrounds = (cards: SceneCard[]) => {
 
 const EASE: Record<Transition, string> = { match: "expo.inOut", iris: "power3.inOut", push: "power4.inOut", block: "power3.inOut",
   wipe: "power3.inOut", fade: "sine.inOut" };
-const TR_S = 0.62; // seconds a transition takes at k = 1
+export const TR_S = 0.62; // seconds a transition takes at k = 1
 
 /** Where a scene's type lives, % of the frame: clear of the app's top bar and the captions under it. */
 export const sceneBox = (w: number, h: number): [number, number, number, number] => (h > w ? [6, 13, 88, 52] : [6, 9, 88, 70]);

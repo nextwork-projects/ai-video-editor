@@ -82,10 +82,38 @@ def test_frames_and_retime():
     assert [x["text"] for x in w] == ["a", "b"] and abs(w[1]["start"] - 1.1) < 1e-6, w
 
 
+def test_stretched_label_is_not_clipped():
+    """Whisper labels "if" 0.4-3.4 s, 3 s ahead of its audio at 3.45 s (the sample take's "If" at
+    173 s). Judged on that label, the pause cut "clips" a word the render plays, and the paper edit
+    sends the model into raising --pad for nothing. Fitted to the audio, nothing is clipped and the
+    paper edit plays exactly the words words.json keeps."""
+    import preview_cut as P
+    words = [{"text": "so", "start": 0.0, "end": 0.3, "type": "word"},
+             {"text": "if", "start": 0.4, "end": 3.4, "type": "word"},
+             {"text": "you", "start": 3.6, "end": 3.9, "type": "word"}]
+    loud = [(0.0, 0.3), (3.45, 3.55), (3.6, 3.9)]
+    lvl = [-20.0 if any(a <= i * B.RMS_WIN_S < b for a, b in loud) else -60.0 for i in range(int(4.5 / B.RMS_WIN_S))]
+
+    def paper(ws):
+        cuts = B.merge(B.silence_cuts(ws, 0.15, 0.1, [(0.3, 3.45)]) + B.lead_trail_cuts(ws, 4.5, 0.1))
+        B.enforce_splice_budget(cuts, ws, [], 0.15, lvl, -40.0)
+        spans = [{"start": a / 30, "end": b / 30} for a, b in B.kept_frames(cuts, 30, 4.5)]
+        md = P.paper_edit(P.label(ws, [], spans), [], 4.5, sum(s["end"] - s["start"] for s in spans))
+        return md, [w["text"] for w in B.retime(ws, spans)]
+
+    assert "CLIPPED" in paper(words)[0]                       # the raw label: a false CLIPPED
+    labels = B.fit_labels(words, lvl, -40.0)
+    assert list(labels) == [1] and 3.4 <= labels[1][0] < labels[1][1] <= 3.6, labels
+    md, kept = paper(B.apply_labels(words, labels))
+    assert "CLIPPED" not in md and kept == ["so", "if", "you"], (md, kept)
+    assert md.split("## What plays")[1].split("## Cuts")[0].split("\n")[-3] == "so if you", md
+
+
 if __name__ == "__main__":
     test_derive()
     test_audible_end()
     test_splice_budget()
     test_spans()
     test_frames_and_retime()
+    test_stretched_label_is_not_clipped()
     print("all ok")

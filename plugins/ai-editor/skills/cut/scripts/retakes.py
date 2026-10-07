@@ -211,8 +211,17 @@ def alt_hooks(toks):
     if not phr:
         return []
     first, t0 = opening(toks, *phr[0]), toks[phr[0][0]]["start"]
-    hits = [a for a, b in clauses(toks) if toks[a]["start"] - t0 > WINDOW_S
-            and similar_openings(first, opening(toks, a, b))]
+    hits = []
+    for a, b in clauses(toks):
+        if toks[a]["start"] - t0 <= WINDOW_S:
+            continue
+        if similar_openings(first, opening(toks, a, b)):
+            hits.append(a)
+        # matched on the word sequence, not the phrase edge: Whisper can hang the take's first word on
+        # the phrase before it ("more tips I | built a model router"), the "I" stretched over the pause
+        elif not toks[a - 1]["text"].strip().endswith((".", "?", "!", ",", ";", ":")) \
+                and similar_openings(first, opening(toks, a - 1, b)):
+            hits.append(a - 1)
     takes, e = [], len(toks)
     for a in reversed(hits):
         if sum(len(nwords(t["text"])) for t in toks[a:e]) > ALT_HOOK_MAX_WORDS:
@@ -255,6 +264,8 @@ def find(toks):
     tail = alts[0][0] if alts else len(toks)   # nothing in the alternate hooks is judged: all of it is cut
 
     def add(kind, a, b, qs=None, **extra):
+        if kind != "alt_hook":
+            b = min(b, tail - 1)    # a phrase can run into the first alternate hook (a word hung on it)
         cands.append({"id": f"c{len(cands)}", "kind": kind, "cut": [a, b], "at": toks[a]["start"],
                       "text": say(toks, a, b), "questions": qs or {}, **extra})
 

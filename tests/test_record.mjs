@@ -106,6 +106,17 @@ console.log("deny list ok");
   console.log("sandbox decision ok");
 }
 
+// a logo comes from the site's sharpest own icon (SVG, then apple-touch, then a large PNG) before the 256 px
+// favicon service; a 32 px favicon is never preferred
+{
+  const { rankIcons } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+  const page = `<link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple.png">
+    <link rel="icon" type="image/svg+xml" href="/logo.svg"><link rel="icon" href="/i-192.png" sizes="192x192"><link rel="stylesheet" href="/a.css">`;
+  assert.deepEqual(rankIcons(page, "https://x.io/"), ["https://x.io/logo.svg", "https://x.io/apple.png", "https://x.io/i-192.png"]);
+  assert.deepEqual(rankIcons(`<link rel="shortcut icon" href="/favicon.ico">`, "https://x.io/"), []);
+  console.log("logo source order ok");
+}
+
 const { launch, findBinary, SHELLS, TEXT } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
 const bin = findBinary(SHELLS);
 if (!bin) {

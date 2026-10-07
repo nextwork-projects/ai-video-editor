@@ -276,6 +276,7 @@ def write_style(edit_dir, root=Path("."), out=None):
     else:
         style = blend(styles, prof["creators"], prof)
     out = Path(out or Path(edit_dir) / "style.json")
+    out.parent.mkdir(parents=True, exist_ok=True)   # start writes the style before cut makes edits/<name>/
     out.write_text(json.dumps(style, indent=1))
     return out, style
 
@@ -307,6 +308,10 @@ def demo():
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
         assert json.loads(out.read_text())["handle"] == "default"
+        # start runs `style edits/<name>` before cut has made the folder: it is created, exit 0
+        r = subprocess.run([sys.executable, __file__, "style", str(Path(d) / "edits" / "new")],
+                           capture_output=True, text=True, env=dict(os.environ, AI_EDITOR_HOME=d))
+        assert r.returncode == 0 and (Path(d) / "edits" / "new" / "style.json").exists(), r.stderr
     styles = {"a": {"captions": {"size_pct": 4}, "zoom": {"per_min": 6}, "graphics": {"palette": [
                   {"hex": "#000000", "pct": 14}, {"hex": "#DEDACC", "pct": 8}, {"hex": "#E5482C", "pct": 3}]}},
               "b": {"captions": {"size_pct": 7, "font_match": "Inter"}, "pace": {"median_shot_s": 1.2}}}

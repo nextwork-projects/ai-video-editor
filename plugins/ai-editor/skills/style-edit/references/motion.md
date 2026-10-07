@@ -75,7 +75,7 @@ so leave it.
 | `chat` | an app's thread from its real parts: the user bubble pops, the app shows typing dots then types its reply; the window punches on each reply | `app`, `logo`, `model?`, `messages: [{from: user\|app, text, at?}]` |
 | `terminal` | a real terminal window: commands type at 30 chars/s with a caret, output lands | `title?`, `lines: [{text, kind: cmd\|out, at?}]` |
 | `toasts` | real notifications drop in from above, blurred, each just before its word, and stack, pushing the older ones down | `items: [{app, src, title, body?, at?}]` |
-| `logo_cluster` | real logos drop in blurred round the head just before their word, land on `back.out(1.7)`, punch on the word, bob, leave upward; bare with a soft shadow and a faint light halo (dark logos read on dark footage) | `logos: [{src, at?}]`, `head` `[x, y, w, h]` % (plan.py fills it), `seed?` |
+| `logo_cluster` | real logos drop in blurred round the head just before their word, land on `back.out(1.7)`, punch on the word, bob, leave upward; bare with a soft shadow and a faint light halo (dark logos read on dark footage) | `logos: [{src, at?}]`, `head` `[x, y, w, h]` % (plan.py fills it), `band?` `[x0, x1]` % and `size?` % (vertical), `seed?` |
 | `side_by_side` | two real screenshots drop in 0.14 s apart, each tilted 1.2 degrees toward the other, the pair centred; each punches on its own marks | `a: {src, size, label?, marks?}`, `b: {...}` |
 | `video_card` | a short real clip in a rounded card, dropping in | `src` (video in `images/`), `size?`, `start_s?`, `rate?`, `label?` |
 | `social_post` | the real post, the quoted phrase in the highlighter | as below |
@@ -92,7 +92,9 @@ Overlay first. plan.py (`place_overlays`) gives each overlay card the free regio
 (face.json) its picture fills best: above the head (top 10% down to just over the hair) for wide
 pictures, beside it for tall ones; left or right of the head on 16:9. A card leads its word by
 `OVERLAY_LEAD_S` (0.3 s) x the personality's duration multiplier, so the entrance has landed on the
-word. `logo_cluster` takes `[0, 0, 100, 100]` and the head box. A beat's own `box` wins.
+word. `logo_cluster` takes `[0, 0, 100, 100]` and the head box, plus on vertical `band` [17, 83] and
+`size` 20 (% of the width). A beat's own `box` wins. On vertical a `flow` is a scene and an `icon_burst`
+sits in the split panel whatever the beat says: in a box they render small and off centre.
 
 ### Behind the speaker
 

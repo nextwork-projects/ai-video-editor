@@ -26,7 +26,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from build_timeline import is_kept, retime  # noqa: E402
+from build_timeline import is_kept, load_fitted, retime  # noqa: E402
 from textnorm import load_words, pair_by_time, timed_words, transcript_words  # noqa: E402
 
 FILLERS = {"um", "uh", "umm", "uhh", "hmm", "mm", "ah", "er", "erm"}
@@ -40,7 +40,7 @@ def main():
     d = Path(a.edit_dir)
 
     spans = json.loads((d / "decisions.json").read_text())
-    raw = [w for w in load_words(d / "words.raw.json") if w.get("type") == "word"]
+    raw = [w for w in load_fitted(d) if w.get("type") == "word"]
     exp = timed_words(retime(raw, spans))      # the kept words, timed on the cut
     expected = [t for t, _, _ in exp]
     removed = set(transcript_words([w for w in raw if not is_kept(w, spans)]))

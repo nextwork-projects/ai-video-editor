@@ -59,14 +59,18 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const P = Math.min(w, h) * 0.03;
   const chipFs = Math.max(LAB, Math.min(44 * s, h * 0.11)), chipH = chipFs * 2.15;
   const chipW = (x: Task) => tw(x.text, chipFs, 800) + chipFs * (x.heavy ? 2.3 : 1.6) + chipFs * 1.3;
-  const laneW = k && tasks.length ? Math.max(...tasks.map(chipW)) + 28 * s : 0;
+  // a portrait box (a vertical scene or the split panel) has no width to spare for a lane of chips left of
+  // the source: the chips stack over it instead, and the cards get the whole width
+  const stack = w < h;
+  const laneW = k && tasks.length && !stack ? Math.max(...tasks.map(chipW)) + 28 * s : 0;
   const rows = !k && n >= 4 ? 2 : 1;
   const perRow = Math.ceil(n / rows);
   const rowGap = Math.max(16 * s, h * (rows > 1 ? 0.08 : 0.05));
   let f = 1, nodes: Box[] = [], bx: Box[] = [], nFs = LAB, bFs: number[] = [], logoN = 0, logoB = 0, ox = 0;
   for (; f >= 0.45; f -= 0.05) {
     const rowH = (h - 2 * P - (rows - 1) * rowGap) / rows;
-    const S = Math.min(rowH * (rows > 1 ? 0.94 : 1), (k ? h * 0.6 : rowH) * f, 240 * s * f);
+    // a portrait box is a phone's whole frame: the cards may grow past the overlay size to fill it
+    const S = Math.min(rowH * (rows > 1 ? 0.94 : 1), (k ? h * 0.6 : rowH) * f, (stack ? 340 : 240) * s * f);
     nFs = Math.max(LAB, Math.min(46 * s, S * 0.23));
     logoN = S * 0.46;
     const nw = chain.map((x) => Math.max(S * 0.92, tw(labelMax(x.label), nFs) + 40 * s));
@@ -85,8 +89,9 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
     const nWires = Math.max(0, perRow - 1) + (k ? 1.6 : 0);
     const add = nWires ? Math.min(spare / nWires, 90 * s) : 0;
     const gN = wireMin + add, gB = wireB + add * 1.6;
-    const used = laneW + rowW(0, perRow) + Math.max(0, perRow - 1) * add + (k ? gB + bW : 0);
-    ox = Math.max(P, (w - used) / 2);
+    // the cards centred on the box (the chips are swallowed before the board settles); the lane, if any, left of them
+    const core = rowW(0, perRow) + Math.max(0, perRow - 1) * add + (k ? gB + bW : 0);
+    ox = Math.max(P, (w - core) / 2 - laneW);
     nodes = [];
     for (let i = 0; i < n; i++) {
       const r = Math.floor(i / perRow), c = i % perRow;
@@ -174,7 +179,8 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
       if (l.chip !== undefined) {
         const x = tasks[l.chip], chip = el(`.dg-chip-${l.chip}`);
         const go = Math.max(x.at! + 0.28, depart - 0.38);
-        tl.to(chip, { x: src.x + src.w / 2 - (ox + chipW(x) / 2), scale: 0.2, autoAlpha: 0, duration: Math.max(0.2, depart - go), ease: "power3.in" }, go);
+        tl.to(chip, stack ? { y: src.h / 2 + chipH * 0.6, scale: 0.2, autoAlpha: 0, duration: Math.max(0.2, depart - go), ease: "power3.in" }
+          : { x: src.x + src.w / 2 - (ox + chipW(x) / 2), scale: 0.2, autoAlpha: 0, duration: Math.max(0.2, depart - go), ease: "power3.in" }, go);
       }
       tl.fromTo(el(`.dg-pulse-${wire.from}`), { opacity: 0.9, scale: 1 }, { opacity: 0, scale: 1.5, duration: 0.5, ease: "power2.out", immediateRender: false }, depart);
       punch(tl, el(`.dg-nh-${wire.from}`), depart, 1.1);
@@ -272,9 +278,10 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
           );
         })}
         {k ? tasks.map((x, c) => {
-          const cy = nodes[0].y + nodes[0].h / 2;
+          const cy = stack ? nodes[0].y - chipH * 0.6 : nodes[0].y + nodes[0].h / 2;
+          const left = stack ? Math.max(P, nodes[0].x + nodes[0].w / 2 - chipW(x) / 2) : ox;
           return (
-            <div key={c} className={`dg-chip-${c}`} style={{ position: "absolute", left: ox, top: cy - chipH / 2, height: chipH, padding: `0 ${chipFs * 0.65}px`,
+            <div key={c} className={`dg-chip-${c}`} style={{ position: "absolute", left, top: cy - chipH / 2, height: chipH, padding: `0 ${chipFs * 0.65}px`,
               display: "flex", alignItems: "center", gap: chipFs * 0.3, borderRadius: chipH / 2, whiteSpace: "nowrap", opacity: 0,
               background: x.heavy ? "#141414" : "#fff", color: x.heavy ? "#fff" : "#141414", border: x.heavy ? `${3 * s}px solid rgba(255,255,255,0.85)` : "none",
               fontFamily: F, fontWeight: 800, fontSize: chipFs, letterSpacing: "-0.02em", boxShadow: shadow, boxSizing: "border-box" }}>

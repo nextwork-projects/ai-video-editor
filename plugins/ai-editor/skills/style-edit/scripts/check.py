@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
+from plan import INK_MIN_W, OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -48,6 +48,12 @@ HOOK_TOL_S = 0.5       # a first graphic this much later than the creator's winn
 STILL_S = 1.5          # a card region unchanged for longer than this
 FPS = 4                # render samples a second
 ZOOM_ORIGIN = (50, 30)  # remotion/src/StyleEdit.tsx ZOOM_ORIGIN
+
+
+# Where an explaining card's size and place come from: the plan, never the renderer's source.
+PLAN_FIX = ("plan again (plan.py makes a vertical flow a full-frame scene and centres a logo_cluster's logos); "
+            "drop a \"layout\": \"box\", a \"box\" or a \"band\" set on that beat in visuals.json; "
+            "a flow of one node or a cluster of one logo is a logo card instead")
 
 
 def spread(c):
@@ -192,6 +198,10 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                 out.append(finding("FAIL", c["start"], f"{name} card sits behind the speaker but there is no cutout for it",
                                    "run matte.py edits/<name> (it cuts the speaker out where behind cards are up)"))
             continue
+        ink = aspect == "9:16" and explain_ink(c, W, H)
+        if ink and (ink[1] - ink[0] < INK_MIN_W or abs((ink[0] + ink[1]) / 2 - 50) > CENTRE_INK):
+            out.append(finding("FAIL", c["start"], f"{name} draws {ink[0]:.0f}-{ink[1]:.0f}% of the width "
+                               f"(under {INK_MIN_W}% wide or off centre): small and lopsided on a phone", PLAN_FIX))
         if c.get("layout") == "scene" or spread(c):
             continue    # a full-frame cut-away, or logos laid round the head: the renderer keeps them clear
         cl, ct, cr = l, top, r
@@ -478,10 +488,16 @@ def check_render(edit, plan, video):
             cx = (x0 + x1) / 2
             rec["ink"] = [round(v, 1) for v in st["mid"][1]]
             rec["ink_centre_x"] = round(cx, 1)
-            if aspect_of(plan) == "9:16" and c.get("lane") != "logo" and not spread(c) and abs(cx - 50) > CENTRE_INK:
+            explain = (c.get("anim") or {}).get("type") in ("flow", "logo_cluster")
+            if aspect_of(plan) == "9:16" and c.get("lane") != "logo" and (explain or not spread(c)) \
+                    and (abs(cx - 50) > CENTRE_INK or explain and x1 - x0 < INK_MIN_W):
                 out.append(finding("FAIL", st["mid"][0], f"{name} card is drawn {cx - 50:+.1f}% of the width off centre "
+                                   f"(its content spans {x0:.0f}-{x1:.0f}%)" if abs(cx - 50) > CENTRE_INK else
+                                   f"{name} card is drawn {x1 - x0:.0f}% of the width wide, under {INK_MIN_W}% "
                                    f"(its content spans {x0:.0f}-{x1:.0f}%)",
-                                   "centre the content inside the card (Anims.tsx / the capture's clip), then render again"))
+                                   PLAN_FIX + "; then render again" if explain else
+                                   "plan again: drop the beat's \"box\" in visuals.json/images.json so plan.py centres it, "
+                                   "or give a capture a \"crop\" round the evidence; then render again"))
         elif c["end"] - c["start"] > 0.8:
             rec["ink"] = None
             out.append(finding("WARN", (c["start"] + c["end"]) / 2, f"{name} card: nothing drawn found in its box",
@@ -571,10 +587,25 @@ def demo():
     assert any("no cutout" in f["what"] for f in check_plan(bh, face)) and not any("covers the head" in f["what"] for f in check_plan(bh, face))
     bh["cutouts"] = [{"src": "cutout/x.mov", "from": 0, "to": 10 ** 6}]
     assert not any("no cutout" in f["what"] for f in check_plan(bh, face))
-    # logo_cluster spans the frame and sits round the head: never "off centre"
-    lc = {**plan, "cards": [{"anim": {"type": "logo_cluster", "props": {}}, "start": 0.5, "end": 2, "trigger_word": "l",
-                             "box": [0, 0, 100, 100]}]}
-    assert not any(f["level"] == "FAIL" and "'l'" in f["what"] for f in check_plan(lc, face))
+    # the sample take's flow and logo_cluster (backlog 2026-10-07): a flow in the 21%-tall band above the head
+    # renders small and pushed right (check.py render FAILed it at +5.6%), so the plan check FAILs it too and
+    # points at the plan; as plan.py now lays it out, a full-frame scene, it passes
+    fp = {"nodes": [{"label": "jev", "src": "images/logo-typesafe.png"}], "tasks": [{"text": "small task"}, {"text": "harder", "heavy": True}],
+          "split": [{"label": "haiku", "src": "images/logo-claude.svg"}, {"label": "opus", "src": "images/logo-claude.svg"}]}
+    fl = {**plan, "cards": [{"anim": {"type": "flow", "props": fp}, "start": 0.5, "end": 3, "trigger_word": "task",
+                             "box": [4, 10, 92, 21.2], "layout": "box"}]}
+    bad = [f for f in check_plan(fl, face) if f["level"] == "FAIL" and "'task'" in f["what"]]
+    assert bad and "% of the width" in bad[0]["what"] and bad[0]["fix"].startswith("plan again") and ".tsx" not in bad[0]["fix"], bad
+    fl["cards"][0].update(box=[0, 0, 100, 100], layout="scene")
+    assert not any(f["level"] == "FAIL" and "'task'" in f["what"] for f in check_plan(fl, face)), check_plan(fl, face)
+    # logo_cluster: logos laid round the head (no band) FAIL on vertical; plan.py's centred band passes, one logo does not
+    lc = {**plan, "cards": [{"anim": {"type": "logo_cluster", "props": {"logos": [{"src": "a"}, {"src": "b"}]}}, "start": 0.5,
+                             "end": 2, "trigger_word": "l", "box": [0, 0, 100, 100]}]}
+    assert any(f["level"] == "FAIL" and "'l'" in f["what"] for f in check_plan(lc, face))
+    lc["cards"][0]["anim"]["props"].update(band=[17, 83], size=20)
+    assert not any(f["level"] == "FAIL" and "'l'" in f["what"] for f in check_plan(lc, face)), check_plan(lc, face)
+    lc["cards"][0]["anim"]["props"]["logos"] = [{"src": "a"}]
+    assert any(f["level"] == "FAIL" and "'l'" in f["what"] for f in check_plan(lc, face))
     # an overlay in the band above the head may span 4-96% and start 10% down (plan.free_regions)
     band = {**plan, "cards": [{"src": "images/a.png", "start": 0.5, "end": 2, "trigger_word": "a", "box": [4, 10, 92, 20], "layout": "box"}]}
     assert not any(f["level"] == "FAIL" and "'a'" in f["what"] for f in check_plan(band, face)), check_plan(band, face)

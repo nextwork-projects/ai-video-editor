@@ -492,9 +492,31 @@ async function shoot(cdp, beat, out) {
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "beat";
 
-// Logos: Simple Icons first (CC0, brand-coloured SVG, thousands of brands), then the
-// site's own icon via Google's favicon service. Written to images/logo-<brand>.<ext>,
-// the path plan.py expects. A logo the user already put there is kept.
+// Logos: Simple Icons first (CC0, brand-coloured SVG, thousands of brands), then the site's own
+// sharpest icon (an SVG icon, else the 180 px apple-touch-icon or a large PNG its page links), and only
+// then Google's favicon service (often a 16-32 px icon blown up to 256). Written to
+// images/logo-<brand>.<ext>, the path plan.py expects. A logo the user already put there is kept.
+
+// The page's own icons, best first: [url]. Only ones sharper than the favicon service: SVG, apple-touch, >= 180 px.
+const rankIcons = (html, base) => {
+  const out = [];
+  for (const tag of html.match(/<link\b[^>]*>/gi) || []) {
+    const attr = (k) => (tag.match(new RegExp(`\\b${k}\\s*=\\s*["']([^"']*)["']`, "i")) || [])[1] || "";
+    const rel = attr("rel").toLowerCase(), href = attr("href");
+    if (!href || !/\bicon\b|apple-touch-icon/.test(rel)) continue;
+    const size = Math.max(0, ...attr("sizes").split(/\s+/).map((x) => parseInt(x, 10) || 0));
+    const score = /\.svg(\?|$)/i.test(href) || /svg/i.test(attr("type")) ? 3 : rel.includes("apple-touch-icon") ? 2 : size >= 180 ? 1 : 0;
+    if (!score) continue;
+    try { out.push([score, size, new URL(href, base).href]); } catch { /* a malformed href */ }
+  }
+  return out.sort((a, b) => b[0] - a[0] || b[1] - a[1]).map((x) => x[2]);
+};
+
+async function siteIcons(domain) {
+  const base = `https://${domain}/`;
+  const r = await fetch(base, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  return r && r.ok ? rankIcons(await r.text(), r.url || base) : [];
+}
 const logoPath = (brand, ext) => `images/logo-${slug(brand)}.${ext}`;
 
 async function fetchLogos(edit, beats) {
@@ -507,11 +529,19 @@ async function fetchLogos(edit, beats) {
     // offices); the same icon set on jsDelivr always answers, in black.
     const tries = [[`https://cdn.simpleicons.org/${si}`, "svg"],
       [`https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/${si}.svg`, "svg"]];
-    if (b.domain) tries.push([`https://www.google.com/s2/favicons?domain=${b.domain}&sz=256`, "png"]);
+    if (b.domain) {
+      for (const u of (await siteIcons(b.domain)).slice(0, 3)) tries.push([u, null]);
+      tries.push([`https://www.google.com/s2/favicons?domain=${b.domain}&sz=256`, "png"]);
+    }
     let ok = false;
-    for (const [url, ext] of tries) {
+    for (let [url, ext] of tries) {
       const r = await fetch(url).catch(() => null);
       if (!r || !r.ok) continue;
+      if (!ext) {    // the site's own icon: SVG or PNG only (plan.py reads those two)
+        const ct = r.headers.get("content-type") || "";
+        ext = /svg/.test(ct) ? "svg" : /png/.test(ct) ? "png" : null;
+        if (!ext) continue;
+      }
       fs.writeFileSync(path.join(edit, logoPath(brand, ext)), Buffer.from(await r.arrayBuffer()));
       console.log(`${logoPath(brand, ext)}  <- ${url}`);
       ok = true;
@@ -707,5 +737,5 @@ async function main() {
 }
 
 // Imported by product-video/scripts/crawl.mjs for the browser, banner and text-finding helpers.
-export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip, noSandbox, sandboxFlags };
+export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip, noSandbox, sandboxFlags, rankIcons };
 if (path.basename(process.argv[1] || "") === "capture.mjs") await main();

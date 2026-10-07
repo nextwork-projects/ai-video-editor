@@ -4,6 +4,35 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Explaining cards on vertical rendered small and off centre (backlog Now 1). plan.py placed a `flow` as a
+  box in the 21%-tall band above the head (its cards pushed right, `check.py render` FAILed it at +5.6% while
+  `check.py plan` passed), and a `logo_cluster`'s logos at about 6% of the width at the frame edges. Now on
+  vertical a `flow` is always a full-frame scene (an `icon_burst` sits in the split panel), as style-edit
+  step 3 says; the diagram centres its cards and, in a portrait box, stacks the task chips over the source
+  instead of a lane to its left and lets the cards grow to 340 px (from 240). A vertical `logo_cluster` gets `band` [17, 83] and `size` 20: logos 20% of
+  the width, spread over a band centred on the frame, above the head. A `logo` card leaves when its sentence
+  ends. `check.py plan` estimates where a vertical flow or logo_cluster draws (the renderer's layout) and FAILs
+  one under 60% of the width or off centre; `check.py render` FAILs the same, and both point the fix at the plan.
+  While a scene is landing or leaving, captions keep their own colour (the scene's ink only once its
+  transition is half done), and quality.py does not read inked scene captions as white ones. Logos: Simple
+  Icons, then the site's own SVG or apple-touch icon, before the 256 px favicon service (the sample's
+  TypeSafe logo is now its 400 px PNG). Test: `check.py demo` (the sample's flow in the band FAILs with a
+  plan fix; as a scene it passes; a cluster without its band FAILs, with it passes), `plan.py demo` (layouts,
+  the band, a logo off at its sentence end), `tests/test_record.mjs` (logo source order).
+- `profile.py style edits/<name>` crashed with `FileNotFoundError` on every first video, because start runs it
+  before cut makes the folder (backlog Now 2). It now creates the folder. Test: `profile.py demo` (a missing
+  `edits/new` exits 0 and holds `style.json`).
+- Whisper's stretched word labels sent the cut into a false loop (backlog Now 3). A label far longer than the
+  word can be said in (over twice a speech-rate length; an "if" at 0.7 s, an "I" at 3 s) is fitted to where
+  the audio has energy in or just after it, so a pause cut no longer "clips" a word the render plays.
+  `build_timeline.py` prints the fitted labels and keeps them in `report.json`; `paper-edit.md`, `words.json`
+  and `verify_cut.py` all judge the fitted words, so they agree. Alternate hooks match on the word sequence:
+  a take whose first word Whisper hung on the phrase before it ("more tips I | built a model router") is
+  found, and no other candidate reaches into it. Test: `test_build_timeline.py` (a 3 s label ahead of its
+  audio: a false CLIPPED before fitting, none after, the paper edit plays the kept words) and
+  `test_retakes.py` (the sample's Whisper words, `testdata/sample-whisper.json`: the late hook run is found
+  from 179 s with the stray "I" attached).
+
 - `login.mjs logout ..` deleted the whole editor folder, and `logout /` every saved login (backlog Now 1).
   `domainOf` fell back to the raw text. Now a site must be a plain hostname (or an http(s) URL whose host is
   one), and the profile folder must sit directly inside `<home>/browser/`; anything else (`..`, `/`, empty,

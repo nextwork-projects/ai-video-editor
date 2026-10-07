@@ -17,32 +17,7 @@ Sources:
 
 ## Now
 
-1. **Explaining cards on vertical render small and off-centre.** On the sample, the `flow` card
-   (28.8-37.8 s) sits in a 21%-tall top band with its content pushed right: `check.py render` FAILs
-   it at 37.25 s (+5.6% off centre) while `check.py plan` passed 0 FAIL, and the FAIL's fix points
-   the model at `Anims.tsx`. Its `tasks` chips ("small task", "harder") are unreadable at phone size.
-   The `logo_cluster` (9.1-11.6 s) is a full-frame box with two logos about 6% of the width at the
-   frame edges; the TypeSafe logo is a 256 px Google favicon. The Claude `logo` (22.9-24.1 s) is a
-   small mark over the plant, still up on "jev is good". SKILL.md step 3 says explaining cards on
-   vertical are full-frame scenes or in the split panel; plan.py placed all four as `box`.
-   Test: `check.py plan` on the sample plan FAILs a vertical `flow` or `logo_cluster` whose ink is
-   under 60% of the frame width or off centre, and plan.py gives the flow a scene or split layout.
-
-2. **`profile.py style edits/<name>` crashes on a new video.** start step 3 runs it before cut
-   creates `edits/<name>/`, and it dies with a `FileNotFoundError` traceback
-   (`profile.py:278`). Every first video through start hits it.
-   Test: `profile.py style <temp>/edits/new` with no folder exits 0 and writes `style.json`.
-
-3. **Whisper word timings send the cut into a false loop.** On the sample, Whisper times "if" at
-   0.7 s and "I" at 3.0 s. `build_timeline.py` reports `CLIPPED by a pause cut: if` at every `--pad`
-   (0.12, 0.3), and the paper edit shows the "I" at 179 s as kept after `alt_hook` cut it. Verify
-   then says the opposite: "if" SURVIVED, "i" MISSING. cut SKILL.md tells the model to raise
-   `--pad` on CLIPPED, so it rebuilds for nothing. The same transcript also hides the alternate
-   hooks: `alt_hooks()` found none at 179-199 s (no `hooks.json`, nothing in `candidates.md`),
-   because Whisper put the "I" of "I built" into the previous phrase.
-   Test: a `test_build_timeline.py` case with one stretched word (start + 3 s) gives no CLIPPED and
-   a paper edit that matches the kept words; `test_retakes.py` on the sample's Whisper words finds
-   one alternate-hook run from 179 s.
+(empty: the next item comes from Next)
 
 ## Next
 
@@ -58,12 +33,13 @@ Output quality (sample render, times in the cut):
 - 11.6-22.9 s and 37.8-45.8 s have no card; the most showable lines (sorting emails, competitor ads,
   11.4-18.2 s) get nothing. SKILL.md says "about one card every 4-6 s" and "most sentences get
   nothing" in the same step. Pick one rule and have `check.py plan` WARN on a gap over 10 s.
-- `check.py plan` passes plans that `check.py render` FAILs (off-centre flow). Move the centring
-  measure into the plan check from the template's layout.
-- Logo source: prefer the site's apple-touch-icon or og image over the Google favicon service.
 - Caption contrast WARN at 20.77 s (4.36:1) after plan.py's contrast pass.
 
 Cut:
+- Whisper can fold a whole spoken repeat into one stretched label: on the sample, "and to break down
+  competitor ads and" (117.7-119.4 s) sits inside "content" (117.07-119.01 s), so no span can quote it and
+  only verify sees it ("SURVIVED"). Fitting the label (build_timeline) does not recover the words. Test: a
+  label fitted over more audio than its word holds is listed for a re-transcription of that stretch.
 - `candidates.md` flags "like" in "models like Claude" as a filler and "a lot of tokens and" vs "a lot
   of money and time" as a retake. Test: neither is a candidate on the sample.
 - A rejected TypeSafe key (401) returns exit 4 like "no key", so the model reads the full transcript

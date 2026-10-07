@@ -21,7 +21,7 @@ import { Capture, Mark } from "./Capture";
 import { Look, Texture, resolveLook, useFonts } from "./look";
 import { Motion, ease, pickMotion, prog } from "./motion";
 import { Sfx } from "./Sfx";
-import { SceneView, Transition, footageX, sceneGrounds } from "./Scene";
+import { SceneView, TR_S, Transition, footageX, sceneGrounds } from "./Scene";
 import { Ground, onGround } from "./look";
 
 // Shapes follow skills/style-edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
@@ -252,9 +252,12 @@ const words = (v: unknown): string[] => typeof v === "string" ? v.toLowerCase().
     .flatMap(([, x]) => words(x)) : [];
 
 /** While a scene is up the captions draw in the scene's own ink (white on paper would vanish), and when
- *  the words being said are already the scene's type they are hidden: the scene is the caption. */
-const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: number, look: Look, grounds: Map<unknown, Ground>): CaptionStyle => {
-  const sc = sceneUp(cards, t);
+ *  the words being said are already the scene's type they are hidden: the scene is the caption. The ink
+ *  starts once the transition in is half done and ends when the transition out is half done (quality.py's
+ *  "landed"): before that the footage is still behind the words, and dark ink on it does not read. */
+const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: number, look: Look, grounds: Map<unknown, Ground>, m: Motion): CaptionStyle => {
+  const half = (TR_S * m.k) / 2;
+  const sc = cards.find((c) => c.layout === "scene" && t >= c.start + half && t < c.end - half);
   if (!sc) return style;
   const said = words(chunks.find((c) => t >= c.start && t < c.end)?.text ?? "");
   const shown = new Set(words(sc.anim?.props ?? {}));
@@ -272,7 +275,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   const fonts = useFonts(look);
   const split = layout?.mode === "split";
   const grounds = sceneGrounds(cards);
-  const capStyle = sceneCaptions(captions.style, captions.chunks, cards, t, look, grounds);
+  const capStyle = sceneCaptions(captions.style, captions.chunks, cards, t, look, grounds, m);
   const up = fonts.ready ? slots(cards, split).filter((s) => t >= s.from && t < s.to) : [];
   const view = (s: Slot) => (
     <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next} covered={s.covered}

@@ -55,6 +55,11 @@ SAFE = {"9:16": (6, 14, 14, 22), "16:9": (3, 5, 3, 10)}
 OVERLAY_TOP, OVERLAY_EDGE, RAIL_TOP = 10, 3, 40
 LOGO_S = 1.2           # a logo stays up this long
 LOGO_BOX_H = 11        # logo tile height, % of the frame
+# logo_cluster on vertical (Overlays.tsx reads props.band and props.size): the logos' outer edges span this
+# band of the width, centred, each this % of the width wide. check.py plan FAILs a vertical cluster whose
+# ink is under INK_MIN_W of the width or off centre, the same as check.py render measures it.
+LOGO_BAND, LOGO_SIZE = (17, 83), 20
+INK_MIN_W = 60
 TOP_CARD_MAX_H = {"9:16": 22, "16:9": 80}   # a top card taller than this reaches the head
 SCENES = ("flow",)   # picture scenes: parts land on their own words
 # Every template in remotion/src/Templates.tsx (references/motion.md), plus the two original names that remain.
@@ -83,6 +88,7 @@ BOX_OK = ("logo", "logo_sting", "arrow_callout", "caption_page")
 SPLIT_FIRST = ("icon_burst",)    # scene or split: split keeps the speaker in shot
 LAYOUTS = ("scene", "split", "box")
 SCENE_BOX = [0, 0, 100, 100]            # "use the scene box" (the renderer's, clear of the app's UI)
+SCENE_TYPE_BOX = {True: [6, 13, 88, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
 TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
 # A scene's transition in takes about 0.62 s x the personality's k (Scene.tsx). The scene starts this
 # much earlier than a box card, so the ground has mostly grown by the word.
@@ -611,7 +617,12 @@ def _place(images, words, duration, hold, ent, box, aspect):
         if im.get("marks"):
             card["marks"] = json.loads(json.dumps(im["marks"]))
         kind = im.get("format") or (im.get("anim") or {}).get("type") or ("shot" if "src" in im else None)
-        card.update({"start": start, "end": round(min(duration, start + (im.get("hold_s") or hold)), 3),
+        end = min(duration, start + (im.get("hold_s") or hold))
+        if im.get("lane") == "logo":    # a logo in passing leaves when its sentence does
+            i = words.index(hits[0])
+            nxt = next((words[j + 1]["start"] for j in range(i, len(words) - 1) if ends_sentence(words[j]["text"])), None)
+            end = min(end, nxt) if nxt is not None else end
+        card.update({"start": start, "end": round(end, 3),
                      "_word_t": hits[0]["start"], "trigger_word": im["word"], "entrance": im.get("entrance") or ent or FORMAT_ENTRANCE.get(kind, "pop"),
                      "box": safe_box(im.get("box") or box or DEFAULT_BOX[aspect], aspect)})
         cards.append(card)
@@ -846,6 +857,9 @@ def place_overlays(cards, face, cap_y, aspect, prefer=None):
             c["box"] = [0, 0, 100, 100]
             if hd:
                 c["anim"]["props"]["head"] = [round(hd[0], 1), round(hd[1], 1), round(hd[2] - hd[0], 1), round(hd[3] - hd[1], 1)]
+            if aspect == "9:16":    # readable logos spread over a band centred on the frame, not round the head
+                c["anim"]["props"].setdefault("band", list(LOGO_BAND))
+                c["anim"]["props"].setdefault("size", LOGO_SIZE)
             out.append(c)
             continue
         if c.get("lane") == "logo" or t in FIXED_BOX or c.get("_own_box") or not hd:
@@ -1114,10 +1128,15 @@ def frame_of(card, aspect):
     """"scene", "split" or "box" for one card (references/motion.md "Layout per template"). A visuals.json
     beat's "layout" wins, except that an explaining card on vertical is never a box over the face.
     Captures: split on vertical (a screen needs the room), a box on wide. Split is vertical only."""
-    # Overlay first: every card floats over the footage beside or above the head. A full-frame scene only
-    # when a beat asks for one ("layout": "scene", a chapter title); the split panel only when asked.
+    # Overlay first: every card floats over the footage beside or above the head. A full-frame scene when a
+    # beat asks for one ("layout": "scene", a chapter title) or for a flow on vertical; the split panel when
+    # asked, or for an icon_burst on vertical.
     want = card.get("layout")
     got = want if want in LAYOUTS else "box"
+    t = (card.get("anim") or {}).get("type")
+    if aspect == "9:16" and got == "box" and t in SCENES + SPLIT_FIRST:
+        # SKILL.md step 3: on vertical an explaining card is a full-frame scene or sits in the split panel
+        got = "split" if t in SPLIT_FIRST else "scene"
     return "box" if got == "split" and aspect != "9:16" else got
 
 
@@ -1134,6 +1153,80 @@ def as_scene(card, face, style, n):
     card.setdefault("transition_in", cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
     card.setdefault("transition_out", cyc[n % len(cyc)] if cyc else TRANSITIONS[1])
     return card
+
+
+def _tw(text, fs, wt=700):
+    """A bold sans line's width in px, about. ponytail: a per-character average, not measureText; the
+    FAIL line (INK_MIN_W) sits well clear of the error."""
+    return len(text or " ") * fs * (0.58 if wt >= 800 else 0.55)
+
+
+def _label(lab):
+    return lab if isinstance(lab, str) or not lab else max((x.get("text", "") for x in lab), key=len, default="")
+
+
+def flow_ink(c, W, H):
+    """[x0, x1] in % of the frame: where Diagrams.tsx draws a flow's cards (nodes and branches; the task chips
+    are swallowed by the time it settles). The same layout as the renderer: shrink to fit, spread the spare
+    width into the wires, centre the cards (a portrait box stacks the chips over the source, no side lane)."""
+    p = (c.get("anim") or {}).get("props") or {}
+    bx, _, bw, bh = SCENE_TYPE_BOX[H > W] if c.get("layout") == "scene" else c["box"]
+    w, h = bw / 100 * W, bh / 100 * H
+    s = min(W, H) / 100 / 10.8
+    lab_min = 40 * s
+    chain = (p.get("nodes") or [])[:6]
+    if not chain:
+        return None
+    n = len(chain)
+    branches = (p.get("split") or [])[:max(0, min(4, 6 - n))]
+    k = len(branches)
+    tasks = [x for x in (p.get("tasks") or []) if (x or {}).get("text")][:4]
+    pad = min(w, h) * 0.03
+    chip_fs = max(lab_min, min(44 * s, h * 0.11))
+    lane = max((_tw(x["text"], chip_fs, 800) + chip_fs * (2.3 if x.get("heavy") else 1.6) + chip_fs * 1.3 for x in tasks),
+               default=0) + 28 * s if k and tasks and w >= h else 0
+    rows = 2 if not k and n >= 4 else 1
+    per = math.ceil(n / rows)
+    gap = max(16 * s, h * (0.08 if rows > 1 else 0.05))
+    f = 1.0
+    while f >= 0.45 - 1e-9:
+        row_h = (h - 2 * pad - (rows - 1) * gap) / rows
+        S = min(row_h * (0.94 if rows > 1 else 1), (h * 0.6 if k else row_h) * f, (340 if w < h else 240) * s * f)
+        nfs = max(lab_min, min(46 * s, S * 0.23))
+        nw = [max(S * 0.92, _tw(_label(x.get("label")), nfs) + 40 * s) for x in chain]
+        rh = min(h * 0.46, 190 * s, (h - 2 * pad - gap * (k - 1)) / k) if k else 0
+        logo_b = min(rh * 0.5, 70 * s * max(f, 0.8))
+        bw_ = max((logo_b + 22 * s + max(_tw(t, max(lab_min, min(58 * s, rh * 0.8 / (len(names) * 1.08))), 800) for t in names) + 56 * s
+                   for names in ([l.get("text", "") for l in x["lines"]] if x.get("lines") else [_label(x.get("label"))]
+                                 for x in branches)), default=0)
+        wire_min, wire_b = 56 * s * f, 120 * s * f
+        row_w = sum(nw[:per]) + max(0, per - 1) * wire_min
+        need = lane + row_w + (wire_b + bw_ if k else 0) + 2 * pad
+        if need > w and f > 0.5:
+            f -= 0.05
+            continue
+        wires = max(0, per - 1) + (1.6 if k else 0)
+        add = min(max(0.0, w - need) / wires, 90 * s) if wires else 0
+        core = row_w + max(0, per - 1) * add + (wire_b + add * 1.6 + bw_ if k else 0)
+        x0 = max(pad, (w - core) / 2 - lane) + lane
+        return [round(bx + x0 / W * 100, 1), round(bx + (x0 + core) / W * 100, 1)]
+    return None
+
+
+def cluster_ink(c):
+    """[x0, x1] in % of the frame for a vertical logo_cluster laid out in its band (Overlays.tsx), else None."""
+    p = (c.get("anim") or {}).get("props") or {}
+    if not p.get("band"):
+        return None
+    if len(p.get("logos") or []) < 2:
+        return [50 - p.get("size", LOGO_SIZE) / 2, 50 + p.get("size", LOGO_SIZE) / 2]
+    return list(p["band"])
+
+
+def explain_ink(c, W, H):
+    """Where a flow or logo_cluster card draws, [x0, x1] % of the width; None for any other card."""
+    t = (c.get("anim") or {}).get("type")
+    return flow_ink(c, W, H) if t == "flow" else cluster_ink(c) or [0, 0] if t == "logo_cluster" else None
 
 
 def overlay_led(c):
@@ -1654,10 +1747,11 @@ def demo():
                        {"word": "d", "kind": "anim", "type": "arrow_callout", "props": {"text": "ship it \U0001F680"}}], None, quiet.append)
     assert [v["word"] for v in ag] == ["c", "d"] and ag[1]["props"]["text"] == "ship it" and len(quiet) == 3, (ag, quiet)
     assert ANIMS[:len(TEMPLATES)] == TEMPLATES and all(t in ANIMS for t in LEGACY + OVERLAYS) and not set(ANIMS) & set(TYPE_ONLY)
-    # layouts: overlay first; a scene or the split panel only when a beat asks
+    # layouts: overlay first; a scene or the split panel when a beat asks, and always for an explaining card on
+    # vertical (SKILL.md step 3: the sample's flow in a box rendered small and off centre)
     fr = lambda t, a="9:16", **k: frame_of({"anim": {"type": t}, "trigger_word": "x", **k}, a)
-    assert (fr("shot"), fr("flow"), fr("icon_burst"), fr("logo_sting"), fr("flow", layout="split"), fr("flow", layout="scene")) == \
-        ("box", "box", "box", "box", "split", "scene")
+    assert (fr("shot"), fr("flow"), fr("icon_burst"), fr("logo_sting"), fr("flow", layout="split"), fr("flow", layout="scene"),
+            fr("flow", layout="box"), fr("flow", "16:9")) == ("box", "scene", "split", "box", "split", "scene", "scene", "box")
     assert frame_of({"src": "images/c.png", "trigger_word": "x"}, "9:16") == "box"
     assert (fr("chat", "16:9"), fr("icon_burst", "16:9", layout="split"), fr("arrow_callout", "16:9")) == ("box", "box", "box")
     # type cards are gone: an old visuals.json naming one is skipped
@@ -1688,6 +1782,11 @@ def demo():
     assert pw["box"][1] == 10 and pw["box"][1] + pw["box"][3] <= 34 - HEAD_GAP + 1e-6, pw["box"]
     assert pt["box"][1] == 34 and (pt["box"][0] + pt["box"][2] <= 32 or pt["box"][0] >= 60), pt["box"]
     assert pl["box"] == [0, 0, 100, 100] and pl["anim"]["props"]["head"] == [32, 34, 28, 23], pl
+    assert pl["anim"]["props"]["band"] == list(LOGO_BAND) and pl["anim"]["props"]["size"] == LOGO_SIZE, pl   # big, centred
+    # a logo in passing leaves when its sentence ends, not 1.2 s later over the next one
+    lw = [{"text": t, "start": 0.5 * i, "end": 0.5 * i + 0.4} for i, t in enumerate("models like Claude. jev is good".split())]
+    lg2 = place_cards([{"word": "Claude", "anim": {"type": "logo"}, "lane": "logo", "hold_s": LOGO_S}], lw, 5, {}, "9:16")
+    assert lg2[0]["end"] == lw[3]["start"], lg2
     # a sticker's rendered x-height: 26.5 PNG px, a 777 x 315 PNG in a 92% x 21.6% box on 1080 x 1920
     st = {"format": "sticker", "size": [777, 315], "xh": 26.5, "box": [4, 10, 92, 21.6]}
     assert 28 < sticker_xh(st, "9:16") < 29.5, sticker_xh(st, "9:16")

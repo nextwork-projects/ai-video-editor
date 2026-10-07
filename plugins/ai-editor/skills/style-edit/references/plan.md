@@ -116,11 +116,14 @@ last 2 s. plan.py picks it up as plan.json `"music"`; run plan.py after it.
 
 `check.py plan` (instant; `edit.py stills` runs it first and stops on a FAIL): FAILs a box under
 the app's UI or on the head, an off-centre vertical card, captions outside the safe band or held
-too long, text-card text under 34 px, a behind card with no cutout. WARNs long stretches with
+too long, text-card text under 34 px, a behind card with no cutout, and a vertical `flow` or
+`logo_cluster` that would draw under 60% of the width or off centre (the renderer's layout, estimated
+from the plan, so the render check never FAILs what this passed). WARNs long stretches with
 nothing moving.
 
 `check.py render` (runs `quality.py` too; results in `check.json`): FAILs a render older than its
-plan or inputs (never show one), a card on the face, a card off centre, a silence inside the speech,
+plan or inputs (never show one), a card on the face, a card off centre (a `flow` or `logo_cluster`
+also under 60% of the width; the fix is in the plan), a silence inside the speech,
 a tiny kept span, frozen frames, a first-frame flash, a card landing over 0.15 s late, text into a
 card's edge, contrast under 3:1, a caption touching the frame's side, true peak over 0 dBTP, SFX
 louder than the voice. WARNs: early landings, one-frame pops, jitter, long static stretches, rhythm

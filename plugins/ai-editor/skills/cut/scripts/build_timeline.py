@@ -42,6 +42,7 @@ import argparse
 import array
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -227,6 +228,55 @@ def audible_start(lvl, noise_db, t, limit):
     while i < end and lvl[i] <= noise_db:
         i += 1
     return None if i >= end else max(t, i * RMS_WIN_S - ONSET_MARGIN_S)
+
+
+# A label far longer than the word can be said in (over 2.5x a speech-rate length and 0.4 s more) is a
+# transcriber artefact: Whisper times a 0.15 s "if" at 0.7 s, or folds a 3 s pause into an "I". Judged
+# on that label, a pause cut "clips" a word the render still plays, and the cut is rebuilt for nothing. So such a label is fitted to where the
+# audio has energy inside it (or just after it, when the label runs ahead of the word), and failing
+# that its end is clamped to a speech-rate length.
+def plausible_s(text):
+    return 0.1 + 0.065 * len(re.sub(r"[^a-z0-9]", "", str(text).lower()))
+
+
+def implausible(w):
+    d, est = w["end"] - w["start"], plausible_s(w["text"])
+    return d > max(2.5 * est, est + 0.4)
+
+
+def fit_labels(toks, lvl, noise_db):
+    """{index: (start, end)} for each implausibly long word label, fitted to the audio: from the first
+    audible window to the end of that audible run, at most a speech-rate length.
+    ponytail: a breath before the word inside the label is taken for the word; judged by level, not voice."""
+    out = {}
+    for i, w in enumerate(toks):
+        if w.get("type") != "word" or not implausible(w):
+            continue
+        est = plausible_s(w["text"])
+        nxt = next((t["start"] for t in toks[i + 1:] if t.get("type") in ("word", "audio_event")), w["end"] + est)
+        a = audible_start(lvl, noise_db, w["start"], min(nxt, w["end"] + est)) if lvl else None
+        if a is None:
+            out[i] = (w["start"], round(w["start"] + est, 3))
+            continue
+        j = int((a + ONSET_MARGIN_S) / RMS_WIN_S)   # the word ends where its first audible run does
+        while j < len(lvl) and lvl[j] > noise_db and j * RMS_WIN_S < a + est:
+            j += 1
+        out[i] = (round(a, 3), round(max(min(j * RMS_WIN_S, nxt), a + 0.04), 3))
+    return out
+
+
+def apply_labels(toks, labels):
+    """toks with fitted labels as copies; the raw list is never changed."""
+    return [dict(t, start=labels[i][0], end=labels[i][1]) if i in labels else t for i, t in enumerate(toks)]
+
+
+def load_fitted(d):
+    """words.raw.json with build_timeline's fitted labels (report.json): the words paper-edit.md,
+    words.json and verify_cut.py all judge, so the three agree."""
+    toks = load_words(Path(d) / "words.raw.json")
+    rep = Path(d) / "report.json"
+    labels = json.loads(rep.read_text()).get("labels", {}) if rep.exists() else {}
+    return apply_labels(toks, {int(k): v for k, v in labels.items()})
 
 
 def derive_noise_db(lvl):
@@ -486,13 +536,13 @@ def main():
     a = ap.parse_args()
 
     d = Path(a.edit_dir)
-    toks = load_words(d / "words.raw.json")
-    toks = [t for t in toks if t.get("type") in ("word", "audio_event")]
-    words = [t for t in toks if t["type"] == "word"]
-    if not words:
+    raw = load_words(d / "words.raw.json")
+    toks = [t for t in raw if t.get("type") in ("word", "audio_event")]
+    if not any(t["type"] == "word" for t in toks):
         sys.exit("ERROR: transcript has no words")
     sp = d / "spans.json"
-    model_cuts = resolve_spans(json.loads(sp.read_text()) if sp.exists() else [], toks)
+    spans_in = json.loads(sp.read_text()) if sp.exists() else []
+    resolve_spans(spans_in, toks)   # a bad quote fails before the audio is read
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import taste    # the user's own pause setting (taste skill) beats the default
@@ -508,6 +558,14 @@ def main():
         sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
                  "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
                  "pass --noise <dB> (about 10 dB above the mean volume).")
+    labels = fit_labels(raw, lvl, noise)
+    if labels:
+        print(f"labels     {len(labels)} implausibly long word label(s) fitted to the audio: "
+              + ", ".join(f"{raw[i]['text'].strip()!r} {raw[i]['end'] - raw[i]['start']:.1f}s" for i in list(labels)[:5]))
+    raw = apply_labels(raw, labels)
+    toks = [t for t in raw if t.get("type") in ("word", "audio_event")]
+    words = [t for t in toks if t["type"] == "word"]
+    model_cuts = resolve_spans(spans_in, toks)
     if a.noise is None:
         print(f"noise      {noise:.0f} dB derived (speech {diag['speech']:.0f}, "
               + (f"music bed {diag['bed']:.0f}: trimming only between words)" if bed
@@ -561,7 +619,8 @@ def main():
     (d / "decisions.json").write_text(json.dumps(spans, indent=1))
     (d / "report.json").write_text(json.dumps(
         {"source": str(Path(a.source).resolve()), "fps": fps, "duration": dur, "final_s": final,
-         "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts},
+         "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts,
+         "labels": {str(i): v for i, v in labels.items()}},
         indent=1))
     (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1))
     import preview_cut
