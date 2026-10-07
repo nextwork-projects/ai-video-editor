@@ -41,10 +41,12 @@ still for +-0.4 s while most of the frame changes (a cut or the camera moving un
 and not flat (a still sky is not one), grown over the samples where the footage stood still, with text
 in it or a hard rectangular edge, and up for under 60% of the video. Fixture (`graphics.py demo`, a
 panning 3-shot clip with a card, an app tile, a screenshot, a still sky and a moving ball): precision
-and recall 0.00 / 0.00 in plate mode, 1.00 / 1.00 in overlay mode. No entrance or exit fit there yet.
+and recall 0.00 / 0.00 in plate mode, 1.00 / 1.00 in overlay mode. Entrances and exits there track
+the graphic's settled picture (position: slide, size: scale, how much shows: cut or fade) and fit the
+same eases. Ceiling: footage that barely moves (slow-drifting stills) gives no detections.
 
 **Kinds.** Code guesses first (moving: b-roll or a UI recording; small, near-square, 8 colours or
-fewer, a line of text at most and none running out of it: a logo; 4+ OCR lines: a screenshot; text
+fewer, a line of text at most, none running out of it and none filling half the box: a logo; 4+ OCR lines: a screenshot; text
 on a flat ground: a text card). `gemini.py kinds` replaces the guess and drops crops it calls
 `part of the set`; each crop goes with its size on screen ("9% x 5% of a 1080 x 1920 frame,
 near-square"), which the enlarged crop hides. Without a key: one Agent call, `model: "haiku"`, reads the crops in

@@ -108,8 +108,8 @@ def fit_ease(ts, p, fps):
             if best is None or err[k] < best[0]:
                 best = (float(err[k]), name, float(t0), float(ds[k]))
     err, name, t0, d = best
-    if d <= 1.0 / fps + 1e-6:
-        name, d = "none", 0.0      # landed within a frame: a cut
+    if d <= 1.5 / fps + 1e-6:
+        name, d = "none", 0.0      # landed within a frame and a half: a cut (a curve fitted to noise otherwise)
     return {"ease": name, "duration_s": round(d, 3), "overshoot": round(max(0.0, float(p.max()) - 1), 3),
             "t0": round(t0, 3), "err": round(err / len(p), 4)}
 
@@ -511,6 +511,75 @@ def motion(frames, plate, body, box, fps, t_first, blurred=False):
     return out
 
 
+def overlay_motion(frames, box, fps, t_first):
+    """How a graphic arrives over moving footage, where there is no plate to diff against. Its
+    settled picture (the window's last frame, inside its box) is searched for in every source frame
+    at a few sizes: where it is found gives a slide, at what size a scale. Otherwise the curve is how
+    close the box's own pixels are to that picture (a cut or a fade). The curve goes to fit_ease, as
+    in motion(). Same dict shape as motion(), or None.
+    ponytail: a slide from off-frame is found only once the whole card is in, so its distance reads
+    short; fades on a slide or scale are not flagged here."""
+    import cv2
+    if len(frames) < 6:
+        return None
+    H, W = frames[0].shape[:2]
+    x0, y0 = int(box[0] * W), int(box[1] * H)
+    x1, y1 = int((box[0] + box[2]) * W), int((box[1] + box[3]) * H)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    ref = frames[-1][y0:y1, x0:x1].astype(np.float32)
+    base = float(np.abs(frames[0][y0:y1, x0:x1].astype(np.float32) - ref).mean())
+    if base < 15:
+        return None             # already up when the window starts: nothing to fit
+    pres = [float(np.clip(1 - np.abs(f[y0:y1, x0:x1].astype(np.float32) - ref).mean() / base, 0, 1)) for f in frames]
+    T = cv2.cvtColor(frames[-1], cv2.COLOR_RGB2GRAY)[y0:y1, x0:x1]
+    fcx, fcy, bw, bh = (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0
+    where = []                  # per frame: (dx, dy in box sizes, scale) where it is found, else None
+    for f in frames:
+        g, best = cv2.cvtColor(f, cv2.COLOR_RGB2GRAY), None
+        for s in (0.6, 0.7, 0.8, 0.9, 1.0):
+            t = cv2.resize(T, (max(4, round(bw * s)), max(4, round(bh * s))), interpolation=cv2.INTER_AREA)
+            r = cv2.matchTemplate(g, t, cv2.TM_CCOEFF_NORMED)
+            _, sc, _, (lx, ly) = cv2.minMaxLoc(r)
+            if best is None or sc > best[0]:
+                best = (sc, (lx + t.shape[1] / 2 - fcx) / bw, (ly + t.shape[0] / 2 - fcy) / bh, s)
+        where.append(best[1:] if best[0] >= 0.7 else None)
+    first = None
+    for k in range(len(frames) - 1, -1, -1):
+        if where[k]:
+            first = k
+        else:
+            break
+    ts = t_first + np.arange(len(frames)) / fps
+    out = {"kind": "cut", "from": None, "distance_pct": 0.0, "scale_from": 1.0, "fade": False, "mask": None}
+    dx, dy, s0 = where[first] if first is not None else (0.0, 0.0, 1.0)
+    if first is not None and first > 0 and max(abs(dx), abs(dy)) > 0.15:
+        out["kind"] = "slide"
+        vert = abs(dy) >= abs(dx)
+        out["from"] = ("top" if dy < 0 else "bottom") if vert else ("left" if dx < 0 else "right")
+        d0 = dy if vert else dx
+        out["distance_pct"] = round(100 * abs(d0) * (bh / H if vert else bw / W), 1)
+        curve = [0.0] * first + [1 - (w[1] if vert else w[0]) / d0 for w in where[first:]]
+    elif first is not None and first > 0 and s0 < 0.85:
+        out["kind"] = "scale"
+        out["scale_from"] = s0
+        curve = [0.0] * first + [(w[2] - s0) / (1 - s0) for w in where[first:]]
+    else:
+        curve = pres
+    fit = fit_ease(ts, np.clip(np.array(curve), -0.5, 1.6), fps)
+    if not fit:
+        return None
+    if fit["duration_s"] == 0.0:
+        out.update(kind="cut", distance_pct=0.0, scale_from=1.0, mask=None)
+        out["from"] = None
+    elif out["kind"] == "cut":
+        out.update(kind="fade", fade=True)
+    out.update(fit)
+    if out["overshoot"] < 0.02 and out["ease"].startswith("back"):
+        out["ease"] = "power3.out"
+    return out
+
+
 def reverse_ease(e):
     if not e:
         return e
@@ -567,6 +636,9 @@ def guess_kind(g, look):
     """Code's guess at the kind. gemini.py kinds replaces it."""
     if g["moving"] >= 6:
         return "UI recording" if g["text_lines"] >= 2 else "b-roll"
+    # one OCR line filling most of the box: a word mark or a one-line text card, not an icon
+    if g["text_lines"] >= 1 and (g.get("text_fill") or 0) >= 0.5:
+        return "text card"
     # an app or brand icon: small, near-square on screen, a few flat colours, a name at most, and no
     # line of text running out of it (then it is a piece of a wider card)
     if (g.get("colours") or 99) <= 8 and 0.75 <= (g.get("aspect") or 0) <= 1.33 and g.get("area_pct", 100) <= 8 \
@@ -591,6 +663,21 @@ def text_lines_in(box, t0, t1, look):
                               and x - 0.02 <= b[0] + b[2] / 2 <= x + w + 0.02
                               and y - 0.02 <= b[1] + b[3] / 2 <= y + h + 0.02))
     return int(statistics.median(counts)) if counts else 0
+
+
+def text_fill(box, t0, t1, look):
+    """Share of the box the biggest OCR line inside it covers while it is up (median per sample):
+    a word mark fills most of its box, an app icon's name under it a strip."""
+    if not look:
+        return 0.0
+    x, y, w, h = box
+    fills = []
+    for s in look.get("samples") or []:
+        if t0 <= s["t"] <= t1:
+            fills.append(max([b[2] * b[3] / max(1e-6, w * h) for tx, b, cap in s["lines"] if not cap
+                              and x - 0.02 <= b[0] + b[2] / 2 <= x + w + 0.02
+                              and y - 0.02 <= b[1] + b[3] / 2 <= y + h + 0.02] or [0.0]))
+    return round(min(1.0, statistics.median(fills)), 2) if fills else 0.0
 
 
 def text_crossing(box, t0, t1, look):
@@ -726,15 +813,18 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
         fc = face(t_in)
         body = body_mask(fc, H, W)
         blur = bool(blurred[i0:i1 + 1].mean() >= 0.5)
-        # ponytail: no entrance or exit fit in overlay mode (it needs a plate); fit against the
-        # shot before the graphic lands if overlay creators need their motion.
-        win = list(decode(path, W, H, None, max(0.0, t_in - 0.6), 1.4)) if not overlay else []
-        ent = motion(win, pl, body, box, src_fps, max(0.0, t_in - 0.6), blur) if len(win) > 6 else None
+        # Overlay mode has no plate: the graphic's own settled picture is tracked instead.
+        win = list(decode(path, W, H, None, max(0.0, t_in - 0.6), 1.4))
+        ent = None
+        if len(win) > 6:
+            ent = overlay_motion(win, box, src_fps, max(0.0, t_in - 0.6)) if overlay else \
+                motion(win, pl, body, box, src_fps, max(0.0, t_in - 0.6), blur)
         ext = None
-        if t_out < dur - 0.3 and not overlay:
+        if t_out < dur - 0.3:
             win = list(decode(path, W, H, None, max(0.0, t_out - 0.9), 1.4))
             if len(win) > 6:
-                ext = reverse_ease(motion(win[::-1], plate_of[min(i1, n - 1)], body_mask(face(t_out), H, W),
+                ext = reverse_ease(overlay_motion(win[::-1], box, src_fps, 0.0) if overlay else
+                                   motion(win[::-1], plate_of[min(i1, n - 1)], body_mask(face(t_out), H, W),
                                           box, src_fps, 0.0, blur))
         rec = {"n": k, "t_in": round(t_in, 2), "t_out": round(t_out, 2), "hold_s": round(t_out - t_in, 2),
                "blur_behind": blur,
@@ -744,7 +834,8 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
                "colours": colour_count(own_crop(F[tr["idx"][len(tr["idx"]) // 2]], tr["boxes"][len(tr["idx"]) // 2])),
                "aspect": round(box[2] * w0 / max(1e-6, box[3] * h0), 2),
                "text_lines": text_lines_in(box, t_in, t_out, look),
-               "text_crossing": text_crossing(box, t_in, t_out, look)}
+               "text_crossing": text_crossing(box, t_in, t_out, look),
+               "text_fill": text_fill(box, t_in, t_out, look)}
         if rec["box"][3] < 0.05 and rec["box"][2] > 4 * rec["box"][3] and not rec["text_lines"] and look:
             continue      # a thin strip with no text in it: a shelf edge or the ceiling line
         rec["kind"] = guess_kind(rec, look)
@@ -997,8 +1088,8 @@ def moving_clip(mp4, W=360, H=640, FPS=30):
     """An 8 s vlog-style fixture, no speaker: the camera pans the whole time over three shots (cuts at
     2.5 s and 5.5 s), with a flat sky band in the second shot and a bright ball moving through
     the third. Hand-labelled truth, (t_in, t_out, box as fractions):
-      a product card (border, text bars) 1.0-4.0 s across the first cut,
-      an app tile 4.5-7.0 s across the second cut,
+      a product card (border, text bars) 1.0-4.0 s across the first cut, sliding up 0.3 s (power3.out),
+      an app tile 4.5-7.0 s across the second cut, fading out over its last 0.3 s,
       a screenshot 6.2-7.8 s over the panning third shot."""
     from PIL import Image, ImageDraw
     rng = np.random.default_rng(5)
@@ -1035,9 +1126,12 @@ def moving_clip(mp4, W=360, H=640, FPS=30):
         if k == 2:   # a bright ball rolling through the shot
             cx, cy = int(60 + 60 * (t - 5.5)), 300
             img[cy - 25:cy + 25, max(0, cx - 25):cx + 25] = 250
-        for im, x, y, t0, t1 in over:
+        for j, (im, x, y, t0, t1) in enumerate(over):
             if t0 <= t < t1:
-                img[y:y + im.shape[0], x:x + im.shape[1]] = im
+                if j == 0:     # the card slides up 200 px over 0.3 s, power3.out
+                    y += round(200 * (1 - float(EASES["power3.out"](min(1.0, (t - t0) / 0.3)))))
+                a = min(1.0, (t1 - t) / 0.3) if j == 1 else 1.0   # the tile fades out over 0.3 s
+                img[y:y + im.shape[0], x:x + im.shape[1]] = img[y:y + im.shape[0], x:x + im.shape[1]] * (1 - a) + im * a
         frames.append(np.clip(img + rng.normal(0, 2, img.shape), 0, 255).astype(np.uint8))
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
                     "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "16", str(mp4)],
@@ -1066,6 +1160,14 @@ def demo_moving():
         assert r.get("mode") == "overlay" and p >= 0.75 and rc == 1.0, (p, rc, r["graphics"])
         tile = next(g for g in r["graphics"] if iou(g["box"], truth[1][2]) >= 0.5)
         assert tile["kind"] == "logo", tile
+        # entrance and exit fitted on moving footage, as in plate mode
+        card = next(g for g in r["graphics"] if iou(g["box"], truth[0][2]) >= 0.5)
+        e = card["entrance"]
+        assert e and e["kind"] == "slide" and e["from"] == "bottom", e
+        assert e["ease"] in ("power2.out", "power3.out", "power4.out", "expo.out") and 0.2 <= e["duration_s"] <= 0.42, e
+        assert tile["entrance"] and tile["entrance"]["kind"] == "cut", tile["entrance"]
+        x = tile["exit"]
+        assert x and x["kind"] == "fade" and 0.15 <= x["duration_s"] <= 0.45, x
 
 
 def demo_kinds():
@@ -1091,6 +1193,16 @@ def demo_kinds():
     look = {"samples": [{"t": 4.0, "lines": [["BUSINESS OR KIDS?", [0.1, 0.2, 0.8, 0.05], False]]}]}
     assert text_crossing([0.07, 0.18, 0.14, 0.09], 3.8, 4.8, look) == 1
     assert guess_kind({**corner, "text_crossing": 1}, None) != "logo"
+    # a one-line word mark in a near-square box: OCR's one word fills most of it, so not a logo
+    mark = [0.40, 0.40, 0.12, 0.07]
+    look = {"samples": [{"t": 2.0, "lines": [["NEW", [0.405, 0.41, 0.11, 0.05], False]]}]}
+    fill = text_fill(mark, 1.8, 2.8, look)
+    assert fill >= 0.5, fill
+    assert guess_kind({**g, "text_lines": 1, "colours": 3, "aspect": 1.0, "area_pct": 0.8, "text_fill": fill},
+                      None) == "text card"
+    # the icon with its name under it: the name is a strip of its box, still a logo
+    look = {"samples": [{"t": 2.0, "lines": [["Notes", [0.41, 0.455, 0.1, 0.012], False]]}]}
+    assert text_fill(mark, 1.8, 2.8, look) < 0.5
 
 
 def demo():

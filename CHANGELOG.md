@@ -4,6 +4,16 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Teardown graphics in overlay mode (moving footage, no steady speaker) had no entrance or exit.
+  `overlay_motion` tracks the graphic's settled picture through the source frames (where it is found
+  gives a slide, its size a scale, how much of it shows a cut or fade) and fits the curve with the same
+  `fit_ease` as plate mode. A fit under 1.5 frames now reads as a cut in both modes. Test:
+  `graphics.py demo` (card slides up 0.3 s power3.out, tile cuts in and fades out over moving footage).
+- The code-only kind guess called a one-line word mark in a near-square box a logo. A box whose biggest
+  OCR line covers half of it or more (`text_fill`) is a text card. Test: `graphics.py demo`.
+- Checked on one public non-talking-head explainer (8 hand-labelled graphics): overlay mode precision
+  0.00, recall 0.00 before and after; the miss is detection on near-still footage (now in Next).
+
 - The Modal render image installs Node from NodeSource's signed apt source; check_plugins now rejects any downloaded script piped into a shell, root or not.
 
 - The Debian and Ubuntu Node fix line ran NodeSource's setup script as root. It now adds NodeSource's
