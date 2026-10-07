@@ -42,8 +42,24 @@ def frontmatter(path):
     return {k.strip(): v.strip() for k, v in fm.items()}, body
 
 
+MAX_LINES = 250
+TRIGGERS = {}  # quoted trigger phrase -> skill that claims it
+
+
 def check_skill(path):
     fm, body = frontmatter(path)
+    vendored = (path.parent / "LICENSE").exists()
+    # PRINCIPLES.md "Cost": a skill is read every time it fires; detail goes in references/
+    lines = path.read_text(encoding="utf-8").count("\n")
+    if not vendored and lines > MAX_LINES:
+        errors.append(f"{path}: {lines} lines, over {MAX_LINES}; move detail into references/")
+    # Two skills claiming the same quoted phrase both fire on it. Phrases after "Not for" are disclaimers.
+    claims = re.split(r"\bnot for\b", fm.get("description", ""), flags=re.I)[0]
+    for phrase in re.findall(r'"([^"]{3,})"', claims):
+        key = re.sub(r"\s+", " ", phrase.lower().strip(" .,"))
+        other = TRIGGERS.setdefault(key, path.parent.name)
+        if other != path.parent.name:
+            errors.append(f"{path}: trigger \"{phrase}\" is also claimed by {other}; give it to one skill")
     name = fm.get("name", "")
     if not NAME.match(name) or len(name) > 64 or name != path.parent.name:
         errors.append(f"{path}: name {name!r} must be kebab-case, at most 64 chars, and match its folder")
@@ -56,7 +72,7 @@ def check_skill(path):
     if PATHS_LINE not in body:
         errors.append(f"{path}: missing the line {PATHS_LINE!r}")
     # every question goes in the question box (PRINCIPLES.md "Asking"); vendored skills keep their own text
-    if not (path.parent / "LICENSE").exists() and "AskUserQuestion" not in body:
+    if not vendored and "AskUserQuestion" not in body:
         errors.append(f"{path}: never says to ask in the question box (AskUserQuestion)")
     for ref in re.findall(r"\$\{CLAUDE_SKILL_DIR\}/((?:references|scripts)/[\w./-]+)", body):
         if not (path.parent / ref).exists():

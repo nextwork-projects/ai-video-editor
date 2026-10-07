@@ -1,6 +1,6 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or hands over raw footage with flubbed lines and gaps. "Edit my video" and "edit my video like @creator" are start triggers; cut runs when start calls it or when the user asks only to cut. Runs before style-edit. Not for adding captions, zooms or cards (that is style-edit), and not for analysing someone else's videos (that is creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before style-edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (style-edit), and not for analysing someone else's videos (creator-teardown).
 license: MIT
 compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster-whisper). Recommended TypeSafe key (Jev decides the cut for a fraction of a cent; without it Claude decides). Optional ElevenLabs key or CrisperWhisper. Mac, Windows or Linux. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -11,7 +11,7 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
 
-Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
 
 One raw take in. A clean jump cut out, with nothing on a timeline for the user to touch.
 
@@ -50,17 +50,19 @@ curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/
 
 ## 0. Ask: the cut first, or everything at once
 
-Before anything else, ask the user one question, even if they said "edit my video like @creator":
+Before anything else, ask the user one question in the question box, even if they said "edit my
+video like @creator":
 
 > Do you want just the cut first, or the cut and the styled edit in one go?
 > - **Just the cut first.** I take out the retakes, false starts and pauses, and you approve that
 >   before I add captions, zooms or visuals. If the cut changes, the visuals don't have to be
 >   rebuilt, so it uses fewer tokens.
 > - **Everything at once.** I cut it, then carry straight on into the style without waiting for you
->   to approve the cut. You still see the cut page and the stills before anything renders.
+>   to approve the cut. You still see the cut page and the stills sheet before anything renders.
 
-List "just the cut first" first. Skip the question only when the user already answered it in
-their message ("just cut it", "cut and style it in one go").
+List "just the cut first" first, marked (Recommended). Skip the question only when the user already
+answered it ("just cut it", "cut and style it in one go") or when start or clips called this skill
+(they have already decided).
 
 - **Just the cut first:** run steps 1-6 and stop. Do not start style-edit until the user approves
   the cut **and** asks for the style ("style it", "now edit it like @creator").
@@ -71,7 +73,7 @@ their message ("just cut it", "cut and style it in one go").
 ## 0b. Read the user's taste
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show --edit edits/<name>
 ```
 
 Follow every rule in it; the scripts already read its settings. When the user reacts to the result
@@ -83,7 +85,7 @@ Follow every rule in it; the scripts already read its settings. When the user re
 $PY "$S/transcribe.py" <source> edits/<name>/words.raw.json
 ```
 
-Picks the engine itself: ElevenLabs Scribe when a key is saved, else CrisperWhisper when the
+Say the time first (below). Picks the engine itself: ElevenLabs Scribe when a key is saved, else CrisperWhisper when the
 setup skill installed it, else the free local Whisper model. `--engine whisper|crisper|scribe`
 overrides. Whisper takes 1-4 minutes for a 3-minute take on a laptop, CrisperWhisper about the
 length of the take. Whisper tidies speech (drops some ums and false starts); Scribe and
@@ -209,6 +211,18 @@ done. `cut.mp4` and `words.json` are what style-edit takes next.
 
 On "just the cut first", stop here after approval: say the cut is done and that they can ask for
 the style when they're ready. Never start style-edit on your own.
+
+## If a script stops
+
+| message | do |
+|---|---|
+| `no such file` / `ffmpeg could not read audio` (transcribe) | ask for the right path; never copy or convert the source |
+| `faster-whisper missing` / `CrisperWhisper missing` | run with `$PY`, or the setup skill's step 3 |
+| `no ElevenLabs key` (exit 2) / `HTTP 4xx` (exit 3) | drop `--engine scribe`, or re-save the key with the setup skill |
+| `spans.json exists. Pass --force` | only on a fresh decision: `propose --force` (keeps spans.prev.json) |
+| build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |
+| `cannot derive a silence threshold` / `marked no silence` | measure with volumedetect and pass `--noise` (step 3) |
+| render `ERROR ... (kept in <tmp>)` | say the message; re-run render once; the temp folder has the segments |
 
 ## Rules
 

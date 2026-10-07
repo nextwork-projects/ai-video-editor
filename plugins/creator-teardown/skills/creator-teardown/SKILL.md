@@ -1,6 +1,6 @@
 ---
 name: creator-teardown
-description: Reverse-engineer a short-form creator's video format from their real numbers, then plan your own video in their style. Pulls a TikTok or YouTube Shorts profile (or pasted links, Instagram reels too) with view, like and save counts, transcribes the top videos word for word with timings, measures pace, pauses and fillers, maps each video into timed beats, and writes a teardown.md someone can film from, plus a teardown.html page of their graphics, motion and sound. It also writes an edit plan for the user's own video, every card timed to its word, as a table and an .srt. Use when the user names a creator or account and wants to analyse, break down or study their videos ("analyse @handle", "teardown of @handle", "what makes this creator's videos work"), pastes TikTok, YouTube or Instagram links and asks what the pattern is, hands over their own video and says "edit this like @handle", or asks to install or set up creator-teardown. Not for researching a topic, and not for cutting raw footage.
+description: Reverse-engineers a short-form creator's video format from their real numbers. Pulls a TikTok or YouTube Shorts profile (or pasted links, Instagram reels too) with view, like and save counts, transcribes the top videos word for word, measures pace, pauses and fillers, maps each video into timed beats, and writes a teardown.md someone can film from, a teardown.html page of their graphics, motion and sound, and the style.json the ai-editor plugin edits from (on its own it can write an edit plan as a table and .srt). Use when the user wants to analyse, break down or study a creator ("analyse @handle", "tear down @handle", "teardown of @handle", "break down this creator", "what makes this creator's videos work"), pastes TikTok, YouTube or Instagram links and asks what the pattern is, or asks to set up creator-teardown. Not for editing the user's own video like a creator when ai-editor is installed (its start skill), not for researching a topic, and not for cutting raw footage.
 license: MIT
 compatibility: Python 3.9+, ffmpeg, yt-dlp and internet access. Optional ElevenLabs key for verbatim transcripts and Gemini key for the look pass. Mac, Windows or Linux.
 ---
@@ -9,38 +9,17 @@ compatibility: Python 3.9+, ffmpeg, yt-dlp and internet access. Optional ElevenL
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md.
 
-Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
 
 Give it a creator. Get back a teardown of their format and a page of what they do on
 screen, every claim tied to a view count and every timing measured.
 
 ## Output
 
-Everything lands under the folder Claude Code was started in:
-
-```
-creator-teardowns/<handle>/
-  videos.json                 stats for every video pulled
-  transcripts/<id>.json       verbatim, word-level timings
-  transcripts/<id>.txt        flat text + role/views/duration/wpm header
-  metrics.json                measured pace, pauses, fillers per video
-  video/<id>.mp4              the picked videos (visual pass)
-  video/<id>.visual.json      cut times, shot lengths, zoom events per video
-  video/<id>.look.json        OCR lines, faces and graphics per sample (look.py)
-  video/<id>.look-ai.json     the look pass's words per video (Gemini or fallback)
-  video/<id>.graphics.json    every graphic: box, kind, entrance, exit, hold, motion
-  video/<id>.sound.json       sound effects and music
-  graphics/                   one crop per graphic + heatmap.png
-  sheets/<id>.jpg             one 3 x 3 sheet per video, read only in the fallback
-  style.json                  every measured number, for editing in this style
-  look.md                     the look in under 48 lines: what Claude reads
-  teardown.html               THE PAGE: what the user looks at (report.py)
-  report.json                 hook, winners against control, AI tells
-  teardown.md                 THE ANALYSIS
-  events.json                 card events, when the card pass ran
-edit-plans/<name>/
-  plan.md, plan.srt           the user's video, planned in the creator's style
-```
+`creator-teardowns/<handle>/`: `teardown.md` (the analysis), `teardown.html` (the page the user looks
+at), `look.md` (what Claude reads), `style.json` (every measured number, for editing in this style),
+plus the per-video files listed in `${CLAUDE_SKILL_DIR}/references/outputs.md`. An edit plan goes to
+`edit-plans/<name>/`.
 
 ## First: doctor
 
@@ -61,13 +40,21 @@ Gemini keys are optional. Never ask for either in the chat: the user saves them 
 
 ## Pipeline
 
+### Quick mode (called by ai-editor's start, setup or style-edit)
+
+When another skill needs only the style.json: Steps 1, 2 and 3b-3c with `--top 5`, the Step 3c
+parts question only if the caller has not asked it, then stop. Skip the Step 3 written passes and
+Steps 4-6. About a minute per creator plus transcription.
+
 ### Step 0: Ask, once
 
-1. **Which creators?** One handle, several, or pasted links. Several is normal: people
-   like one creator's captions and another's pace.
-2. With more than one: **which part from whom?** Captions, pace (cuts, zooms, motion),
-   visuals (graphics, face framing, cards). Or a weighting ("mostly Alice"). "Not sure
-   yet" is fine: ask again after Step 3b, with each creator's `look.md` to compare.
+Skip what the message already answers. One question box call:
+
+1. **Which creators?** The handle or links they named (Recommended) / I'll paste more handles or
+   links. Several is normal: people like one creator's captions and another's pace.
+2. With more than one: **which part from whom?** Captions, pace (cuts, zooms, motion), visuals
+   (graphics, face framing, cards), or **Not sure yet (Recommended)**: ask again after Step 3b, with
+   each creator's `look.md` to compare.
 
 ### Step 1: Get the videos
 
@@ -95,8 +82,9 @@ exact videos. The median ones are the control: a move that appears in the 500K
 video *and* the 3K video is that creator's habit, not the reason the 500K one
 worked. Keep at least 2.
 
-Whisper (free, local) is the default; with an ElevenLabs key `transcribe` uses Scribe,
-which keeps every filler ($0.22 an hour of audio; give the estimate before 10+ videos).
+Say the time first (download plus transcription, about a minute a video on a laptop). Whisper
+(free, local) is the default; with an ElevenLabs key `transcribe` uses Scribe, which keeps every
+filler ($0.22 an hour of audio; give the estimate before 10+ videos).
 If filler counts lean on Whisper transcripts, say so in the teardown.
 
 ### Step 3: Measure, then analyse
@@ -108,7 +96,9 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/metrics.py" <handle>
 Writes `metrics.json` (WPM per third, pauses, fillers, sentence length, you/I/we,
 repeated phrases), all off the word timestamps.
 
-Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its passes:
+Then load `${CLAUDE_SKILL_DIR}/references/analysis-framework.md` and run its passes. Read
+`transcripts/<id>.txt` (flat text with a stats header), never `transcripts/<id>.json` or `metrics.json`
+whole:
 
 1. **Beat map + timings.** Every video split into labelled beats with second-marks
    and word counts.
@@ -198,21 +188,8 @@ default.
 
 ### Step 3d: Several creators (when the user named more than one)
 
-Run Steps 1 to 3b for each creator into its own folder; each keeps its own
-`style.json`. Then show the user each `look.md` side by side (5 lines each: pace,
-motion, captions, face, graphics) and ask the two questions in Step 0 if they are
-still open. Blend:
-
-```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/editplan.py" blend <name> --from alice,bob \
-    --captions alice --pace bob --visuals bob        # or --weights alice=0.7,bob=0.3
-```
-
-Writes `creator-teardowns/<name>/style.json` (and its `look.md`). A named owner gives
-its whole part; otherwise numbers are averaged by weight and words come from the
-heaviest. Parts: `captions`; `pace` = pace, zoom, motion; `visuals` = graphics, face,
-look, card events. `--take` (Step 3c) works on a blend too. style-edit takes the blend like
-any creator.
+Follow `${CLAUDE_SKILL_DIR}/references/blend.md`: Steps 1 to 3b per creator, `look.md` side by side,
+then `editplan.py blend`.
 
 ### Step 4: Write the teardown
 
@@ -229,7 +206,21 @@ Ask whether the format is worth keeping. If yes, follow
 
 When the user hands over their own video, follow
 `${CLAUDE_SKILL_DIR}/references/edit-plan.md`. It needs the creator's `events.json`
-from the visual pass.; it does not render.
+from the visual pass; it does not render.
+
+## If a script stops
+
+| message | do |
+|---|---|
+| doctor `Not ready: ...` | follow `references/setup.md` for each line it lists |
+| `yt-dlp returned nothing` / `parsed 0 videos` | read the hint it prints: update yt-dlp (doctor shows how), or ask for single video links and use `--urls` |
+| Instagram profile fails | ask for 10+ reel links (Step 1 "Instagram") |
+| `... Fix the key, then rerun` (transcribe) | the ElevenLabs key is wrong: the user re-saves it with `setkey` in their own terminal, or drop it and use Whisper |
+| `gemini.py` exits 2 (no key) | Step 3b "No Gemini key" |
+| `Gemini rejected the key` / `none of ... is available to this key` | the user makes a new key at the link it prints; meanwhile the haiku fallback |
+| `no videos in ... Run download first` | run `visual.py download <handle>` |
+| `yt-dlp not found` | run `fetch.py doctor` and fix what it lists |
+| some videos fail to transcribe | retry with `--ids`, then say which failed; never fill the gap |
 
 ## Hard rules
 

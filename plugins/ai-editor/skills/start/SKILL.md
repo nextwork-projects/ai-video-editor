@@ -1,6 +1,6 @@
 ---
 name: start
-description: The front door of the AI video editor. Takes the user's video and a few multiple-choice answers (platform, creators they like and what to take from each, audience and goal, brand kit, their own photos and screenshots, the products and people they will name, what to avoid, captions, sound), saves them once to a profile so they are never asked twice, then runs the whole edit in order (setup if a tool is missing, creator-teardown for a new creator, cut, style-edit) so the user only drops a video, answers, approves the cut and approves the stills. Use when the user says "edit my video", "make my video look like @creator", "make this look like <creator>'s videos", "I want my videos edited", "start", "new video", drops a video file or pastes any link (video, Drive or Dropbox share, creator profile, website, podcast) with no other instruction, or asks how to use the editor. Not for a single step the user names on its own ("just cut it" is cut, "tear down @handle" is creator-teardown, "captions too small" is taste).
+description: The front door of the AI video editor. Takes the user's video and a few multiple-choice answers (platform, creators to copy and what to take from each, audience, brand kit, own photos, names, what to avoid, captions, sound), saves them once to a profile, then runs the whole edit in order (setup if a tool is missing, creator-teardown for a new creator, cut, style-edit) so the user only drops a video, answers, approves the cut and approves the stills sheet. Use when the user says "edit my video", "edit this like @creator", "make my video look like @creator", "make this look like <creator>'s videos", "I want my videos edited", "start", "new video", drops a video file or pastes any link (video, Drive or Dropbox share, creator profile, website, podcast) with no other instruction, or asks how to use the editor. Not for one step named on its own (only cutting is cut, only analysing a creator is creator-teardown, a correction is taste, styling an existing cut is style-edit).
 license: MIT
 compatibility: Python 3.9+, standard library only for the intake. The steps it runs need what the setup skill installs. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -11,7 +11,9 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
 
-The user's whole job: drop a video, answer a few questions, approve the cut, approve the stills.
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
+
+The user's whole job: drop a video, answer a few questions, approve the cut, approve the stills sheet.
 Everything else is this skill's job.
 
 `P="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py"`. Run it with `python3` on Mac and Linux, `py` on Windows.
@@ -49,8 +51,9 @@ re-edit.
 
 ## 1. The video
 
-If the user has not given a video path (or a link step 0 fetched), ask for it (or offer the cut
-skill's sample take). Name the edit folder after the file (`IMG_1234.MOV` -> `edits/img-1234`).
+If the user has not given a video path (or a link step 0 fetched), ask for it in the question box:
+**I'll give the path (Recommended)** / **Use the sample take** (the cut skill's "No video yet?").
+Name the edit folder after the file (`IMG_1234.MOV` -> `edits/img-1234`).
 
 ## 2. Intake: only what is missing
 
@@ -60,10 +63,10 @@ python3 "$P" missing --style     # normally answered at setup; ask here only if 
 ```
 
 Prints the question ids with no saved answer. The style questions (platform, creators, liked
-videos, brand, own photos, avoid, captions, sound, behind) are asked once at the end of setup. Ask only those, always in the question box (the AskUserQuestion tool; numbered
-text questions only in an agent without it), at most four questions per call, grouped as below. Every
-question has a first option that a beginner can accept as is: list it first and mark it
-"(Recommended)". Free-text answers ("Other") are always allowed.
+videos, brand, own photos, avoid, captions, sound, behind) are asked once at the end of setup. Ask
+only the printed ids, at most four questions per call, grouped as below. Every question has a first
+option that a beginner can accept as is: list it first and mark it "(Recommended)". Free-text
+answers ("Other") are always allowed.
 
 **Call 1: the video**
 
@@ -72,7 +75,6 @@ question has a first option that a beginner can accept as is: list it first and 
 | `platform` | Where will this be posted? | TikTok, Reels or Shorts (vertical 9:16) / YouTube (wide 16:9) |
 | `creators` | Which creators' videos do you want yours to look like? Give 1-3 handles or links. | the creator they named in their message / I'll paste handles / no one: a clean editorial look |
 | `creators` (take) | What should we take from each? (multi-select, per creator when there are several) | everything / captions / pace and zooms / visuals and colours |
-| `liked_videos` | Any specific videos you love the edit of? Paste 1-5 links (any creator). | skip / I'll paste links |
 | `audience` | Who is it for, and what should they do after watching? | free text, one line each. Default: "people curious about the topic" and "follow" |
 
 **Call 2: what makes it yours**
@@ -88,6 +90,7 @@ question has a first option that a beginner can accept as is: list it first and 
 
 | id | question | options |
 |---|---|---|
+| `liked_videos` | Any specific videos you love the edit of? Paste 1-5 links (any creator). | skip / I'll paste links |
 | `captions` | Captions? | like the creator / bold, a few words at a time / karaoke, the line fills as you speak / minimal / no captions |
 | `sound` | Sound effects and music? | subtle sound effects, no music / no sound effects / sound effects and I'll add music myself |
 | `behind` | Let graphics sit behind you? (screenshots and logos tuck behind your head and shoulders) | Yes / No, keep them beside and above me |
@@ -122,12 +125,15 @@ the creator's captions, subtle sound).
 Do each step in order, skipping what is already done. Read each skill's SKILL.md before its step.
 
 1. **setup**, if any step fails because a tool is missing (`setup.py doctor` says `FIX`).
-2. **creator-teardown**, quick mode, for every profile creator without
-   `creator-teardowns/<handle>/style.json`. Run several creators in parallel when the platform allows.
+2. **creator-teardown** in quick mode (its SKILL.md "Quick mode") for every profile creator without
+   `creator-teardowns/<handle>/style.json`. Say the time first (about a minute per creator). Run
+   several creators in parallel when the platform allows.
 3. **Blend the style**: `python3 "$P" style edits/<name>` writes `edits/<name>/style.json`, each part
    (captions, pace, visuals) from the creator the user picked for it, with the caption and sound
-   answers laid over. With no creator, skip it and give style-edit the plain defaults.
-4. **cut** on the raw take. The user approves the cut page. This is approval 1 of 2.
+   answers laid over. With no creator, skip it and give style-edit the plain defaults. If it stops
+   with `no creator style.json found`, step 2 did not finish for a creator: run it again.
+4. **cut** on the raw take, from its step 0b (start has already decided: cut, wait for the cut page
+   approval, then style). The user approves the cut page. This is approval 1 of 2.
 5. **style-edit** with `edits/<name>/style.json`. Its stills sheet is approval 2 of 2. It reads the
    profile itself: the brand kit sets the look, `names` get real logos and captures, `assets_dir`
    images go on screen first, `avoid` is enforced by plan.py.

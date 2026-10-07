@@ -4,6 +4,21 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Skill quality pass. Every first-party SKILL.md is under 250 lines (style-edit 305 -> 230, setup
+  283 -> 193, product-video 263 -> 244, creator-teardown 251 -> 242), detail moved one level down
+  with a pointer saying when to read it: `style-edit/references/plan.md` (what plan.py does, the
+  cutout, sound, music, the check lists) and the live preview into `render.md`;
+  `setup/references/keys.md` and `cloud.md` (Modal, GitHub CLI); `product-video/references/brief.md`
+  (music rights, logging in); `creator-teardown/references/blend.md` and `outputs.md`. Each skill
+  has an "If a script stops" table built from its scripts' own messages. Triggers no longer collide:
+  "edit this like @creator" is start's alone (creator-teardown and style-edit dropped it), style-edit
+  fires only once a cut exists, cut no longer quotes "edit my video", setup dropped "get started".
+  creator-teardown defines the quick mode start and setup call. The question boxes keep to four
+  questions a call (start's intake, product-video's brief now three calls), recommended first, and
+  setup asks before it starts. style-edit proofreads captions from `paper-edit.md` instead of the
+  caption JSON; `retakes.py fix` now fixes `captions.json` and `cut.transcript.json` too
+  (`test_retakes.py`). `tests/check_plugins.py` fails a first-party SKILL.md over 250 lines and a
+  quoted trigger phrase claimed by two skills' descriptions
 - Captions never fail contrast (backlog item 1): plan.py measures the cut behind every caption page
   (at the caption box, through the zooms and pans, 4 samples a second) and, where the creator's look
   would read under 3:1, adds the first step that reaches it: a denser soft shadow, then a 0.1 em stroke

@@ -5,9 +5,7 @@ and passes after. Done items move to CHANGELOG.md.
 
 ## Now
 
-1. **Skill quality pass.** Every SKILL.md read against PRINCIPLES.md: one decision path, under 250
-   lines, references for detail, trigger phrases that fire (claude plugin eval, 3 runs each), no
-   step that makes Claude read raw data a script can summarise.
+Nothing. Take the top of Next.
 
 ## Next
 

@@ -1,6 +1,7 @@
 # Render targets
 
-Laptop, Modal, GitHub Actions and Lambda detail, moved out of SKILL.md step 7.
+Laptop, Modal, GitHub Actions and Lambda detail, the live preview and the export, moved out of
+SKILL.md steps 6-9.
 
 ## Estimates
 
@@ -95,7 +96,23 @@ Lambda also prints what the render
 really cost. The first Lambda render sets up the function and a storage bucket in their account;
 later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
 
+## The live preview
+
+`preview.py` opens a local page (no account, works offline) that plays the real edit: the same
+composition and props as the render. The user can drag a card in time or trim it, drag it on the
+frame (it snaps to the free regions round the head, never onto the face), swap its picture for
+another in `images/`, delete it, fix a misheard caption word (empty it to remove it), and nudge a
+sound cue's level. Every change is a small diff in `edits/<name>/overrides.json` and a line in
+`corrections.jsonl` (what, from, to). The script waits until they press **Render**, which writes
+`edits/<name>/preview-done.json` with a summary and stops it. `preview.py demo` self-checks.
+
 ## Export to another editor
+
+`export_nle.py` writes the jump cut as trims of the raw take (so every cut can be re-opened),
+captions (titles + `.srt`), each card on its own track at its time and place, sound cues on their
+own audio track, a marker per beat. Moving cards are rendered with alpha first (about 0.7 s per
+card frame on a laptop); `--no-render` skips them. If the raw take moved, pass `--source <file>`.
+
 
 `export_nle.py edits/<name> --to <format>` writes `edits/<name>/export/`. Which file opens where
 (support checked 2026-10-06):

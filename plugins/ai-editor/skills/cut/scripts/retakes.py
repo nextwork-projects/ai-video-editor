@@ -19,7 +19,8 @@ propose  1. Code finds every candidate: a restart (words said again within 40 s:
          is the broken one; that case is never cut automatically, it goes to review.md.
          With no TypeSafe key it writes transcript.txt and candidates.md and exits 4: decide
          the cut yourself from those (references/retake-detection.md).
-fix      Replaces one whole word everywhere in words.raw.json and words.json, keeping
+fix      Replaces one whole word everywhere in words.raw.json, words.json, cut.transcript.json
+         and captions.json (style-edit's caption text), keeping
          punctuation and timings. A misheard name costs one command, not a rewrite.
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (fall back to deciding yourself)
@@ -391,7 +392,7 @@ def propose(d, key=None, canned=None, force=False):
 def fix(d, pairs):
     """Replace whole words (case-insensitive), keeping each token's punctuation."""
     d, n = Path(d), 0
-    for name in ("words.raw.json", "words.json"):
+    for name in ("words.raw.json", "words.json", "cut.transcript.json", "captions.json"):
         f = d / name
         if not f.exists():
             continue

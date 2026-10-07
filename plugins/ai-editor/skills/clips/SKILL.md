@@ -11,6 +11,8 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
 
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
+
 One long video in. The best few short clips out, each a finished vertical edit in the user's style.
 
 ```
@@ -35,8 +37,7 @@ Read the profile and taste first (`python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/
 `python3 "${CLAUDE_PLUGIN_ROOT}/skills/taste/scripts/taste.py" show`). No profile yet: run the
 `start` skill's style intake first, so the clips come out in the user's look.
 
-Then one call to the question box (the AskUserQuestion tool; numbered text questions only in an
-agent without it), the recommended option first:
+Then one question box call, the recommended option first:
 
 | question | options |
 |---|---|
@@ -45,7 +46,7 @@ agent without it), the recommended option first:
 | How many people talk in it? | one (Recommended) / two (a podcast or interview) |
 
 Skip any the user already answered. These replace the cut skill's "cut first or everything at
-once" question: clips run straight through, and the user approves the picks and the stills.
+once" question: clips run straight through, and the user approves the picks and the stills sheets.
 
 ## 1. The video
 
@@ -66,7 +67,8 @@ they have permission for. Say so once if the link is someone else's.
 $PY "$C/transcribe.py" clips/<name>/source.mp4 clips/<name>/words.raw.json
 ```
 
-Same engines as the cut skill. Scribe adds laughter and other audio events, which the score uses.
+Say the time first: Whisper takes 1-4 minutes per 3 minutes of video on a laptop (free), Scribe
+about 20 s for a 13-minute video. Same engines as the cut skill. Scribe adds laughter and other audio events, which the score uses.
 Every clip reuses this transcript: nothing is transcribed twice.
 
 ## 3. Candidates and the shortlist
@@ -127,6 +129,15 @@ Each edit folder gets `source.mp4` (frame-accurate, padded without catching the 
 
 Show all the clips' stills sheets together for one approval, ask the render question once for all
 of them, and render. Open every render and give the full paths.
+
+## If a script stops
+
+| message | do |
+|---|---|
+| `no run of whole sentences lasts <lo>-<hi> s` | ask in the question box for a wider length, run `candidates` again |
+| `no candidate <id>` | use an id from `shortlist.md` |
+| yt-dlp "confirm you're not a bot" | ask before adding `--cookies-from-browser <browser>` |
+| any cut or style-edit message | that skill's "If a script stops" table |
 
 ## Rules
 

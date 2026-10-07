@@ -90,7 +90,9 @@ def test_text_and_fix():
         (Path(d) / "words.raw.json").write_text(json.dumps(take("I use cloud code. | cloud, daily")))
         txt = R.text_view(R.load(d))
         assert "[0.00-" in txt and "(+1.2s)" in txt and "cloud code." in txt, txt
-        assert R.fix(d, [("cloud", "Claude")]) == 2
+        (Path(d) / "captions.json").write_text(json.dumps(take("cloud")))   # style-edit's caption copy
+        assert R.fix(d, [("cloud", "Claude")]) == 3
+        assert json.loads((Path(d) / "captions.json").read_text())[0]["text"] == "Claude"
         words = [t["text"] for t in json.loads((Path(d) / "words.raw.json").read_text())]
         assert words[2:4] == ["Claude", "code."] and words[4] == "Claude,", words
 

@@ -7,9 +7,9 @@ compatibility: Python 3.9+, standard library only. Runs in a git checkout of the
 
 # Improve
 
-Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md.
+Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
-Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the default first). Only in an agent without that tool, ask numbered questions in text.
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
 
 This runs in a checkout of the repo, for the person who maintains it. A fix here reaches every user on
 their next plugin update. `S="${CLAUDE_SKILL_DIR}/scripts"`.

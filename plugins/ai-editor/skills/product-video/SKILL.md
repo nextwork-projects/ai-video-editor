@@ -11,6 +11,8 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video follows (story first, smooth before varied, nothing leaves the frame, privacy, no presses that write).
 
+Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
+
 A URL in. A product video out, made only of the site's real UI, real recorded click-throughs of it, its own
 colours and type, and its own words, scored and mixed for this cut. `S="${CLAUDE_SKILL_DIR}/scripts"`,
 `PY=~/.ai-video-editor/venv/bin/python` (Windows: `%USERPROFILE%\.ai-video-editor\venv\Scripts\python.exe`).
@@ -26,7 +28,8 @@ URL -> brief (questions) -> crawl.mjs -> site.json + pages/ (features, pricing, 
 ```
 
 Read `references/story.md` before writing storyboard.md or story.json, `references/style.md` before judging
-stills and `references/sound.md` before changing the sound.
+the animatic sheet, `references/sound.md` before changing the sound and `references/brief.md` for
+music rights and logging in.
 
 ## 0. Setup
 
@@ -37,82 +40,45 @@ It installs the Chrome Headless Shell the crawl and the recordings drive. Read t
 ## 1. The brief, in the question box, before crawling deeply
 
 Load the home page first (`node "$S/crawl.mjs" <url> product/<name> --pages 0`, about 40 s) so the
-options are the site's own. Then one AskUserQuestion call, recommended option first, marked
-"(Recommended)", "Other" always open for their own words:
+options are the site's own. Then three AskUserQuestion calls (at most four questions each), the
+recommended option first and marked "(Recommended)", "Other" always open for their own words.
+
+**Call 1, the video's job:**
 
 1. **What it does, in one line**: the site's own tagline (`site.json` description or h1) / Other.
 2. **The 2-3 things the video must show** (multi-select): the jobs you can already see on the home page
    and nav (its h2s, nav items), each in the site's words.
 3. **Who will watch**: new users (Recommended) / existing users / investors / developers.
 4. **The one action at the end**: visit the URL (Recommended) / sign up / try a feature.
-5. **A page or flow that must be in it**: none / Other (a URL).
 
-Then a second call:
+**Call 2, the shape:**
 
+5. **A page or flow that must be in it**: none (Recommended) / Other (a URL).
 6. **Style**: Linear (Recommended: tilted plane, slow drift, blur-dissolves, small low-left words) /
    Apple / Stripe / Arc / Raycast (`references/style.md`, one line each).
 7. **Length and shape**: 30 s 16:9 (Recommended) / 30 s 9:16 / both / 15 s. (`--fps 60` on request:
    smoother camera moves, twice the render time.)
-8. **Music**: generated here for this cut (Recommended: synthesised, nothing to licence) / ElevenLabs
-   Music with their key (offer only if `keys.get("elevenlabs")` finds one; their terms allow online
-   commercial use, not film or TV) / their own track (a file) / a YouTube link (or any link yt-dlp reads:
-   SoundCloud, Bandcamp) / none.
+8. **Show the logged-in product?** Yes, log in now (Recommended when the use cases live behind a login) /
+   Public pages only / Later.
 
-   For a link: ask for an optional start and end time, then ask **who holds the rights**: "It's my own
-   track" / "YouTube Audio Library or Creative Commons (I'll credit it)" / "Licensed (Epidemic, Artlist
-   etc.)" / "Not sure". Then:
+**Call 3, the sound:**
 
-   ```bash
-   python3 "$S/product.py" music product/<name> --url '<link>' [--start 0:12 --end 0:52] --rights own|cc|licensed|unsure [--credit '<the credit line>']
-   ```
-
-   Audio only, into `audio/track.wav`; the link's title, channel and licence field (YouTube shows "Creative
-   Commons Attribution license" there), the user's answer and the date go to `audio/MUSIC-LICENSE.md`; a
-   CC-BY credit line goes into `share.txt`. Use `--yt-cookies` (their Chrome's YouTube login) only if
-   YouTube blocks the download, and only after asking. On "Not sure", say plainly that Instagram, TikTok and
-   YouTube may mute or claim the video and offer the generated score instead; then do what they choose.
-   For their own file, ask the same rights question, then
-   `python3 "$S/product.py" music product/<name> --file audio/<their track> --rights own|cc|licensed|unsure`.
-   `plan --music audio/<file>` refuses a track with no recorded rights. The download never leaves the project folder. Plan with `--music audio/track.wav`: cuts snap to its
-   detected beats.
-9. **Sound effects**: subtle UI sounds (Recommended: clicks and key ticks where the UI acts, a swell into
-   the logo) / none.
-10. **Voice**: none, on-screen words only (Recommended) / their own recording / text to speech (only with
+9. **Music**: generated here for this cut (Recommended: synthesised, nothing to licence) / ElevenLabs
+   Music (only with their key) / their own track (a file) / a link (YouTube, SoundCloud, Bandcamp) /
+   none. A link or a file: ask who holds the rights, then `product.py music` (`references/brief.md` "Music").
+10. **Sound effects**: subtle UI sounds (Recommended: clicks and key ticks where the UI acts, a swell into
+    the logo) / none.
+11. **Voice**: none, on-screen words only (Recommended) / their own recording / text to speech (only with
     an ElevenLabs key).
-
-11. **Show the logged-in product?** Yes, log in now (Recommended when the use cases live behind a login) /
-    Public pages only / Later.
 
 Write the answers to `product/<name>/brief.json` (`{"tagline", "must_show": [...], "audience", "action",
 "must_include": [urls]}`). `plan` refuses without it. Example brief for nextwork.ai: must_show = the Create button (prompt your
 own project), search other people's projects, roadmaps, step-by-step guides, the portfolio in Your Library.
 
-**Logging in** (on "Yes"): say this plainly first: the login is kept in a browser profile of its own,
-`~/.ai-video-editor/browser/<domain>/`, on this computer only; it is outside every repo, never uploaded
-(Modal, Lambda and GitHub renders only ever receive rendered captures), a demo or test account is best, and
-`node "$S/login.mjs" logout <domain>` deletes it. Then:
-
-```bash
-node "$S/login.mjs" login <the site's login or home URL> [--check <a page that needs a login>]
-```
-
-A visible Chrome window opens on that profile (never their own Chrome profile, never their cookie
-database). They log in by hand; you never see or type a password. When they close the window it checks a
-page that needs the login and prints `logged in` or why not (a redirect to a login page, a password field,
-a "Log in" button). If they say "done" without closing it, close only that window's Chrome (the process
-whose `--user-data-dir` is that profile), then `node "$S/login.mjs" check <url>`. From then on
-`record.mjs` uses that profile for that domain (installed Chrome, headless).
-
-While recording a logged-in product:
-- **Read-only.** `record.mjs` refuses to press create, delete, remove, pay, buy, upgrade, subscribe, billing,
-  publish, invite, transfer, log out, unless the step carries `"allow": true`, which you add only after
-  asking in the question box. Creating something (a project from a prompt) is a write: ask first, then do
-  one, with an obviously test prompt (starting "TEST, safe to delete:"), and tell the
-  user its name so they can delete it.
-- **Personal data blurred** in the page before capture: email addresses, avatars, billing panels, email
-  fields, and any names in `flows.json` `"blur": {"text": [...], "selectors": [...]}`. Each flow writes
-  `flows/<id>-blurred.png` (what was blurred, outlined in red) and the list in `<id>.json` `blurred`.
-  Show the user those sheets before rendering.
+**Logging in** (on "Yes"): follow `references/brief.md` "Logging in": say where the login is kept
+first, then `node "$S/login.mjs" login <url>` opens a separate Chrome window they log in to by hand.
+Recording stays read-only (no create, delete, pay, publish or invite without a yes in the question
+box) and blurs personal data; show the user the `flows/<id>-blurred.png` sheets before rendering.
 
 ## 2. Crawl the site
 
@@ -154,8 +120,8 @@ node "$S/record.mjs" product/<name> flows.json --states --mobile   # the phone l
 
 Each flow writes `flows/<id>.states.json` and `flows/states/*.jpg`: the start, each step's after-state, the
 focused field and the typed text with the caret measured per character, a tall still for each scroll. It
-waits for each view to finish loading (pictures, skeletons) before taking it. Look at the stills: a loading
-page, a click that opened the wrong thing, a modal you did not want. Fix the flow and capture again
+waits for each view to finish loading (pictures, skeletons) before taking it. Look at the states, not every
+file: a loading page, a click that opened the wrong thing, a modal you did not want. Fix the flow and capture again
 (`--only <id>`). Without `--states` it records screencasts (`flows/*.mp4`) for the shot film below.
 `{"write": "..."}` types into whatever has focus (a search a button or shortcut opened); a link that opens
 a new tab is followed in the same one; with a dialog open, a `text=` target is looked for in the dialog
@@ -190,7 +156,7 @@ older shot film (screencasts and the shot library, each shot naming its `job`).
 $PY "$S/product.py" animatic product/<name> --plan plan-linear-16x9.json
 ```
 
-Writes `animatic-<tag>/sheet.png`: the start, middle and end of every beat, captioned with its job, time
+Writes `animatic-<tag>/sheet.png`, the animatic sheet: the start, middle and end of every beat, captioned with its job, time
 and words, in seconds. Run the `storyboard-critic` agent on the sheet; apply its fixes to the story (order,
 steps, words, a capture) and plan again; two rounds at most. Then show the sheet and ask in the question
 box: **Approve** (Recommended) / **Change the order** / **Swap a shot** / **Redo a capture**. Do not render
@@ -244,6 +210,20 @@ python3 "$S/product.py" share product/<name>
 that says what is shown. Open the render (`open` / `start ""` / `xdg-open`), give the full paths of
 the video, sheet and share.txt, and ask for notes. Notes about taste go to the taste skill.
 
+## If a script stops
+
+| message | do |
+|---|---|
+| `no brief: ask the brief ...` / `brief.json has no ...` | ask those in the question box (step 1), write brief.json |
+| `plan-<tag> is not approved` / `changed after it was approved` / `no animatic-<tag>/sheet.png` | step 6: animatic, show it, ask Approve, `approve` |
+| `story names '...', which is not in site.json elements` / `click target ... not in site.json` | `product.py copy` lists the elements; use one of them |
+| `not the site's words: ...` | replace those words with the site's own (`pages.md`) |
+| `--rights is required` | ask who holds the rights (`references/brief.md` "Music") |
+| `yt-dlp could not read that link` | ask before retrying with `--yt-cookies`, or offer the generated score |
+| `No ElevenLabs key` | offer on-screen words or their own recording |
+| `Modal is not set up on this computer` | the setup skill's Modal step, or render on the laptop |
+| a blank `images/tile-0.jpg` after the crawl | the site blocked the headless browser: say so, ask for another URL |
+
 ## Files
 
 - `scripts/crawl.mjs`: the crawl, home page and inner pages. Reuses `style-edit/scripts/capture.mjs` (Chrome binary, cookie banners).
@@ -258,6 +238,7 @@ the video, sheet and share.txt, and ask for notes. Notes about taste go to the t
 - `references/story.md`: story.json, the shot library, flows, the words rules, purposes, 9:16.
 - `references/style.md`: what Apple, Linear, Stripe, Arc and Raycast films do, measured; how the styles borrow it; what to look for.
 - `references/sound.md`: their sound, measured; what sound.py does with it.
+- `references/brief.md`: music rights and logging in, for the brief.
 - `references/brag.md`: what this takes from latent-spaces/brag (MIT) and what it does differently.
 - `../../remotion/src/product/`: `ProductVideo.tsx` (the composition, page/lift/media/flow shots), `Journey.tsx` (the rendered film), `Shots.tsx` (the shot library), `kit.tsx` (styles, geometry, words, the logo).
 - `../../agents/storyboard-critic.md`: reviews the animatic against the checklist.
