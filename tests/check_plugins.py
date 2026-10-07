@@ -232,6 +232,9 @@ def main():
         if p.suffix not in (".md", ".json", ".py", ".mjs", ".ts", ".tsx", ".yml") or "node_modules" in p.parts or ".git" in p.parts or p.name.endswith("lock.json"):
             continue
         text = p.read_text(encoding="utf-8", errors="ignore")
+        # A fix line never pipes a downloaded script into a root shell on the user's computer.
+        if re.search(r"\b(curl|wget)\b[^\n|]*\|\s*sudo\s+(-\S+\s+)*(ba|z)?sh\b", text):
+            errors.append(f"{p}: pipes a downloaded script into sudo bash; use the vendor's signed package steps")
         if re.search(r"\bIMG[-_](?!1234\b)\d{4}\b", text, re.I):
             errors.append(f"{p}: names a personal test file (IMG_####); say 'the sample take'")
         for w in set(re.findall(r"[a-z0-9]{4,}", text.lower())):

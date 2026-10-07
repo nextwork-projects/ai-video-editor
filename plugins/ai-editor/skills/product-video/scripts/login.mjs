@@ -5,6 +5,7 @@
 //   node login.mjs check  <url that needs a login>                           is the profile still logged in?
 //   node login.mjs logout <domain>                                           delete the profile (the login with it)
 //   node login.mjs where  <domain>                                           print the profile folder
+//   node login.mjs browser                                                   the Chrome it would use, or why none
 //
 // The profile: ~/.ai-video-editor/browser/<domain>/ (AI_EDITOR_HOME overrides the root). Never the user's
 // own Chrome profile, never their cookie database. It holds a live login on this computer only: it is
@@ -20,7 +21,7 @@ import { pathToFileURL } from "node:url";
 
 const HOME = process.env.AI_EDITOR_HOME || path.join(os.homedir(), ".ai-video-editor");
 // Chrome, or a Chromium build (Edge on Windows): the usual install paths, then the names on PATH (snap's
-// /snap/bin/chromium, a distro's chromium, a portable install). Flatpak has no plain binary: install another.
+// /snap/bin/chromium, a distro's chromium, a portable install). Flatpak: see noChrome.
 export const chromeCandidates = (platform = process.platform, env = process.env) => {
   const win = platform === "win32", pf = env.PROGRAMFILES || "C:\\Program Files", pf86 = env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
   const fixed = {
@@ -36,7 +37,18 @@ export const chromeCandidates = (platform = process.platform, env = process.env)
   return [...fixed.filter(Boolean), ...dirs.flatMap((d) => names.map((n) => (win ? path.win32 : path.posix).join(d, n)))];
 };
 export const chromeBinary = (platform, env, exists = fs.existsSync) => chromeCandidates(platform, env).find((p) => exists(p)) || null;
-const NO_CHROME = "ERROR: no Google Chrome, Chromium or Edge found (install paths and PATH). Install Chrome, or Chrome for Testing (npx @puppeteer/browsers install chrome@stable).";
+// A Flatpak Chrome or Chromium runs only inside its sandbox (its libraries are the Flatpak runtime's, and it
+// cannot reach a profile under ~/.ai-video-editor or the DevTools pipe), so it is named, never launched.
+const FLATPAKS = ["org.chromium.Chromium", "com.google.Chrome", "com.microsoft.Edge"];
+export const flatpakChrome = (platform = process.platform, env = process.env, exists = fs.existsSync) =>
+  platform !== "linux" ? null : FLATPAKS.find((id) => ["/var/lib/flatpak/app", path.posix.join(env.HOME || os.homedir(), ".local/share/flatpak/app")]
+    .some((root) => exists(path.posix.join(root, id)))) || null;
+export const noChrome = (platform = process.platform, env = process.env, exists = fs.existsSync) => {
+  const fp = flatpakChrome(platform, env, exists);
+  return fp
+    ? `ERROR: ${fp} is installed as a Flatpak, which runs sandboxed and cannot be started on its own login profile. Install a plain Chromium or Chrome next to it: sudo snap install chromium (Ubuntu), your distro's chromium package, or Google Chrome from google.com/chrome.`
+    : "ERROR: no Google Chrome, Chromium or Edge found (install paths and PATH). Install Chrome, or Chrome for Testing (npx @puppeteer/browsers install chrome@stable).";
+};
 // A hostname and nothing else: dot-separated labels of letters, digits and inner hyphens. "..", "/", "", "a/b",
 // an absolute path or a drive letter is null, so no input can name a folder outside <home>/browser/.
 const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
@@ -66,7 +78,7 @@ const LOGGED_OUT = `(() => /(^|\\/)(login|log-in|signin|sign-in|auth|sso)(\\/|$|
 
 async function check(url) {
   const bin = chromeBinary();
-  if (!bin) return { ok: false, why: NO_CHROME };
+  if (!bin) return { ok: false, why: noChrome() };
   if (!hasProfile(url)) return { ok: false, why: `no profile for ${domainOf(url) || url}: run login first` };
   const dir = profileFor(url);
   // headless, on the same profile, over the DevTools pipe
@@ -91,7 +103,7 @@ async function check(url) {
 
 async function login(url, checkUrl) {
   const bin = chromeBinary();
-  if (!bin) { console.error(NO_CHROME); process.exit(1); }
+  if (!bin) { console.error(noChrome()); process.exit(1); }
   let dir;
   try { dir = profileFor(url); } catch (e) { console.error(`ERROR: ${e.message}`); process.exit(2); }
   fs.mkdirSync(dir, { recursive: true });
@@ -116,6 +128,7 @@ if ((process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
     fs.rmSync(dir, { recursive: true, force: true });
     console.log(`deleted ${dir}: logged out of ${domainOf(arg)} on this computer`);
   }
+  else if (cmd === "browser") { const b = chromeBinary(); console.log(b || noChrome()); process.exit(b ? 0 : 1); }
   else if (cmd === "where" && arg) { try { console.log(profileFor(arg)); } catch (e) { console.error(`ERROR: ${e.message}`); process.exit(2); } }
-  else { console.error("usage: node login.mjs login <url> [--check <url>] | check <url> | logout <domain> | where <domain>"); process.exit(2); }
+  else { console.error("usage: node login.mjs login <url> [--check <url>] | check <url> | logout <domain> | where <domain> | browser"); process.exit(2); }
 }

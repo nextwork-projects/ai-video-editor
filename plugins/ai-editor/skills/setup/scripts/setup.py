@@ -57,7 +57,12 @@ FFMPEG_MIN = (4, 4)    # sfx.py mixes with amix normalize=0, added in FFmpeg 4.4
 # Optional extras, pinned; installed with the lock as constraints so they never move a pinned package.
 OPTIONAL = {"modal": "modal==1.6.1", "crisperwhisper": "crisperwhisper[transformers]==2.0.3"}
 
-NODESOURCE = "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"
+# NodeSource's manual steps (signed apt source), not its setup script piped to a root shell.
+NODESOURCE = ("sudo apt install -y ca-certificates curl gnupg && sudo mkdir -p /etc/apt/keyrings && "
+              "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor --yes "
+              "-o /etc/apt/keyrings/nodesource.gpg && echo \"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] "
+              "https://deb.nodesource.com/node_22.x nodistro main\" | sudo tee /etc/apt/sources.list.d/nodesource.list "
+              "&& sudo apt update && sudo apt install -y nodejs")
 PACMAN = "sudo pacman -S --needed --noconfirm "
 INSTALL = {  # tool -> (mac, windows, {linux package manager: command})
     "python": ("brew install python", "winget install -e --id Python.Python.3.12",
@@ -308,6 +313,10 @@ def doctor():
         "ready": "logged in: cloud renders on Modal",
         "no token": f"installed, not logged in. In your own terminal: {modal_exe()} token new",
         "missing": f"optional, cloud renders on Modal ($30 free credit a month): {py_self} \"{here}\" modal"}[mo])
+    node = shutil.which("node")
+    if node:   # logged-in captures need an installed Chrome; login.mjs says which, or why none works
+        b = run([node, str(PLUGIN / "skills/product-video/scripts/login.mjs"), "browser"], timeout=30)
+        print(browser_line(b.returncode == 0, b.stdout.strip()))
     for domain, days, _ in saved_logins():
         print(login_line(domain, days))
     ready = all(r[1] for r in rows) and disk_ok
@@ -315,6 +324,12 @@ def doctor():
         print(f"     installed versions: {ENV}")
     print("Ready." if ready else "Not ready. Fix the lines above, top to bottom.")
     return 0 if ready else 1
+
+
+def browser_line(ok, out):
+    """Optional row: logged-in captures need an installed Chrome. A Flatpak-only Chrome says so, with the fix."""
+    return f"{'ok ' if ok else '-- '}  {'chrome':<20} " + (
+        f"{out} (logged-in captures)" if ok else "optional, for logged-in captures. " + out.removeprefix("ERROR: "))
 
 
 def saved_logins(home=None):
@@ -673,8 +688,16 @@ def demo():
     assert fix("ffmpeg", os_name="Linux", which=has("apt-get")) == "sudo apt install -y ffmpeg"
     assert fix("ffmpeg", os_name="Linux", which=has("dnf")).startswith("sudo dnf install")
     assert fix("node", os_name="Linux", which=has("pacman")) == "sudo pacman -S --needed --noconfirm nodejs npm"
+    # apt's Node fix adds NodeSource's signed apt source; no remote script is piped to a shell
+    apt_node = fix("node", os_name="Linux", which=has("apt-get"))
+    assert "signed-by=/etc/apt/keyrings/nodesource.gpg" in apt_node and "apt install -y nodejs" in apt_node, apt_node
+    assert not re.search(r"\|\s*(sudo\s+(-E\s+)?)?(ba)?sh\b", apt_node), apt_node
     assert fix("ffmpeg", UPGRADE, os_name="Linux", which=has("dnf")).startswith("sudo dnf upgrade")
     assert fix("python", os_name="Darwin", which=has("dnf")) == "brew install python"
+    # Chrome row: a Flatpak-only Chromium is said plainly, with the fix, not left as a silent miss
+    fp = browser_line(False, "ERROR: org.chromium.Chromium is installed as a Flatpak, which runs sandboxed ... sudo snap install chromium")
+    assert fp.startswith("-- ") and "Flatpak" in fp and "snap install chromium" in fp and "ERROR" not in fp, fp
+    assert browser_line(True, "/usr/bin/chromium").startswith("ok ")
     # Free disk: FIX under 3 GB, with the reason
     assert disk_row(5e9) == (True, "5.0 GB free")
     ok, why = disk_row(2.9e9)

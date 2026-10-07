@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Find the best short clips in a long video. Transcribe once, then code and Jev do the reading.
 
+    python3 clips.py link       <video file> <clips_dir>   the source, linked (never copied when avoidable)
     python3 clips.py candidates <clips_dir> [--min 20 --max 40] [--speakers 1|2] [--style style.json] [--top 8]
     python3 clips.py page       <clips_dir> [--recommend c3,c7]
     python3 clips.py trim       <clips_dir> <cand_id> [<cand_id> ...] [--name NAME] [--edits edits]
@@ -29,6 +30,8 @@ page        picks.html: one self-contained page with every shortlisted clip, its
 reframe     A wide source.mp4 cropped to 9:16, the crop following the speaker's head shot by shot
             (camera cuts snapped to ffmpeg's scene changes). Before the cut, so every later step
             sees a vertical take. The wide file stays as source-wide.mp4.
+link        <clips_dir>/source.mp4: a hard link on the same drive (no admin needed, NTFS too), else a
+            symlink, else a copy as the last resort. Nothing here writes to source.mp4 in place.
 trim        For each chosen id, edits/<name>-clip<N>/source.mp4 (frame-accurate re-encode) and
             words.raw.json re-timed to it, so the cut skill starts at retakes.py with no second
             transcription.
@@ -43,6 +46,7 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -539,6 +543,30 @@ def reframe(edit_dir):
     print(f"{src}: {crop_w}x{h}, {len(shots)} shot(s), crop follows the head (wide original: {wide.name})")
 
 
+def link_source(video, clips_dir, link=os.link, symlink=os.symlink):
+    """<clips_dir>/source.mp4 pointing at the user's file: hard link, else symlink, else copy.
+    Returns (path, how). Windows makes symlinks only with Developer Mode or admin, and a multi-GB copy
+    fills the disk, so the hard link comes first; it fails only across drives."""
+    src = Path(video).resolve()
+    if not src.is_file():
+        sys.exit(f"ERROR: no such file: {video}")
+    d = Path(clips_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    dst = d / "source.mp4"   # every step names it so; ffmpeg reads the container, not the extension
+    if dst.exists() or dst.is_symlink():
+        if dst.exists() and os.path.samefile(dst, src):
+            return dst, "already there"
+        sys.exit(f"ERROR: {dst} already exists and is another file; pick another clips folder")
+    for how, make in (("hard link", link), ("symlink", symlink)):
+        try:
+            make(src, dst)
+            return dst, how
+        except (OSError, NotImplementedError):
+            pass
+    shutil.copy2(src, dst)
+    return dst, "copy"
+
+
 # --- demo ---------------------------------------------------------------------------------
 
 def demo():
@@ -636,12 +664,25 @@ def demo():
     assert snap(shots, [4.62, 9.0]) == [(0.0, 60.0), (4.62, 25.0)] and snap(shots, [5.1]) == [(0.0, 60.0), (5.1, 25.0)]
     assert crop_x_expr([(0.0, 60.0), (4.62, 25.0)], 1920, 608) == "if(lt(t,4.620),848,176)"
     assert crop_x_expr([(0.0, 99.0)], 1920, 608) == "1312"
+    # link: hard link first, then symlink, then copy; never a copy when a link works
+    with tempfile.TemporaryDirectory() as td:
+        v = Path(td) / "Talk.MOV"
+        v.write_bytes(b"video")
+        dst, how = link_source(v, Path(td) / "a")
+        assert how == "hard link" and dst.name == "source.mp4" and os.path.samefile(dst, v), (dst, how)
+        assert link_source(v, Path(td) / "a")[1] == "already there"
+        def no(*_):
+            raise OSError("cross-device link")
+        dst, how = link_source(v, Path(td) / "b", link=no)
+        assert how == "symlink" and dst.is_symlink() and dst.read_bytes() == b"video", how
+        dst, how = link_source(v, Path(td) / "c", link=no, symlink=no)
+        assert how == "copy" and not dst.is_symlink() and dst.read_bytes() == b"video", how
     print("clips ok")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["candidates", "page", "trim", "reframe", "demo"])
+    ap.add_argument("cmd", choices=["link", "candidates", "page", "trim", "reframe", "demo"])
     ap.add_argument("clips_dir", nargs="?")
     ap.add_argument("ids", nargs="*")
     ap.add_argument("--min", type=float, default=20)
@@ -657,6 +698,12 @@ def main():
         return demo()
     if not a.clips_dir:
         ap.error("clips_dir is required")
+    if a.cmd == "link":
+        if len(a.ids) != 1:
+            ap.error("link needs <video file> <clips_dir>")
+        dst, how = link_source(a.clips_dir, a.ids[0])
+        print(f"{dst} ({how})")
+        return 0
     if a.cmd == "candidates":
         style = json.loads(Path(a.style).read_text()) if a.style else None
         prof = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor")) / "profile.json"

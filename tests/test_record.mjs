@@ -96,6 +96,15 @@ console.log("deny list ok");
   assert.equal(chromeBinary("win32", { PROGRAMFILES: "C:\\Program Files", "PROGRAMFILES(X86)": "C:\\Program Files (x86)", Path: "C:\\Windows" }, only(edge)), edge);
   assert.equal(chromeBinary("win32", { Path: "C:\\Windows;D:\\Tools\\Chrome" }, only("D:\\Tools\\Chrome\\chrome.exe")), "D:\\Tools\\Chrome\\chrome.exe");
   assert.equal(chromeBinary("linux", { PATH: "/usr/bin" }, () => false), null);
+  // Flatpak Chromium (system or per user) is never launched; the error names it and the fix
+  const { flatpakChrome, noChrome } = await import(pathToFileURL(path.join(SCRIPTS, "product-video/scripts/login.mjs")).href);
+  const sys = only("/var/lib/flatpak/app/org.chromium.Chromium"), user = only("/home/u/.local/share/flatpak/app/com.google.Chrome");
+  assert.equal(chromeBinary("linux", { PATH: "/usr/bin", HOME: "/home/u" }, sys), null);
+  assert.equal(flatpakChrome("linux", { HOME: "/home/u" }, sys), "org.chromium.Chromium");
+  assert.equal(flatpakChrome("linux", { HOME: "/home/u" }, user), "com.google.Chrome");
+  assert.equal(flatpakChrome("darwin", { HOME: "/home/u" }, sys), null);
+  assert.match(noChrome("linux", { HOME: "/home/u" }, sys), /org\.chromium\.Chromium is installed as a Flatpak.*sudo snap install chromium/);
+  assert.match(noChrome("linux", { HOME: "/home/u" }, () => false), /no Google Chrome, Chromium or Edge found/);
   console.log("chrome lookup ok");
 }
 

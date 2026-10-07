@@ -4,6 +4,16 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The Debian and Ubuntu Node fix line ran NodeSource's setup script as root. It now adds NodeSource's
+  signing key and apt source by hand, then installs `nodejs`. `tests/check_plugins.py` fails any file that
+  pipes a downloaded script into `sudo` and a shell. Test: `setup.py demo`.
+- A Flatpak Chrome, Chromium or Edge left login.mjs saying "no Chrome found". It runs only inside its
+  sandbox, so it is still not launched, but login.mjs and doctor now name it and give the fix (a snap,
+  distro or Google Chrome install). Doctor has an optional `chrome` row from the new `login.mjs browser`.
+  Test: `node tests/test_record.mjs` (chrome lookup), `setup.py demo`.
+- clips told Windows users to copy the source video, often several GB. `clips.py link` makes
+  `source.mp4` a hard link on the same drive (no admin needed), else a symlink, else a copy, and the
+  skill uses it on every OS. Test: `clips.py demo`.
 - The renderer copy in `~/.ai-video-editor/remotion/src` kept components deleted from the plugin:
   edit.py copied over it with `dirs_exist_ok`. `mirror()` now removes files and folders gone from the
   plugin's `remotion/src`, inside that folder only. Test: `edit.py demo`.

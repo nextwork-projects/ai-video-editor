@@ -51,8 +51,13 @@ once" question: clips run straight through, and the user approves the picks and 
 
 ## 1. The video
 
-A local file: `mkdir -p clips/<name> && ln -s "<absolute path>" clips/<name>/source.mp4` (Windows:
-copy it). A link:
+A local file (a hard link on the same drive, else a symlink, a copy only as the last resort):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/clips/scripts/clips.py" link "<absolute path>" clips/<name>
+```
+
+A link:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/links.py" fetch "<url>" clips/<name> --max-height 1080
