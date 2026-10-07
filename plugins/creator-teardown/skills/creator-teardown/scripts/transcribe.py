@@ -26,8 +26,8 @@ Options:
                    <out>.clean.json.
   --lang CODE      ISO-639-1 language code (default: en)
 
-The key comes from the ELEVENLABS_API_KEY variable, a .env in the current
-folder, or the file `fetch.py setkey` writes, in that order.
+The key comes from the ELEVENLABS_API_KEY variable, else the file `fetch.py setkey`
+writes. A .env in the current folder is never read (it is another project's).
 
 Scribe keyterms add $0.05 per hour of audio. Cap is 1000 terms, <=50 chars each,
 <=5 words each; this script enforces those limits and drops what violates them.
@@ -66,7 +66,7 @@ def find_key(var="ELEVENLABS_API_KEY"):
     ELEVENLABS_API_KEY (transcripts) or GEMINI_API_KEY (the look pass)."""
     if os.environ.get(var):
         return os.environ[var].strip(), f"the {var} variable"
-    for p in (KEY_FILE, Path.cwd() / ".env"):
+    for p in (KEY_FILE,):   # never a .env in the working folder: another project's key would be billed
         if p.exists():
             for line in p.read_text().splitlines():
                 if line.startswith(f"{var}="):

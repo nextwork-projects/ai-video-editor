@@ -9,8 +9,8 @@ The file is ~/.config/creator-teardown/.env (KEY=value lines, chmod 600), the sa
 creator-teardown's `fetch.py setkey` writes, so a key saved by either plugin works in both.
 With AI_EDITOR_HOME set, the file is $AI_EDITOR_HOME/.env instead and the shared one is never
 read or written, so an isolated test run never finds or spends real keys.
-An environment variable of the same name wins over the file; a .env in the working folder
-comes next, as in creator-teardown.
+An environment variable of the same name wins over the file. A .env in the working folder is never
+read: it belongs to whatever project Claude Code started in.
 """
 import json
 import os
@@ -30,21 +30,35 @@ VARS = {"typesafe": "TYPESAFE_API_KEY", "gemini": "GEMINI_API_KEY",
 
 
 def get(name):
-    """(key, where it came from) or (None, None). `name` is typesafe, gemini or elevenlabs."""
-    var = VARS[name]
+    """(key, where it came from) or (None, None). `name` is typesafe, gemini or elevenlabs.
+    Never a .env in the working folder: that is another project's, and its key would be billed."""
+    var, p = VARS[name], key_file()
     if os.environ.get(var, "").strip():
         return os.environ[var].strip(), f"the {var} variable"
-    for p in (key_file(), Path.cwd() / ".env"):
-        try:
-            lines = p.read_text().splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            if line.startswith(f"{var}="):
-                key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                if key:
-                    return key, str(p)
+    try:
+        lines = p.read_text().splitlines()
+    except OSError:
+        return None, None
+    for line in lines:
+        if line.startswith(f"{var}="):
+            key = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if key:
+                return key, str(p)
     return None, None
+
+
+def write_private(path, text):
+    """Write a secrets file readable by this user only, 0600 from the moment it exists (never written, then
+    chmodded). An older file gets 0600 before the new text goes in."""
+    path = Path(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    return path
 
 
 def save(name, key, path=None):
@@ -53,12 +67,7 @@ def save(name, key, path=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     keep = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
             if ln.strip() and not ln.startswith(f"{var}=")]
-    path.write_text("\n".join(keep + [f"{var}={key}"]) + "\n")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
-    return path
+    return write_private(path, "\n".join(keep + [f"{var}={key}"]) + "\n")
 
 
 def _get(url, headers):
@@ -110,9 +119,21 @@ if __name__ == "__main__":   # self-check: saving one key keeps the others
         assert save("gemini", "d" * 24) == f
         f.unlink()
         cwd = os.getcwd()
-        os.chdir(d)   # an empty folder: nothing else may answer
+        work = Path(d) / "another-project"
+        work.mkdir()
+        (work / ".env").write_text(f"TYPESAFE_API_KEY={'e' * 24}\n")
+        os.chdir(work)   # the folder Claude Code started in: its .env is another project's, never read
         try:
-            assert get("typesafe") == (None, None), "found a key outside AI_EDITOR_HOME"
+            assert get("typesafe") == (None, None), "read a key from the working folder's .env"
         finally:
             os.chdir(cwd)
+        # a new key file is 0600 from its first byte: with chmod doing nothing, the mode is still 0600
+        if os.name != "nt":
+            real, old_mask = os.chmod, os.umask(0)
+            os.chmod = lambda *a, **k: None
+            try:
+                g = save("typesafe", "f" * 24, Path(d) / "new" / ".env")
+            finally:
+                os.chmod, _ = real, os.umask(old_mask)
+            assert g.stat().st_mode & 0o777 == 0o600, oct(g.stat().st_mode)
     print("keys ok")

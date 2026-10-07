@@ -4,6 +4,56 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- `login.mjs logout ..` deleted the whole editor folder, and `logout /` every saved login (backlog Now 1).
+  `domainOf` fell back to the raw text. Now a site must be a plain hostname (or an http(s) URL whose host is
+  one), and the profile folder must sit directly inside `<home>/browser/`; anything else (`..`, `/`, empty,
+  `.`, `a/b`, a drive letter, `%2e%2e`) exits 2 and deletes nothing. `where`, `check` and `login` use the
+  same check. Audit of every other delete in the repo (`rmSync`, `rmtree`, `unlink`, `os.remove`): each
+  works on a temp folder or a fixed name inside the edit folder; none takes a path from the user. Test:
+  `tests/test_record.mjs` (in a temp `AI_EDITOR_HOME`, 12 bad names exit non-zero and the home and both
+  profiles survive; `logout https://www.example.com/settings` removes only `browser/example.com`).
+- An ordinary download error asked for the browser login (backlog Now 2). `links.py`'s `LOGIN` matched
+  the bare "age" in "webpage", "image" and "storage". It now matches whole words and real gate messages
+  (sign in, login, private, members-only, age-restricted, confirm your age). Test: `links.py demo`
+  ("Unable to download webpage: HTTP Error 404" is not a login; "age-restricted" and "Log in for access" are).
+- The product-video music step ran a bare `yt-dlp` with `--cookies-from-browser chrome` behind
+  `--yt-cookies`. It now runs the venv's pinned yt-dlp (`links.ytdlp()`, which also prefers the venv over a
+  copy on PATH now), never passes cookies by default, and stops with `LOGIN:` when the site wants a login,
+  so the skill asks in the question box before `--cookies-from-browser <browser>`. Test: `product.py demo`
+  (the default command has no cookies flag; the named browser goes through only when given).
+- Keys from the working folder (backlog Privacy). `keys.py` and creator-teardown's `transcribe.py` read a
+  `.env` in whatever folder Claude Code started in, so another project's key could be billed. Now only the
+  environment variable and the key file (`$AI_EDITOR_HOME/.env`, else the shared one). Test: `keys.py` and
+  `fetch.py demo` (a `.env` with a key in the working folder is not read).
+- Key files are created readable by the user only (0600) instead of written and then chmodded: `keys.py`
+  (`write_private`), `setup.py awskey` (aws.env) and creator-teardown `fetch.py setkey`. Test: `keys.py`,
+  `setup.py demo`, `fetch.py demo` (umask 0 and chmod disabled: a new file is still 0600).
+- GitHub renders no longer run `gh auth setup-git`, which rewrote the user's global git credential helper.
+  The render repo gets its own `credential.helper` (`git config --local`, cleared, then `!gh auth
+  git-credential`). Test: `edit.py demo` (no `setup-git` in `github_push`; every credential command is
+  `--local`).
+- Cloud renders delete the uploaded footage after the download. GitHub: `github-fetch` deletes the `media`
+  release (and tag) and the run's artifacts; the video artifact is kept 1 day, not 7. Lambda: `render.mjs
+  lambda --cleanup` deletes the deployed site (the footage) and the render's objects from S3. style-edit
+  asks once "Delete the uploaded footage from <GitHub|AWS> after rendering?" (Yes recommended) and keeps
+  the answer as `cloud_cleanup` in the profile; with no, the run says where the footage is. Modal already
+  deleted its volume folder. Test: `edit.py demo` (a mocked `gh` deletes the release and both artifacts,
+  never the repo) and `tests/test_record.mjs` (a mocked Lambda client gets `deleteRender` and `deleteSite`,
+  called only after `downloadMedia`).
+- Saved logins are shown: `setup.py doctor` lists each logged-in browser profile with when it was last used
+  and how to delete it ("log me out of <site>"), and setup asks whether to delete them. product-video says
+  where the login is kept at the end of a logged-in run and offers `logout` once the video is approved.
+  Test: `setup.py demo` (two profiles listed with their age, a folder with no profile left out).
+- Linux captures kept Chrome's sandbox off on every site. `capture.mjs` and `record.mjs` now launch with the
+  sandbox and turn it off only when a probe launch fails with a sandbox or namespace error (blocked user
+  namespaces, running as root), and say so. Test: `tests/test_record.mjs` (`noSandbox`: on for a working
+  sandbox and for an unrelated crash, off only for a sandbox error on Linux, never off on Mac or Windows).
+  The Remotion renderer, which opens only the local bundle, is unchanged.
+- The live preview took requests from any page. `preview.py` now binds 127.0.0.1 only (checked) and puts a
+  random token in the URL; the page gets it as an HttpOnly, SameSite=Strict cookie, and every request
+  without it (page, script, state, media, changes, Render) gets 403. Test: `preview.py demo` (a real
+  server: no token is 403 on every path and writes nothing; the token then reads and writes).
+
 - Alternate hooks recorded after the call to action stay out of the main cut (backlog Next). A take that
   ends with more takes of the opening line had "last take wins" moving the hook to the end. `retakes.py
   propose` now finds them (more than 40 s after the opening, at the end of the recording, each under 30

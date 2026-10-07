@@ -20,8 +20,10 @@ python3 "$S/product.py" music product/<name> --url '<link>' [--start 0:12 --end 
 
 Audio only, into `audio/track.wav`; the link's title, channel and licence field (YouTube shows
 "Creative Commons Attribution license" there), the user's answer and the date go to
-`audio/MUSIC-LICENSE.md`; a CC-BY credit line goes into `share.txt`. Use `--yt-cookies` (their
-Chrome's YouTube login) only if YouTube blocks the download, and only after asking. On "Not sure",
+`audio/MUSIC-LICENSE.md`; a CC-BY credit line goes into `share.txt`. If it stops with `LOGIN:`, ask in
+the question box "Use your browser's login for this one download?" (No, use the generated score
+(Recommended) / Yes, Chrome / Yes, another browser), and only on a yes re-run with
+`--cookies-from-browser <browser>`. On "Not sure",
 say plainly that Instagram, TikTok and YouTube may mute or claim the video and offer the generated
 score instead; then do what they choose.
 

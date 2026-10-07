@@ -211,6 +211,11 @@ python3 "$S/product.py" share product/<name>
 that says what is shown. Open the render (`open` / `start ""` / `xdg-open`), give the full paths of
 the video, sheet and share.txt, and ask for notes. Notes about taste go to the taste skill.
 
+A logged-in run: say where the login is kept (`node "$S/login.mjs" where <domain>` prints the folder)
+and that it stays logged in on this computer until removed. Once the video is approved, ask in the
+question box "Log out of <domain> on this computer?" (Yes, delete the saved login (Recommended) / Keep
+it for the next video); on yes, `node "$S/login.mjs" logout <domain>`.
+
 ## If a script stops
 
 | message | do |
@@ -220,7 +225,7 @@ the video, sheet and share.txt, and ask for notes. Notes about taste go to the t
 | `story names '...', which is not in site.json elements` / `click target ... not in site.json` | `product.py copy` lists the elements; use one of them |
 | `not the site's words: ...` | replace those words with the site's own (`pages.md`) |
 | `--rights is required` | ask who holds the rights (`references/brief.md` "Music") |
-| `yt-dlp could not read that link` | ask before retrying with `--yt-cookies`, or offer the generated score |
+| `LOGIN: the site wants a login` (music) | ask before retrying with `--cookies-from-browser <browser>`, or offer the generated score |
 | `No ElevenLabs key` | offer on-screen words or their own recording |
 | `Modal is not set up on this computer` | the setup skill's Modal step, or render on the laptop |
 | a blank `images/tile-0.jpg` after the crawl | the site blocked the headless browser: say so, ask for another URL |

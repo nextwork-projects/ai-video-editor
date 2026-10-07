@@ -20,9 +20,11 @@ overrides.json:
 import argparse
 import array
 import datetime
+import hmac
 import json
 import mimetypes
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -204,14 +206,33 @@ class Session:
         return target
 
 
-def handler(sess, bundle, stop):
+def handler(sess, bundle, stop, token):
+    """Every request needs the token: ?t=<token> on the page's URL, then an HttpOnly, SameSite=Strict cookie the
+    page's own requests carry. Another site open in the browser (or a DNS-rebound name) has neither: 403."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
-        def body(self, data, ctype="application/json"):
+        def cookie_name(self):
+            return f"ave-preview-{self.server.server_address[1]}"   # cookies ignore ports: one per server
+
+        def authorized(self):
+            from urllib.parse import parse_qs, urlsplit
+            from http.cookies import SimpleCookie
+            q = parse_qs(urlsplit(self.path).query).get("t", [""])[0]
+            c = SimpleCookie()
+            try:
+                c.load(self.headers.get("Cookie") or "")
+            except Exception:
+                pass
+            got = c[self.cookie_name()].value if self.cookie_name() in c else ""
+            return any(hmac.compare_digest(v.encode(), token.encode()) for v in (q, got) if v)
+
+        def body(self, data, ctype="application/json", cookie=False):
             raw = data if isinstance(data, bytes) else json.dumps(data).encode()
             self.send_response(200)
+            if cookie:
+                self.send_header("Set-Cookie", f"{self.cookie_name()}={token}; Path=/; HttpOnly; SameSite=Strict")
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
@@ -248,9 +269,11 @@ def handler(sess, bundle, stop):
                 pass
 
         def do_GET(self):
+            if not self.authorized():
+                return self.send_error(403, "open the preview with the URL preview.py printed")
             p = self.path.split("?")[0]
             if p == "/":
-                return self.body((PAGE / "index.html").read_bytes(), "text/html; charset=utf-8")
+                return self.body((PAGE / "index.html").read_bytes(), "text/html; charset=utf-8", cookie=True)
             if p == "/app.js":
                 return self.body(bundle.read_bytes(), "text/javascript")
             if p == "/api/state":
@@ -263,6 +286,8 @@ def handler(sess, bundle, stop):
             self.send_error(404)
 
         def do_POST(self):
+            if not self.authorized():
+                return self.send_error(403, "open the preview with the URL preview.py printed")
             data = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             if self.path == "/api/change":
                 try:
@@ -295,14 +320,20 @@ def build_bundle():
     return dst / "dist" / "app.js"
 
 
+def make_server(sess, bundle, port):
+    """(server, url, token): this computer only (127.0.0.1), a fresh random token in the URL."""
+    token = secrets.token_urlsafe(32)
+    srv = ThreadingHTTPServer(("127.0.0.1", port), None)
+    srv.RequestHandlerClass = handler(sess, bundle, srv.shutdown, token)
+    srv.sess = sess
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/?t={token}", token
+
+
 def serve(edit, plan_name, port, open_page):
     if not (edit / plan_name).exists():
         sys.exit(f"ERROR: no {plan_name} in {edit}. Run plan.py first.")
-    bundle = build_bundle()
-    sess = Session(edit, plan_name)
-    srv = ThreadingHTTPServer(("127.0.0.1", port), None)
-    srv.RequestHandlerClass = handler(sess, bundle, srv.shutdown)
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    srv, url, _ = make_server(Session(edit, plan_name), build_bundle(), port)
+    sess = srv.sess
     print(f"preview: {url}  (Ctrl+C to stop; the page's Render button stops it too)", flush=True)
     if open_page:
         webbrowser.open(url)
@@ -370,6 +401,32 @@ def demo():
     assert st["plan"]["cards"][0]["_regions"] and st["overrideCount"] == 6, st["overrideCount"]
     assert s.done()["changes"] == 1 and (d / "preview-done.json").exists()
     assert s.media("../../etc/passwd") is None
+    # the server: 127.0.0.1 only, and every request (page, state, media, writes) needs the URL's token
+    import urllib.request, urllib.error
+    (d / "app.js").write_text("// bundle")
+    srv, url, token = make_server(s, d / "app.js", 0)
+    assert srv.server_address[0] == "127.0.0.1" and f"?t={token}" in url and len(token) >= 32, url
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = url.split("?")[0]
+
+    def hit(path, data=None, headers=None):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(base + path.lstrip("/"), data=data, headers=headers or {})) as r:
+                return r.status, r.headers.get("Set-Cookie") or ""
+        except urllib.error.HTTPError as e:
+            return e.code, ""
+    before = (d / "overrides.json").read_text()
+    for path, data in (("/", None), ("/app.js", None), ("/api/state", None), ("/api/state?t=wrong", None),
+                       ("/api/change", b'{"kind": "word", "key": "0.000", "to": "x"}'), ("/api/done", b"{}")):
+        assert hit(path, data)[0] == 403, path
+    assert (d / "overrides.json").read_text() == before, "a request without the token wrote"
+    code, cookie = hit(f"/?t={token}")
+    assert code == 200 and "HttpOnly" in cookie and "SameSite=Strict" in cookie, cookie
+    jar = {"Cookie": cookie.split(";")[0]}
+    assert hit("/api/state", headers=jar)[0] == 200 and hit("/app.js", headers=jar)[0] == 200
+    assert hit("/api/change", b'{"kind": "word", "key": "0.000", "from": "jev", "to": "Jev"}', jar)[0] == 200
+    srv.shutdown()
+    srv.server_close()
     shutil.rmtree(d)
     print("demo ok")
 

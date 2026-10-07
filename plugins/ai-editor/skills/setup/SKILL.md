@@ -52,6 +52,11 @@ the tools are done: skip to step 5 (keys). A `FIX ... run: setup.py repair` line
 moved off the pinned versions (an update, or a package changed by hand): run `python3 "$U" repair`,
 it puts back the exact pinned set. What is installed is recorded in `~/.ai-video-editor/env.json`.
 
+A `saved login` row is a browser profile product-video logged in to a site with: it stays logged in
+on this computer. Say which sites and how long ago each was used, and ask in the question box
+"Delete these saved logins?" (Keep them (Recommended) / Delete <domain>, one option a site); on a
+delete, `node "${CLAUDE_PLUGIN_ROOT}/skills/product-video/scripts/login.mjs" logout <domain>`.
+
 If `python3` itself is missing:
 - Mac: `brew install python`. No Homebrew? See step 2.
 - Windows: `winget install -e --id Python.Python.3.12`, then open a new terminal.

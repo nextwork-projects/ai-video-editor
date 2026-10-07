@@ -17,21 +17,7 @@ Sources:
 
 ## Now
 
-1. **`login.mjs logout` can delete the whole editor folder.** `domainOf("..")` falls back to the raw
-   string, so `profileFor("..")` is `$AI_EDITOR_HOME` and `logout ..` runs `rmSync` on it (venv,
-   models, profile, taste, keys location). `logout /` deletes every saved login.
-   (`product-video/scripts/login.mjs:30-31,83`)
-   Test: in a temp `AI_EDITOR_HOME`, `node login.mjs logout ..` and `logout /` exit non-zero and the
-   folder survives; `logout example.com` removes only `browser/example.com`.
-
-2. **Ordinary download errors ask the user for their browser login.** The `LOGIN` regex in
-   `links.py:427` matches the bare substring `age`, so "Unable to download webpage", "image" or
-   "storage" return exit 3, and start and clips then ask "Use your browser's login?". A user says
-   yes to a cookie read that was never needed.
-   Test: `links.py` classifies "ERROR: Unable to download webpage: HTTP Error 404" as exit 1 and
-   "Sign in to confirm your age" as exit 3.
-
-3. **Explaining cards on vertical render small and off-centre.** On the sample, the `flow` card
+1. **Explaining cards on vertical render small and off-centre.** On the sample, the `flow` card
    (28.8-37.8 s) sits in a 21%-tall top band with its content pushed right: `check.py render` FAILs
    it at 37.25 s (+5.6% off centre) while `check.py plan` passed 0 FAIL, and the FAIL's fix points
    the model at `Anims.tsx`. Its `tasks` chips ("small task", "harder") are unreadable at phone size.
@@ -42,12 +28,12 @@ Sources:
    Test: `check.py plan` on the sample plan FAILs a vertical `flow` or `logo_cluster` whose ink is
    under 60% of the frame width or off centre, and plan.py gives the flow a scene or split layout.
 
-4. **`profile.py style edits/<name>` crashes on a new video.** start step 3 runs it before cut
+2. **`profile.py style edits/<name>` crashes on a new video.** start step 3 runs it before cut
    creates `edits/<name>/`, and it dies with a `FileNotFoundError` traceback
    (`profile.py:278`). Every first video through start hits it.
    Test: `profile.py style <temp>/edits/new` with no folder exits 0 and writes `style.json`.
 
-5. **Whisper word timings send the cut into a false loop.** On the sample, Whisper times "if" at
+3. **Whisper word timings send the cut into a false loop.** On the sample, Whisper times "if" at
    0.7 s and "I" at 3.0 s. `build_timeline.py` reports `CLIPPED by a pause cut: if` at every `--pad`
    (0.12, 0.3), and the paper edit shows the "I" at 179 s as kept after `alt_hook` cut it. Verify
    then says the opposite: "if" SURVIVED, "i" MISSING. cut SKILL.md tells the model to raise
@@ -104,22 +90,6 @@ Skill wording:
 - `edit.py:43` copies the renderer with `dirs_exist_ok`, so deleted components stay in the user's copy.
 
 Privacy and safety:
-- `product.py:1075` music runs a bare `yt-dlp` (not installed on PATH by setup: traceback) with
-  `--cookies-from-browser chrome` hardcoded. Use `links.ytdlp()` and the browser the user names.
-- Lambda renders leave the footage in the user's S3 bucket (`render.mjs:163-166`); GitHub renders
-  leave it as a release asset and a 90-day artifact (`edit.py:519-525`). Delete after download, or
-  say where it is.
-- `gh auth setup-git` (`edit.py:501`) rewrites the user's global git credential helper. Scope it to
-  the one push.
-- `keys.py:37` reads `./.env` from whatever folder Claude Code started in: another project's key
-  gets billed silently. Drop it, or print which file each paid call used.
-- Key files (`keys.py:52-58`, `setup.py:527-537` aws.env, creator-teardown `fetch.py:266`) are
-  written, then chmodded. Create them with `0o600`.
-- Logged-in capture profiles keep cookies on disk with `--password-store=basic` and are never
-  removed. Offer `logout` when the video is approved.
-- Linux captures run Chrome with `--no-sandbox` on arbitrary sites (`capture.mjs:51`,
-  `record.mjs:46`). Try the sandbox first.
-- The live preview server (`preview.py`) takes POSTs from any page; add a URL token.
 - `taste.py scrub` does not remove `profile.names` or bare domains before a public issue.
 - `setkey` from the clipboard sends any token-shaped text to the vendor; check the prefix first.
 
@@ -129,7 +99,6 @@ Windows and Linux:
 - setup and creator-teardown Linux fixes are apt-only; the Node line pipes a remote script to
   `sudo bash`.
 - `render.py:111` concat list breaks on a `'` in the temp path.
-- `links.py:314-319` prefers a system yt-dlp over the pinned venv copy.
 - clips on Windows copies a multi-GB source instead of linking.
 
 Setup:

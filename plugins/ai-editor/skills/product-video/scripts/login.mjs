@@ -27,9 +27,26 @@ const CHROMES = {
 }[process.platform] || [];
 
 export const chromeBinary = () => CHROMES.find((p) => p && fs.existsSync(p)) || null;
-export const domainOf = (u) => { try { return new URL(/^https?:/.test(u) ? u : `https://${u}`).host.replace(/^www\./, ""); } catch { return u; } };
-export const profileFor = (u) => path.join(HOME, "browser", domainOf(u));
-export const hasProfile = (u) => fs.existsSync(path.join(profileFor(u), "Default"));
+// A hostname and nothing else: dot-separated labels of letters, digits and inner hyphens. "..", "/", "", "a/b",
+// an absolute path or a drive letter is null, so no input can name a folder outside <home>/browser/.
+const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+export const domainOf = (u) => {
+  const s = String(u ?? "").trim();
+  let host;
+  if (/^https?:\/\//i.test(s)) { try { host = new URL(s).hostname; } catch { return null; } }
+  else host = s.replace(/:\d+$/, "");        // a bare name: no scheme, so no path, slash or backslash allowed
+  host = host.toLowerCase().replace(/^www\./, "");
+  return HOSTNAME.test(host) ? host : null;
+};
+// <home>/browser/<domain>, or an Error: the folder must sit directly inside <home>/browser/.
+export const profileFor = (u) => {
+  const d = domainOf(u);
+  const root = path.resolve(HOME, "browser");
+  const dir = d && path.resolve(root, d);
+  if (!dir || path.dirname(dir) !== root) throw new Error(`not a website name: ${JSON.stringify(String(u ?? ""))}`);
+  return dir;
+};
+export const hasProfile = (u) => { try { return fs.existsSync(path.join(profileFor(u), "Default")); } catch { return false; } };
 export const FLAGS = ["--no-first-run", "--no-default-browser-check", "--use-mock-keychain", "--password-store=basic"];
 
 // Is this page asking for a login? A redirect to a login path, or a visible password field.
@@ -39,8 +56,8 @@ const LOGGED_OUT = `(() => /(^|\\/)(login|log-in|signin|sign-in|auth|sso)(\\/|$|
 
 async function check(url) {
   const bin = chromeBinary();
+  if (!hasProfile(url)) return { ok: false, why: `no profile for ${domainOf(url) || url}: run login first` };
   const dir = profileFor(url);
-  if (!hasProfile(url)) return { ok: false, why: `no profile for ${domainOf(url)}: run login first` };
   // headless, on the same profile, over the DevTools pipe
   const proc = spawn(bin, [...FLAGS, "--headless=new", "--remote-debugging-pipe", `--user-data-dir=${dir}`, "about:blank"],
     { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
@@ -64,7 +81,8 @@ async function check(url) {
 async function login(url, checkUrl) {
   const bin = chromeBinary();
   if (!bin) { console.error("ERROR: no Google Chrome found. Install it, or Chrome for Testing (npx @puppeteer/browsers install chrome@stable)."); process.exit(1); }
-  const dir = profileFor(url);
+  let dir;
+  try { dir = profileFor(url); } catch (e) { console.error(`ERROR: ${e.message}`); process.exit(2); }
   fs.mkdirSync(dir, { recursive: true });
   console.log(`A Chrome window is opening on its own profile (${dir}).\nLog in to ${domainOf(url)} there by hand, then close the window.`);
   // headed, the user's hands only; this process waits for the window to close
@@ -80,7 +98,13 @@ const flag = (k) => { const a = process.argv, i = a.indexOf(k); return i >= 0 ? 
 if ((process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) || process.argv[1]?.endsWith("login.mjs")) {
   if (cmd === "login" && arg) await login(arg, flag("--check"));
   else if (cmd === "check" && arg) { const v = await check(arg); console.log(JSON.stringify(v)); process.exit(v.ok ? 0 : 1); }
-  else if (cmd === "logout" && arg) { fs.rmSync(profileFor(arg), { recursive: true, force: true }); console.log(`deleted ${profileFor(arg)}: logged out of ${domainOf(arg)} on this computer`); }
-  else if (cmd === "where" && arg) console.log(profileFor(arg));
+  else if (cmd === "logout" && arg) {
+    let dir;
+    try { dir = profileFor(arg); } catch (e) { console.error(`ERROR: ${e.message}. Give the site, e.g. example.com.`); process.exit(2); }
+    if (!fs.existsSync(dir)) { console.log(`no saved login for ${domainOf(arg)}: nothing to delete`); process.exit(0); }
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`deleted ${dir}: logged out of ${domainOf(arg)} on this computer`);
+  }
+  else if (cmd === "where" && arg) { try { console.log(profileFor(arg)); } catch (e) { console.error(`ERROR: ${e.message}`); process.exit(2); } }
   else { console.error("usage: node login.mjs login <url> [--check <url>] | check <url> | logout <domain> | where <domain>"); process.exit(2); }
 }

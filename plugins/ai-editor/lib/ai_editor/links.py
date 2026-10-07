@@ -312,11 +312,12 @@ def plan(items):
 # ---- network: yt-dlp length probe and the downloader ----
 
 def ytdlp():
-    if shutil.which("yt-dlp"):
-        return [shutil.which("yt-dlp")]
+    """The venv's pinned yt-dlp (the version CI checks weekly), else one on PATH, else None."""
     home = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
     py = home / "venv" / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python")
-    return [str(py), "-m", "yt_dlp"] if py.exists() else None
+    if py.exists():
+        return [str(py), "-m", "yt_dlp"]
+    return [shutil.which("yt-dlp")] if shutil.which("yt-dlp") else None
 
 
 def probe(url, cookies=None):
@@ -424,7 +425,9 @@ def route(text, own=False):
     return plan(group(out))
 
 
-LOGIN = re.compile(r"sign in|log ?in|login|private|cookies|not a bot|registered users|members-only|age", re.I)
+# Whole words only: a bare "age" matched "webpage", "image" and "storage", and an ordinary 404 asked for the browser login.
+LOGIN = re.compile(r"\b(?:sign(?:ed)? ?in|log ?in|login|private|cookies|not a bot|registered users|members[- ]only|"
+                   r"age[- ](?:restricted|gated|verification)|confirm your age|inappropriate for some users)\b", re.I)
 
 
 def video_format(max_height=2160):
@@ -620,6 +623,15 @@ def demo():
                  "ERROR: [youtube] x: Private video", "Sign in to confirm your age"):
         assert LOGIN.search(line), line
     assert not LOGIN.search("ERROR: [youtube] x: This video is unavailable")
+    # "age" inside an ordinary word is not an age gate: these are plain failures (exit 1), never a cookie question
+    for line in ("ERROR: Unable to download webpage: HTTP Error 404: Not Found", "ERROR: no image found",
+                 "ERROR: not enough storage", "ERROR: [generic] x: Unable to extract page data", "ERROR: message too long"):
+        assert not LOGIN.search(line), line
+    for line in ("ERROR: [youtube] x: This video is age-restricted", "ERROR: [instagram] x: Requested content is not available, "
+                 "rate-limit reached or login required", "ERROR: [tiktok] x: This post may not be comfortable for some audiences. "
+                 "Log in for access", "ERROR: [youtube] x: Join this channel to get access to members-only content",
+                 "Use --cookies-from-browser or --cookies for the authentication"):
+        assert LOGIN.search(line), line
     # a /channel/ link: the @handle out of yt-dlp's channel JSON (canned, as --flat-playlist prints it)
     canned = {"id": "UCabcdefghijklmnopqrstuv", "channel_id": "UCabcdefghijklmnopqrstuv", "uploader_id": "@SomeCreator",
               "uploader_url": "https://www.youtube.com/@SomeCreator", "_type": "playlist"}

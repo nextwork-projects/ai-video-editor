@@ -373,7 +373,7 @@ __JOIN__
         with:
           name: render
           path: out/render.mp4
-          retention-days: 7
+          retention-days: 1
       - run: |
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \\
             -q '.artifacts[] | select(.name | startswith("chunk-")) | .id' |
@@ -416,7 +416,8 @@ it, as the `{zip}` asset of the `media` release.
 
 Actions > render > Run workflow renders `plan.json` with Remotion, about 2 minutes of video per
 runner in parallel, then joins the pieces. The video is the `render` artifact on the finished run
-(kept 7 days). `edit.py github-fetch` downloads it.
+(kept 1 day). `edit.py github-fetch` downloads it, then deletes the footage (the `media` release) and
+the run's artifacts unless the profile says `"cloud_cleanup": false`.
 """
 
 
@@ -485,6 +486,29 @@ def need_gh():
         sys.exit(1)
 
 
+# The render repo's own .git/config: an empty helper clears the user's global ones for this repo only, then
+# gh supplies the login. `gh auth setup-git` would rewrite the user's global git config instead.
+GIT_CREDENTIAL = [["config", "--local", "--replace-all", "credential.helper", ""],
+                  ["config", "--local", "--add", "credential.helper", "!gh auth git-credential"]]
+
+
+def cloud_cleanup():
+    """The profile's answer to "Delete the uploaded footage from <service> after rendering?". Unanswered: yes."""
+    sys.path.insert(0, str(PLUGIN / "lib"))
+    from ai_editor import profile
+    return profile.load().get("cloud_cleanup", True) is not False
+
+
+def github_cleanup(repo_name, run_id, gh=gh):
+    """After the render is downloaded: delete the footage from GitHub. The `media` release (and its tag) and every
+    artifact of the run. The repo stays (renderer source and plan, no footage) for the next push."""
+    gh("release", "delete", "media", "-y", "--cleanup-tag", "-R", repo_name, check=False)
+    arts = gh("api", f"repos/{repo_name}/actions/runs/{run_id}/artifacts", check=False).stdout
+    for a in (json.loads(arts).get("artifacts", []) if arts.strip() else []):
+        gh("api", "-X", "DELETE", f"repos/{repo_name}/actions/artifacts/{a['id']}", check=False)
+    print(f"deleted the footage from {repo_name}: the media release and the run's artifacts")
+
+
 def github_push(edit, repo_name, tag):
     need_gh()
     repo, zip_path = gh_paths(edit, tag)
@@ -498,7 +522,8 @@ def github_push(edit, repo_name, tag):
     git = lambda *a, **kw: subprocess.run(["git", *a], cwd=repo, check=True, **kw)
     if not (repo / ".git").exists():
         git("init", "-q", "-b", "main")
-    gh("auth", "setup-git")                        # git pushes with the gh login
+    for c in GIT_CREDENTIAL:                       # git pushes with the gh login, in this repo only
+        git(*c)
     git("add", "-A")
     if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo).returncode:
         who = subprocess.run(["git", "config", "user.email"], cwd=repo, capture_output=True, text=True).stdout.strip()
@@ -556,6 +581,10 @@ def github_fetch(edit, repo_name, tag):
     out = edit / f"render-github{tag}.mp4"
     shutil.move(str(tmp / "render.mp4"), out)
     shutil.rmtree(tmp, ignore_errors=True)
+    if cloud_cleanup():
+        github_cleanup(repo_name, run_id)
+    else:
+        print(f"kept on GitHub (profile cloud_cleanup false): the footage is the media release of {repo_name}")
     dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                           str(out)], capture_output=True, text=True).stdout.strip()
     print(f"{out} ({float(dur):.1f} s)")
@@ -614,6 +643,21 @@ def demo():
         split_file(big, 1000)
         assert [p.name for p in media_files(big)] == ["big.zip.part-00", "big.zip.part-01", "big.zip.part-02"]
         assert b"".join(p.read_bytes() for p in media_files(big)) == bytes(range(256)) * 10
+    # git pushes use the gh login in the render repo only: the user's global credential helper is never rewritten
+    assert "setup-git" not in inspect.getsource(github_push)
+    assert GIT_CREDENTIAL and all(c[:2] == ["config", "--local"] for c in GIT_CREDENTIAL), GIT_CREDENTIAL
+    # after a downloaded render the footage leaves GitHub: the media release and the run's artifacts, nothing else
+    assert "retention-days: 7" not in WORKFLOW and WORKFLOW.count("retention-days: 1") == 2
+    calls = []
+
+    def fake_gh(*args, check=True, cwd=None):
+        calls.append(args)
+        out = '{"artifacts": [{"id": 11, "name": "render"}, {"id": 12, "name": "chunk-00"}]}' if args[:1] == ("api",) and "-X" not in args else ""
+        return subprocess.CompletedProcess(args, 0, out, "")
+    github_cleanup("me/video-x", "99", fake_gh)
+    assert ("release", "delete", "media", "-y", "--cleanup-tag", "-R", "me/video-x") in calls, calls
+    assert {c[-1] for c in calls if "DELETE" in c} == {"repos/me/video-x/actions/artifacts/11", "repos/me/video-x/actions/artifacts/12"}, calls
+    assert not any("repo" in c[:1] or "delete" == c[0] for c in calls), "never the repo itself"
     assert chunk_ranges(1326, 30) == [[0, 1325]]
     r = chunk_ranges(40 * 60 * 30, 30)
     assert len(r) == 20 and r[0] == [0, 3599] and r[-1][1] == 71999, r
@@ -673,7 +717,8 @@ def main():
     elif a.github:
         package_github(edit, plan_path, pub, tag)
     elif a.use_lambda:
-        node("lambda", pub, plan_path, edit / f"render{tag}.mp4", re.sub(r"[^a-z0-9-]+", "-", f"ai-editor-{edit.name}{tag}".lower()))
+        node("lambda", pub, plan_path, edit / f"render{tag}.mp4", re.sub(r"[^a-z0-9-]+", "-", f"ai-editor-{edit.name}{tag}".lower()),
+             *(["--cleanup"] if cloud_cleanup() else []))
     elif a.modal:
         if not modal_ready():
             sys.exit("Modal is not set up on this computer: run the setup skill's Modal step first.")

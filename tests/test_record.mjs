@@ -50,6 +50,62 @@ console.log("deny list ok");
   console.log("snapClip ok");
 }
 
+// login.mjs logout deletes only <home>/browser/<one hostname>: never the home, never every saved login
+{
+  const { spawnSync } = await import("node:child_process");
+  const os = await import("node:os");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ave-login-test-"));
+  try {
+    for (const d of ["browser/example.com/Default", "browser/other.org/Default", "venv"]) fs.mkdirSync(path.join(home, d), { recursive: true });
+    const login = path.join(SCRIPTS, "product-video/scripts/login.mjs");
+    const run = (...a) => spawnSync(process.execPath, [login, ...a], { env: { ...process.env, AI_EDITOR_HOME: home }, encoding: "utf8" });
+    for (const bad of ["..", "/", "", ".", "a/b", "../..", "example.com/..", "C:\\x", "..\\..", "%2e%2e", "https://", "-rf"]) {
+      const r = run("logout", bad);
+      assert.notEqual(r.status, 0, `logout ${JSON.stringify(bad)} exited 0: ${r.stdout}`);
+      for (const d of ["venv", "browser/example.com/Default", "browser/other.org/Default"])
+        assert.ok(fs.existsSync(path.join(home, d)), `logout ${JSON.stringify(bad)} deleted ${d}`);
+    }
+    assert.notEqual(run("where", "..").status, 0, "where .. names a folder");
+    const r = run("logout", "https://www.example.com/settings");
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!fs.existsSync(path.join(home, "browser/example.com")), "logout example.com left the profile");
+    assert.ok(fs.existsSync(path.join(home, "browser/other.org/Default")) && fs.existsSync(path.join(home, "venv")));
+    console.log("logout ok");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+// Lambda: after a downloaded render, the footage (the deployed site holds the public dir) and the render's
+// objects leave the user's bucket. render.mjs imports Remotion on load, so the function is read from its source.
+{
+  const rsrc = fs.readFileSync(path.join(ROOT, "plugins/ai-editor/remotion/render.mjs"), "utf8");
+  const m = rsrc.match(/^const cleanupLambda = (async \(L, o\) => \{[\s\S]*?\n\});$/m);
+  assert.ok(m, "render.mjs has no `const cleanupLambda = async (L, o) => {...};` block");
+  const cleanupLambda = eval(m[1]);
+  const calls = [];
+  const L = { deleteRender: async (a) => calls.push(["render", a]), deleteSite: async (a) => calls.push(["site", a]) };
+  await cleanupLambda(L, { region: "us-east-1", bucketName: "remotionlambda-x", renderId: "r1", siteName: "ai-editor-take" });
+  assert.deepEqual(calls, [["render", { region: "us-east-1", bucketName: "remotionlambda-x", renderId: "r1" }],
+    ["site", { region: "us-east-1", bucketName: "remotionlambda-x", siteName: "ai-editor-take" }]]);
+  assert.match(rsrc, /if \(flags\.cleanup\) await cleanupLambda\(L,/, "lambda() never calls cleanupLambda on --cleanup");
+  assert.match(rsrc, /downloadMedia[\s\S]{0,400}if \(flags\.cleanup\)/, "cleanup must come after the download");
+  console.log("lambda cleanup ok");
+}
+
+// --no-sandbox only on Linux, and only when a probe launch says the sandbox itself cannot start
+{
+  const { noSandbox } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
+  const dead = { status: 1, stderr: "FATAL:zygote_host_impl_linux.cc No usable sandbox! Update your kernel or see .../linux/suid_sandbox_development.md" };
+  assert.equal(noSandbox("linux", { status: 0, stderr: "" }), false, "a working sandbox stays on");
+  assert.equal(noSandbox("linux", dead), true, "a sandbox that cannot start is turned off");
+  assert.equal(noSandbox("linux", { status: 1, stderr: "Running as root without --no-sandbox is not supported" }), true);
+  assert.equal(noSandbox("linux", { status: 127, stderr: "error while loading shared libraries: libnss3.so" }), false, "an unrelated crash keeps the sandbox");
+  assert.equal(noSandbox("darwin", dead), false);
+  assert.equal(noSandbox("win32", dead), false);
+  console.log("sandbox decision ok");
+}
+
 const { launch, findBinary, SHELLS, TEXT } = await import(pathToFileURL(path.join(SCRIPTS, "style-edit/scripts/capture.mjs")).href);
 const bin = findBinary(SHELLS);
 if (!bin) {

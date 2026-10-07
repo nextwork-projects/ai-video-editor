@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { findBinary, SHELLS, DISMISS, TEXT } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
+const { findBinary, SHELLS, DISMISS, TEXT, sandboxFlags } = await import(pathToFileURL(path.join(HERE, "../../style-edit/scripts/capture.mjs")).href);
 const { chromeBinary, hasProfile, profileFor, FLAGS } = await import(pathToFileURL(path.join(HERE, "login.mjs")).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const args = process.argv.slice(2);
@@ -41,9 +41,9 @@ const DSF = MOBILE || STATES ? 3 : 2, FPS = 30, SUFFIX = MOBILE ? "-m" : "";
 // on that profile, which is never deleted here. Otherwise the headless shell on a throwaway profile.
 function chrome(bin, logged) {
   const profile = logged || fs.mkdtempSync(path.join(os.tmpdir(), "ai-editor-record-"));
-  const proc = spawn(logged ? chromeBinary() : bin, ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio",
-    ...(logged ? [...FLAGS, "--headless=new"] : []),
-    ...(process.platform === "linux" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []), `--user-data-dir=${profile}`, "about:blank"],
+  const exe = logged ? chromeBinary() : bin;
+  const proc = spawn(exe, ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio",
+    ...(logged ? [...FLAGS, "--headless=new"] : []), ...sandboxFlags(exe), `--user-data-dir=${profile}`, "about:blank"],
     { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
   let id = 0, buf = "";
   const waiting = new Map(), listeners = new Set();

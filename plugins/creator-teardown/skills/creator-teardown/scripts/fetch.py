@@ -41,6 +41,7 @@ import argparse
 import datetime
 import glob
 import json
+import os
 import platform
 import re
 import shutil
@@ -246,7 +247,14 @@ def save_key(var, key, path=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     keep = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
             if ln.strip() and not ln.startswith(f"{var}=")]
-    path.write_text("\n".join(keep + [f"{var}={key}"]) + "\n")
+    # readable by you only from the moment it exists: created 0600, never written and then chmodded
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.chmod(path, 0o600)   # a file made by an older version
+    except OSError:
+        pass
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(keep + [f"{var}={key}"]) + "\n")
 
 
 def cmd_setkey(args):
@@ -262,10 +270,6 @@ def cmd_setkey(args):
     if not re.fullmatch(r"[A-Za-z0-9_\-]{20,}", key):
         sys.exit(f"That doesn't look like a {name} key. Copy it again from {where}.")
     save_key(var, key)
-    try:
-        KEY_FILE.chmod(0o600)  # readable by you only
-    except OSError:
-        pass
     print(f"Saved to {KEY_FILE}. It works from any folder now.")
     print(f"Check everything with: {PY} \"{SELF}\" doctor")
 
@@ -515,6 +519,25 @@ def demo():
         save_key("GEMINI_API_KEY", "b" * 24, f)
         save_key("GEMINI_API_KEY", "c" * 24, f)
         assert f.read_text() == f"ELEVENLABS_API_KEY={'a' * 24}\nGEMINI_API_KEY={'c' * 24}\n"
+        # a new key file is 0600 from its first byte: with chmod doing nothing, the mode is still 0600
+        if os.name != "nt":
+            real, mask = os.chmod, os.umask(0)
+            os.chmod = lambda *a, **k: None
+            try:
+                save_key("GEMINI_API_KEY", "d" * 24, Path(d) / "new.env")
+            finally:
+                os.chmod, _ = real, os.umask(mask)
+            assert (Path(d) / "new.env").stat().st_mode & 0o777 == 0o600, oct((Path(d) / "new.env").stat().st_mode)
+        # the working folder's .env is another project's: never read
+        (Path(d) / ".env").write_text(f"GEMINI_API_KEY={'e' * 24}\n")
+        cwd, saved = os.getcwd(), os.environ.pop("GEMINI_API_KEY", None)
+        os.chdir(d)
+        try:
+            assert find_key("GEMINI_API_KEY")[1] != str(Path.cwd() / ".env"), "read the working folder's .env"
+        finally:
+            os.chdir(cwd)
+            if saved is not None:
+                os.environ["GEMINI_API_KEY"] = saved
     print("ok")
 
 

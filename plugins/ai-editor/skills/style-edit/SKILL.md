@@ -168,6 +168,8 @@ recommended, each carrying the printed numbers:
 3. **Other: GitHub Actions or AWS Lambda**: both `Other:` lines in the description. On this pick, ask
    a second question with the two. GitHub Actions: free, needs `gh` logged in, the footage goes into
    a **private** repo in their account; ask before creating the repo. Lambda: their own AWS account.
+   No `cloud_cleanup` in the profile: ask once "Delete the uploaded footage from <GitHub|AWS> after
+   rendering?" (Yes (Recommended) / No, keep it there), then `profile.py set cloud_cleanup=true|false`.
 
 Modal picked but not set up: the setup skill's Modal step first. Lambda picked and
 `aws sts get-caller-identity` fails: the setup skill's Lambda section first.

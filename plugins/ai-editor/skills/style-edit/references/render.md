@@ -88,13 +88,19 @@ renders in parallel: a `plan` job splits the video into chunks of about 2 minute
 `render` job per chunk renders its frames, and a `join` job puts them back together, so a long take
 stays under GitHub's 6-hour job limit. Re-run `github-push` after a new plan: it pushes the
 changes, replaces the media and starts a new run. `github-fetch` waits for the latest run and
-writes `edits/<name>/render-github.mp4`.
+writes `edits/<name>/render-github.mp4`. With `cloud_cleanup` true in the profile (the default) it
+then deletes the `media` release (the footage) and the run's artifacts; the rendered video artifact
+is kept 1 day either way. Git pushes use the `gh` login through the render repo's own
+`.git/config` (`credential.helper`, set with `git config --local`); the user's global git config
+is never changed (no `gh auth setup-git`).
 
 ## Lambda
 
 Lambda also prints what the render
 really cost. The first Lambda render sets up the function and a storage bucket in their account;
-later renders reuse them. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
+later renders reuse them. The footage goes up as the render's site (`sites/<name>/` in that bucket).
+With `cloud_cleanup` true in the profile (the default), `edit.py` passes `--cleanup` and the site and
+the render's objects are deleted after the download; with false, the render prints where they are. Region comes from `REMOTION_AWS_REGION` or `AWS_REGION`, else us-east-1.
 
 ## The live preview
 
@@ -105,6 +111,9 @@ another in `images/`, delete it, fix a misheard caption word (empty it to remove
 sound cue's level. Every change is a small diff in `edits/<name>/overrides.json` and a line in
 `corrections.jsonl` (what, from, to). The script waits until they press **Render**, which writes
 `edits/<name>/preview-done.json` with a summary and stops it. `preview.py demo` self-checks.
+The server listens on 127.0.0.1 only and its URL carries a random token (`?t=...`); every request
+without it, reads and writes alike, gets 403, so another page open in the browser cannot change the
+edit. Open the URL it prints, as printed.
 
 ## Export to another editor
 

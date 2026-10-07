@@ -21,7 +21,8 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "avoid": {"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"], "notes": ""},
    "captions": {"on": true, "style": "creator"},     style: creator | bold | karaoke | minimal
    "sound": {"sfx": true, "music": false},
-   "behind": true}                                     cards sit behind the speaker (style-edit matte.py)
+   "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
+   "cloud_cleanup": true}                              delete uploaded footage from GitHub / S3 after a cloud render
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
 `editorial` preset. No creator: DEFAULT_STYLE (style-edit references/plan.md "No creator"). Stdlib only.

@@ -4,7 +4,7 @@
     python3 product.py crawl  URL DIR [--app URL] [--cookies FILE] [--include URLS]   crawl.mjs: site.json, pages, fonts, logo
     python3 product.py pages  DIR                                     pages.md: every crawled page, compact, to find the use cases in
     python3 product.py record DIR [--mobile] [--cookies FILE]         record.mjs: flows.json -> real click-throughs in flows/
-    python3 product.py music  DIR --url URL [--start S --end S] --rights own|cc|licensed|unsure [--credit "..."]
+    python3 product.py music  DIR --url URL [--start S --end S] --rights own|cc|licensed|unsure [--credit "..."] [--cookies-from-browser B]
     python3 product.py copy   DIR                                     the site's phrases to pick beats from (Jev ranks them with a key)
     python3 product.py plan   DIR --style linear|apple|stripe|arc|raycast --aspect 16:9|9:16|1:1 [--length 30]
                               [--music generated|eleven|none|audio/F] [--sfx subtle|none] [--vo F] [--story F --tag T]
@@ -1066,16 +1066,32 @@ RIGHTS = {"own": "It's my own track", "cc": "YouTube Audio Library or Creative C
           "licensed": "Licensed (Epidemic, Artlist or similar)", "unsure": "Not sure"}
 
 
-def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=False):
+def music_cmd(cookies=None, y=None):
+    """yt-dlp for the music step: the venv's pinned copy (links.ytdlp), and the browser's cookies only when the
+    user said yes in the question box (cookies = the browser they named)."""
+    if y is None:
+        from ai_editor import links
+        y = links.ytdlp()
+    if not y:
+        sys.exit("ERROR: yt-dlp is not installed. Run the setup skill, then try again.")
+    return [*y, "--no-playlist", *(["--cookies-from-browser", cookies] if cookies else [])]
+
+
+def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=None):
     """A track from a YouTube (or any yt-dlp) link: audio only, cut to a section, its licence recorded in
     audio/MUSIC-LICENSE.md with the user's answer. Never copied anywhere but this project's audio/."""
     import datetime
+    from ai_editor import links
     d = Path(d)
     (d / "audio").mkdir(exist_ok=True)
-    base = ["yt-dlp", "--no-playlist", *(["--cookies-from-browser", "chrome"] if cookies else [])]
-    meta = json.loads(subprocess.run(base + ["-j", url], capture_output=True, text=True).stdout or "{}")
+    base = music_cmd(cookies)
+    r = subprocess.run(base + ["-j", url], capture_output=True, text=True)
+    meta = json.loads(r.stdout or "{}")
     if not meta:
-        sys.exit("ERROR: yt-dlp could not read that link. If YouTube asks to sign in, ask the user, then --cookies.")
+        if not cookies and links.LOGIN.search(r.stderr):
+            sys.exit("LOGIN: the site wants a login for this link. Ask in the question box before re-running with "
+                     "--cookies-from-browser <browser>, or offer the generated score.")
+        sys.exit("ERROR: yt-dlp could not read that link: " + (r.stderr.strip().splitlines() or ["no output"])[-1][:300])
     raw = d / "audio" / "track-src"
     subprocess.run(base + ["-f", "bestaudio", "-x", "--audio-format", "wav", "-o", f"{raw}.%(ext)s", url], check=True, capture_output=True)
     src = next(d.glob("audio/track-src.wav"))
@@ -1119,6 +1135,10 @@ def cmd_tts(d, text, voice):
 # ---------------------------------------------------------------- self-check
 
 def demo():
+    # music: the pinned yt-dlp, and no browser cookies unless the user said yes (--cookies-from-browser <browser>)
+    y = ["/venv/bin/python", "-m", "yt_dlp"]
+    assert music_cmd(y=y) == y + ["--no-playlist"], music_cmd(y=y)
+    assert music_cmd("firefox", y=y)[-2:] == ["--cookies-from-browser", "firefox"]
     site = {"domain": "example.com", "viewport": [1440, 900], "title": "Example", "description": "",
             "tiles": [{"src": "images/tile-0.jpg", "y": 0, "size": [2880, 1800]}, {"src": "images/tile-1.jpg", "y": 900, "size": [2880, 1800]}],
             "copy": [{"text": "Ship faster with fewer meetings", "tag": "h1", "rect": [80, 300, 900, 80]},
@@ -1186,7 +1206,8 @@ def main():
     ap.add_argument("--start"), ap.add_argument("--end")
     ap.add_argument("--rights", choices=list(RIGHTS), help="music: the user's answer to who holds the rights")
     ap.add_argument("--credit", help="music: the credit line a CC-BY track needs (goes into share.txt)")
-    ap.add_argument("--yt-cookies", action="store_true", help="music: --cookies-from-browser chrome, only after asking")
+    ap.add_argument("--cookies-from-browser", dest="cookies_browser", metavar="BROWSER",
+                    help="music: read this browser's login for the one download; only after the user said yes")
     ap.add_argument("a")
     ap.add_argument("b", nargs="?")
     ap.add_argument("--app")
@@ -1223,7 +1244,7 @@ def main():
             sys.exit("ERROR: --rights is required: ask who holds the rights in the question box first")
         if a.file:
             return print(json.dumps(gates.record_file(a.a, a.file, a.rights, a.credit), indent=1))
-        return cmd_music(a.a, a.url, a.start, a.end, a.rights, a.credit, a.yt_cookies)
+        return cmd_music(a.a, a.url, a.start, a.end, a.rights, a.credit, a.cookies_browser)
     if a.cmd == "pages":
         return cmd_pages(a.a)
     if a.cmd == "record":

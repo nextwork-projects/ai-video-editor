@@ -9,7 +9,7 @@
 // <publicDir> can also be a bundle folder made by `bundle` (it holds bundle.js): nothing is bundled again.
 // --draft renders at 2/3 size (1080x1920 -> 720x1280), on a Mac with its hardware H.264 encoder.
 //   node render.mjs lambda-estimate <plan.json>               -> JSON: Lambda cost + time guess
-//   node render.mjs lambda <publicDir> <plan.json> <out.mp4> <siteName>
+//   node render.mjs lambda <publicDir> <plan.json> <out.mp4> <siteName> [--cleanup]   --cleanup: delete the footage and render from S3 after
 //
 // Lambda uses the user's own AWS credentials: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY,
 // or AWS_PROFILE (REMOTION_AWS_* variants work too). Region: REMOTION_AWS_REGION, AWS_REGION, else us-east-1.
@@ -154,6 +154,13 @@ async function lambdaEstimate(planPath) {
     wall_s: Math.round(fpl * LAMBDA_S_PER_FRAME + 25) }));
 }
 
+// --cleanup (the profile's cloud_cleanup, asked once): after the download, delete what this render left in the
+// user's bucket. The site holds the uploaded public dir (the footage); the render holds its chunks and output.
+const cleanupLambda = async (L, o) => {
+  await L.deleteRender({ region: o.region, bucketName: o.bucketName, renderId: o.renderId });
+  await L.deleteSite({ region: o.region, bucketName: o.bucketName, siteName: o.siteName });
+};
+
 async function lambda(publicDir, planPath, out, siteName) {
   const L = await import("@remotion/lambda");
   const inputProps = readPlan(planPath);
@@ -177,6 +184,9 @@ async function lambda(publicDir, planPath, out, siteName) {
       await L.downloadMedia({ region: REGION, bucketName, renderId, outPath: out });
       console.log(`\nrendered ${out} in ${((Date.now() - t0) / 1000).toFixed(1)} s, ` +
         `AWS cost ${p.costs.displayCost}`);
+      if (flags.cleanup) await cleanupLambda(L, { region: REGION, bucketName, renderId, siteName });
+      console.log(flags.cleanup ? `deleted the uploaded footage and the render from s3://${bucketName}`
+        : `kept in s3://${bucketName}: the footage (sites/${siteName}/) and the render (renders/${renderId}/)`);
       return;
     }
   }

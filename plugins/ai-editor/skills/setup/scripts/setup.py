@@ -273,11 +273,29 @@ def doctor():
         "ready": "logged in: cloud renders on Modal",
         "no token": f"installed, not logged in. In your own terminal: {modal_exe()} token new",
         "missing": f"optional, cloud renders on Modal ($30 free credit a month): {py_self} \"{here}\" modal"}[mo])
+    for domain, days, _ in saved_logins():
+        print(login_line(domain, days))
     ready = all(r[1] for r in rows) and disk_ok
     if ENV.exists():
         print(f"     installed versions: {ENV}")
     print("Ready." if ready else "Not ready. Fix the lines above, top to bottom.")
     return 0 if ready else 1
+
+
+def saved_logins(home=None):
+    """[(domain, days since last use, folder)]: every logged-in capture profile login.mjs keeps in <home>/browser/.
+    Each holds a live login (cookies) on this computer until the user logs out."""
+    root = Path(home or HOME) / "browser"
+    if not root.is_dir():
+        return []
+    return [(d.name, int((time.time() - (d / "Default").stat().st_mtime) // 86400), d)
+            for d in sorted(root.iterdir()) if (d / "Default").is_dir()]
+
+
+def login_line(domain, days):
+    age = "today" if days < 1 else f"{days} day{'s' if days > 1 else ''} ago"
+    return (f"--   {'saved login':<20} {domain}, last used {age}. Still logged in on this computer; "
+            f"say \"log me out of {domain}\" to delete it")
 
 
 KEY_ROWS = [  # name, what it gives, what happens without it
@@ -532,12 +550,13 @@ def save_aws_key():
     if not key_id.startswith(("AKIA", "ASIA")) or len(secret) < 30:
         sys.exit("That does not look like an AWS access key. Nothing saved.")
     HOME.mkdir(parents=True, exist_ok=True)
-    f = HOME / "aws.env"
-    f.write_text(f"REMOTION_AWS_ACCESS_KEY_ID={key_id}\nREMOTION_AWS_SECRET_ACCESS_KEY={secret}\n"
-                 f"REMOTION_AWS_REGION={region}\n")
-    if OS != "Windows":
-        f.chmod(0o600)
-    print(f"Saved to {f}")
+    print(f"Saved to {write_aws_env(HOME / 'aws.env', key_id, secret, region)}")
+
+
+def write_aws_env(f, key_id, secret, region):
+    """aws.env, readable by this user only from the moment it exists (keys.write_private)."""
+    return keys.write_private(f, f"REMOTION_AWS_ACCESS_KEY_ID={key_id}\nREMOTION_AWS_SECRET_ACCESS_KEY={secret}\n"
+                                 f"REMOTION_AWS_REGION={region}\n")
 
 
 def check_lambda():
@@ -629,6 +648,29 @@ def demo():
         later("style"); later("style")
         assert later_load() == ["style"] and "style" in still_later()
     HOME, LATER = keep
+    # Saved logins: one row each, with its age and the logout offer; a folder with no profile is not one
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("example.com", "app.other.org"):
+            (Path(d) / "browser" / name / "Default").mkdir(parents=True)
+        (Path(d) / "browser" / "half-made").mkdir()
+        old = time.time() - 12 * 86400 - 60
+        os.utime(Path(d) / "browser" / "example.com" / "Default", (old, old))
+        got = [(n, a) for n, a, _ in saved_logins(d)]
+        assert got == [("app.other.org", 0), ("example.com", 12)], got
+        line = login_line("example.com", 12)
+        assert "12 days ago" in line and 'log me out of example.com' in line, line
+        assert "today" in login_line("app.other.org", 0)
+    assert saved_logins(Path(tempfile.gettempdir()) / "no-such-ave-home") == []
+    # aws.env is created 0600: with chmod doing nothing, the mode is still 0600
+    if OS != "Windows":
+        with tempfile.TemporaryDirectory() as d:
+            real, mask = os.chmod, os.umask(0)
+            os.chmod = lambda *a, **k: None
+            try:
+                f = write_aws_env(Path(d) / "aws.env", "AKIA" + "X" * 16, "s" * 40, "us-east-1")
+            finally:
+                os.chmod, _ = real, os.umask(mask)
+            assert f.stat().st_mode & 0o777 == 0o600, oct(f.stat().st_mode)
     # Minimum versions, as each OS prints them.
     assert ffmpeg_version("ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright") == (4, 4) >= FFMPEG_MIN
     assert ffmpeg_version("ffmpeg version 4.2.7-0ubuntu0.1") < FFMPEG_MIN

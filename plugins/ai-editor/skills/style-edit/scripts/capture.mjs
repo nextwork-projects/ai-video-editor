@@ -21,7 +21,7 @@
 // into images/post-<id>.json for a social_post card), "app" (App Store lookup: icon as the logo, first
 // screenshot as a card), "youtube" (the video's thumbnail), "github" (the repo's social card).
 // Cookie banners: a bundled list of consent-manager selectors is hidden and a reject/accept button clicked.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,13 +43,32 @@ const findBinary = (dir) => {
   return null;
 };
 
+// Chrome's sandbox stays on. Linux only: some systems block the unprivileged namespaces it needs (Ubuntu 23.10+
+// AppArmor, many containers) or run as root, and Chrome then dies on start. A probe launch with the sandbox
+// decides; only when its error names the sandbox are pages opened without it, and the run says so.
+const noSandbox = (platform, probe) => platform === "linux" && probe.status !== 0
+  && /sandbox|namespace/i.test(probe.stderr || "");
+const probed = new Map();
+function sandboxFlags(bin) {
+  if (process.platform !== "linux") return [];
+  if (!probed.has(bin)) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-editor-probe-"));
+    const r = spawnSync(bin, ["--headless", "--no-first-run", `--user-data-dir=${dir}`, "--dump-dom", "about:blank"],
+      { encoding: "utf8", timeout: 30000 });
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    const off = noSandbox(process.platform, { status: r.status, stderr: r.stderr });
+    if (off) console.error("note: Chrome's sandbox cannot start on this computer (" +
+      ((r.stderr || "").split("\n").find((l) => /sandbox|namespace/i.test(l)) || "").trim().slice(0, 160) +
+      "), so pages open without it. Allow unprivileged user namespaces, or don't run as root, to keep it on.");
+    probed.set(bin, off);
+  }
+  return [...(probed.get(bin) ? ["--no-sandbox"] : []), "--disable-dev-shm-usage"];
+}
+
 // Minimal DevTools Protocol client over --remote-debugging-pipe (fd 3 in, fd 4 out, \0-framed JSON).
 function launch(bin) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "ai-editor-capture-"));
-  // Linux: recent Ubuntu blocks the unprivileged namespaces Chrome's sandbox needs, so Chrome dies
-  // on start. Remotion's renderer launches this same binary without the sandbox too.
-  const flags = ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio",
-    ...(process.platform === "linux" ? ["--no-sandbox", "--disable-dev-shm-usage"] : [])];
+  const flags = ["--remote-debugging-pipe", "--no-first-run", "--hide-scrollbars", "--mute-audio", ...sandboxFlags(bin)];
   const proc = spawn(bin, [...flags, `--user-data-dir=${profile}`, "about:blank"],
     { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
   let id = 0, buf = "", errTail = "";
@@ -688,5 +707,5 @@ async function main() {
 }
 
 // Imported by product-video/scripts/crawl.mjs for the browser, banner and text-finding helpers.
-export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip };
+export { launch, findBinary, SHELLS, DISMISS, FIND, lines, TEXT, snapClip, noSandbox, sandboxFlags };
 if (path.basename(process.argv[1] || "") === "capture.mjs") await main();
