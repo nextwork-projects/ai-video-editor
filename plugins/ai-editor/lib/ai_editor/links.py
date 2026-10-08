@@ -5,6 +5,7 @@
                                                             lengths with yt-dlp, print the plan
     python3 links.py classify <url>... [--own]              offline: kind, normalised url, action
     python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4] [--max-height 2160] [--direct]
+                                                            [--cover <image url>]  (audio: the artwork as cover.<ext>)
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
@@ -36,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -419,7 +421,8 @@ def spotify_audio(url, get=_get):
         return None
     for e in eps:
         if _norm(e["title"]) == _norm(title):
-            return {"audio": e["url"], "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show"}
+            return {"audio": e["url"], "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show",
+                    "image": e["image"]}
     return None
 
 
@@ -442,11 +445,22 @@ def _secs(text):
 
 
 def episodes(data, limit=EPISODES):
-    """RSS or Atom bytes -> (show title, [{title, date, duration, url}] newest first, only items with audio). Pure."""
+    """RSS or Atom bytes -> (show title, [{title, date, duration, url, image}] newest first, only items with
+    audio). image: the episode's itunes:image, else the show's (itunes:image or <image><url>), else None. Pure."""
     def tag(e):
         return e.tag.rsplit("}", 1)[-1] if isinstance(e.tag, str) else ""
+
+    def image(el):
+        for c in el:
+            if tag(c) == "image":
+                u = c.get("href") or next((x.text for x in c if tag(x) == "url"), None)
+                if u and u.strip():
+                    return u.strip()
+        return None
     root = ET.fromstring(data)
-    show = next((c.text or "" for c in (root if root.find("channel") is None else root.find("channel")) if tag(c) == "title"), "").strip()
+    top = root if root.find("channel") is None else root.find("channel")
+    show = next((c.text or "" for c in top if tag(c) == "title"), "").strip()
+    cover = image(top)
     out = []
     for el in root.iter():
         if tag(el) not in ("item", "entry"):
@@ -462,7 +476,7 @@ def episodes(data, limit=EPISODES):
             continue
         d = _when(f.get("pubDate") or f.get("published") or f.get("updated"))
         out.append({"title": f.get("title") or "untitled", "date": d.date().isoformat() if d else None,
-                    "duration": _secs(f.get("duration")), "url": url, "_t": d.timestamp() if d else float("-inf")})
+                    "duration": _secs(f.get("duration")), "url": url, "image": image(el) or cover, "_t": d.timestamp() if d else float("-inf")})
     out.sort(key=lambda e: e.pop("_t"), reverse=True)    # stable: undated items keep the feed's order, last
     return show, out[:limit]
 
@@ -488,11 +502,12 @@ def pick_episode(it, get=None):
             if it.get("feed") else it
     for e in eps:
         e["name"] = _slug(e["title"])
-    opts = [{"kind": "long", "label": e["title"][:60], "url": e["url"], "name": e["name"],
+    opts = [{"kind": "long", "label": e["title"][:60], "url": e["url"], "name": e["name"], "image": e["image"],
              "description": ", ".join(x for x in (e["date"], _long(e["duration"] or 0)) if x)} for e in eps[:3]]
     out = dict(it, kind="ask", action=ACTION["ask"], url=feed, feed=feed, episodes=eps, options=opts,
                question=f"Which episode of {show or 'this podcast'}?",
-               note=f"{len(eps)} newest episodes in `episodes`; fetch the picked one's url with --direct")
+               note=f"{len(eps)} newest episodes in `episodes`; fetch the picked one's url with --direct "
+                    "--cover <its image>")
     if feed != it["url"]:
         out["source"] = it["url"]
     return out
@@ -512,7 +527,7 @@ def resolve(it):
     if it.get("platform") == "spotify":
         a = spotify_audio(it["url"])
         if a:
-            it = dict(it, url=a["audio"], source=it["url"], feed=a["feed"], name=_slug(a["title"]),
+            it = dict(it, url=a["audio"], source=it["url"], feed=a["feed"], name=_slug(a["title"]), image=a.get("image"),
                       note=f"{a['show']}: {a['title']}, from the show's RSS feed" +
                            (" (a show link: its latest episode; paste an episode's link for another)" if a["latest"] else ""))
     return it
@@ -545,9 +560,33 @@ def video_format(max_height=2160):
     return f"bv*[vcodec^=avc1][height<={h}]+ba[ext=m4a]/b[ext=mp4][height<={h}]/bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
-def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160, direct=False):
+def save_cover(url, edit, get=_get):
+    """The podcast's own artwork next to the source, as cover.<ext>: the ground an audio-only clip renders
+    on (clips.py trim). Best effort: None when there is none or it fails to download."""
+    if not url:
+        return None
+    ext = next((e for e in (".jpg", ".jpeg", ".png", ".webp") if urlparse(url).path.lower().endswith(e)), ".jpg")
+    try:
+        data = get(url, timeout=30, cap=20 << 20)
+    except (ValueError, OSError):
+        return None
+    Path(edit).mkdir(parents=True, exist_ok=True)
+    out = Path(edit) / f"cover{ext}"
+    out.write_bytes(data)
+    return out
+
+
+def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160, direct=False, cover=None):
     """Download one own-footage link into edit_dir. Returns (code, message). `direct`: a file URL (a podcast
-    episode's enclosure), downloaded as it is, no yt-dlp."""
+    episode's enclosure), downloaded as it is, no yt-dlp. `cover`: the episode's image, saved as cover.<ext>."""
+    found = {}
+    code, msg = _fetch(url, edit_dir, cookies, max_gb, max_height, direct, found)
+    if code == 0 and Path(msg).suffix.lower() in AUDIO_EXT:
+        save_cover(cover or found.get("image"), edit_dir)
+    return code, msg
+
+
+def _fetch(url, edit_dir, cookies, max_gb, max_height, direct, found):
     if direct:
         return http_get(url, Path(edit_dir), max_gb)
     it = classify(url, own=True)
@@ -558,6 +597,7 @@ def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160, direct=False
         it = decide(it, None, own=True)
     if it.get("platform") == "spotify":
         it = resolve(it)    # the episode's audio from the show's feed: Spotify's own stream is DRM
+        found["image"] = it.get("image")
     edit = Path(edit_dir)
     if it.get("local"):
         p = Path(it["url"])
@@ -796,8 +836,8 @@ def demo():
         g["spotify_audio"] = saved
     # a podcast feed is never clips straight away: pick an episode, newest first, then download only it
     rss = b"""<?xml version="1.0"?><rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
-        <title>Some Show</title>""" + b"".join(
-        f"""<item><title>Ep {n}: Talk number {n}</title><pubDate>{d:02d} Sep 2026 08:00:00 +0000</pubDate>
+        <title>Some Show</title><itunes:image href="https://cdn.example.com/show.jpg"/>""" + b"".join(
+        f"""<item><title>Ep {n}: Talk number {n}</title>{'<itunes:image href="https://cdn.example.com/ep13.png"/>' if n == 13 else ''}<pubDate>{d:02d} Sep 2026 08:00:00 +0000</pubDate>
             <itunes:duration>{'1:02:03' if n == 13 else 3000 + n}</itunes:duration>
             <enclosure url="https://cdn.example.com/{n}.mp3?x=1" type="audio/mpeg"/></item>""".encode()
         for n, d in ((12, 1), (13, 8), *((k, 1) for k in range(1, 12)))) + b"</channel></rss>"
@@ -811,7 +851,12 @@ def demo():
     assert show == "Some Show" and len(eps) == 13 and len(episodes(rss)[1]) == EPISODES and eps[0]["title"] == "Ep 13: Talk number 13", eps[:2]
     assert eps[0]["date"] == "2026-09-08" and eps[0]["duration"] == 3723 and eps[0]["url"] == "https://cdn.example.com/13.mp3?x=1"
     assert episodes(atom)[1] and [e["title"] for e in episodes(atom)[1]] == ["New", "Old"], episodes(atom)
-    assert episodes(atom)[1][0]["url"] == "https://cdn.example.com/new.m4a"
+    assert episodes(atom)[1][0]["url"] == "https://cdn.example.com/new.m4a" and episodes(atom)[1][0]["image"] is None
+    assert eps[0]["image"] == "https://cdn.example.com/ep13.png" and eps[1]["image"] == "https://cdn.example.com/show.jpg", eps[:2]
+    with tempfile.TemporaryDirectory() as td:   # the artwork lands next to the source; a dead link is no error
+        got = save_cover("https://cdn.example.com/ep13.png?w=3000", td, get=lambda u, **k: b"png")
+        assert got.name == "cover.png" and got.read_bytes() == b"png", got
+        assert save_cover("https://cdn.example.com/x.jpg", td, get=lambda u, **k: offline(u)) is None and save_cover(None, td) is None
     for raw in ("https://feeds.example.com/show/rss", "https://feeds.megaphone.fm/ABC123", "https://anchor.fm/s/abc/podcast/rss",
                 "https://example.com/show.xml", "https://podcasts.apple.com/us/podcast/some-show/id123456789"):
         it = classify(raw)
@@ -824,7 +869,7 @@ def demo():
         assert it["kind"] == "ask" and it["url"] == "https://feeds.example.com/show/rss" and len(it["episodes"]) == EPISODES, it
         o = it["options"]
         assert len(o) == 3 and o[0]["kind"] == "long" and o[0]["url"] == "https://cdn.example.com/13.mp3?x=1", o
-        assert o[0]["name"] == "ep-13-talk-number-13" and "2026-09-08" in o[0]["description"] and "1 h 2 min" in o[0]["description"], o[0]
+        assert o[0]["image"] == "https://cdn.example.com/ep13.png" and o[0]["name"] == "ep-13-talk-number-13" and "2026-09-08" in o[0]["description"] and "1 h 2 min" in o[0]["description"], o[0]
         assert "Some Show" in it["question"], it
     dead = pick_episode(classify("https://feeds.example.com/show/rss"), get=offline)
     assert dead["kind"] == "ask" and not dead["options"] and "episode" in dead["note"], dead
@@ -880,7 +925,8 @@ def main():
         cookies = a[a.index("--cookies-from-browser") + 1] if "--cookies-from-browser" in a else None
         max_gb = float(a[a.index("--max-gb") + 1]) if "--max-gb" in a else 4.0
         height = int(a[a.index("--max-height") + 1]) if "--max-height" in a else 2160
-        code, msg = fetch(a[1], a[2], cookies, max_gb, height, "--direct" in a)
+        cover = a[a.index("--cover") + 1] if "--cover" in a else None
+        code, msg = fetch(a[1], a[2], cookies, max_gb, height, "--direct" in a, cover)
         print(msg, file=sys.stdout if code == 0 else sys.stderr)
         return code
     print(__doc__, file=sys.stderr)

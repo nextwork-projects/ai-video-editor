@@ -4,6 +4,19 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- An audio-only podcast stopped at clips: a feed or Spotify episode downloads `source.mp3`, and
+  `clips.py` looked only for `source.mp4/mov/mkv/webm`. One `source()` lookup now finds video or audio
+  (mp3, m4a, aac, wav, ogg, flac, opus) for candidates, page and trim; `link` keeps an audio file's
+  extension. `links.py` reads each episode's artwork from the feed (the episode's itunes:image, else the
+  show's) into the episode options, and `fetch --direct --cover <image>` (or a Spotify link) saves it as
+  `cover.jpg` next to the audio. `trim` makes each audio clip a 1080x1920 video: the cover blurred and
+  dimmed to 30% fills the frame, the sharp cover sits above the captions (no artwork: the file's
+  embedded art, else black); `clip.json` says `audio_only` and `profile.py style` keeps captions on for
+  it. The picks page plays audio previews. Tests: `clips.py demo`, `links.py demo`, `profile.py demo`,
+  and `tests/smoke.py` renders a synthetic audio clip through the real renderer with `check.py render`
+  0 FAIL. Live on a public 4-minute news feed episode: episode list 0.2 s, download with cover 1.5 s,
+  Whisper 32 s, candidates 0.4 s, picks page 1.5 s, trim 5 s, render 14 s, check render 0 FAIL.
+
 - A podcast feed link (RSS or Atom, 442 episodes) went straight to clips with no episode picked, and
   yt-dlp `--no-playlist` was still walking the feed after 5 minutes. `links.py route` now reads the feed
   itself (stdlib, 15 s timeout, 32 MB cap; an Apple Podcasts show page through the iTunes lookup API)

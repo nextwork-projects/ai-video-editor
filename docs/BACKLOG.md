@@ -32,9 +32,8 @@ Sources:
 
 ## Next
 
-- Audio-only podcasts stop at clips: a feed or Spotify episode downloads `source.mp3`, but `clips.py` looks only
-  for `source.mp4/mov/mkv/webm`. Done: an audio source is found and each clip renders with a visual
-  (audiogram or captions on a still), tested on a feed episode.
+- Audio-only podcast clips hold still: only the captions move for 22 s (`check.py render` WARN). Done: a
+  slow push on the cover and word-timed motion in the house easing, with the WARN gone on a feed episode.
 
 - Someone else's short video recommends editing it as your own. A public agency's TikTok (136 s) and
   YouTube Short (39 s), pasted without "my", route to `ask` with **Edit it as my video** first, which

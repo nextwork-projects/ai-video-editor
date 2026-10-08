@@ -296,6 +296,9 @@ def write_style(edit_dir, root=Path("."), out=None):
         sys.exit("ERROR: no creator style.json found for the profile's creators")
     else:
         style = blend(styles, prof["creators"], prof)
+    clip = Path(edit_dir) / "clip.json"
+    if clip.exists() and json.loads(clip.read_text()).get("audio_only"):   # a podcast clip: the words are the picture
+        style["captions"] = {**style.get("captions", {}), "present": True}
     out = Path(out or Path(edit_dir) / "style.json")
     out.parent.mkdir(parents=True, exist_ok=True)   # start writes the style before cut makes edits/<name>/
     out.write_text(json.dumps(style, indent=1))
@@ -329,6 +332,12 @@ def demo():
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
         assert json.loads(out.read_text())["handle"] == "default"
+        # captions off in the profile, but an audio-only podcast clip keeps them: its words are the picture
+        save({"captions": {"on": False}})
+        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}))
+        assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is True
+        (Path(d) / "clip.json").unlink()
+        assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is False
         # start runs `style edits/<name>` before cut has made the folder: it is created, exit 0
         r = subprocess.run([sys.executable, __file__, "style", str(Path(d) / "edits" / "new")],
                            capture_output=True, text=True, env=dict(os.environ, AI_EDITOR_HOME=d))

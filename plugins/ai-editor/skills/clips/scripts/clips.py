@@ -8,8 +8,8 @@
     $PY     clips.py reframe    <edit_dir>        (venv python: OpenCV) a wide clip to 9:16 round the speaker
     python3 clips.py demo
 
-<clips_dir> holds source.mp4 (or a symlink to it) and words.raw.json from the cut skill's
-transcribe.py. Nothing here reads the whole transcript into a model.
+<clips_dir> holds source.mp4 (or a symlink to it; a podcast's audio keeps its own extension, source.mp3)
+and words.raw.json from the cut skill's transcribe.py. Nothing here reads the whole transcript into a model.
 
 candidates  1. Sentences from the word timings (. ? ! or a 1.2 s silence ends one).
             2. Every run of whole sentences whose length is inside --min/--max is a candidate:
@@ -34,7 +34,8 @@ link        <clips_dir>/source.mp4: a hard link on the same drive (no admin need
             symlink, else a copy as the last resort. Nothing here writes to source.mp4 in place.
 trim        For each chosen id, edits/<name>-clip<N>/source.mp4 (frame-accurate re-encode) and
             words.raw.json re-timed to it, so the cut skill starts at retakes.py with no second
-            transcription.
+            transcription. An audio source's clip is the audio over the podcast's cover (cover.<ext> from
+            links.py, else the file's embedded art, else black), 1080x1920; clip.json says audio_only.
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (features-only ranking)
 """
@@ -56,6 +57,49 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "lib"))
 from ai_editor import jev, keys  # noqa: E402
+from ai_editor.links import AUDIO_EXT  # noqa: E402
+
+SOURCES = [f"source{e}" for e in (".mp4", ".mov", ".mkv", ".webm", ".m4v") + AUDIO_EXT]
+COVERS = ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp")
+GROUND_W, GROUND_H, COVER_PX, COVER_Y = 1080, 1920, 720, 200   # an audio clip: the cover above the captions
+
+
+def source(d):
+    """The long source in a clips folder: a video, or a podcast's audio (links.py names both source.<ext>)."""
+    return next((Path(d) / n for n in SOURCES if (Path(d) / n).exists()), None)
+
+
+def is_audio(src):
+    return bool(src) and Path(src).suffix.lower() in AUDIO_EXT
+
+
+def cover_of(d, src=None):
+    """The podcast's own artwork: links.py's cover.<ext>, else the picture embedded in the audio file
+    (extracted once to cover.jpg), else None (a plain black ground)."""
+    found = next((Path(d) / n for n in COVERS if (Path(d) / n).exists()), None)
+    if found or not src:
+        return found
+    out = Path(d) / "cover.jpg"
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-an", "-frames:v", "1", str(out)],
+                       capture_output=True)
+    return out if r.returncode == 0 and out.exists() and out.stat().st_size else None
+
+
+def ground_cmd(src, a, b, cover, out, fps=30):
+    """ffmpeg: a vertical video of the audio from a to b over the cover (a blurred copy dimmed to 30%
+    fills the frame, so white captions read on it; the sharp cover sits above where captions go). No cover: black. No invented graphics."""
+    dur = f"{b - a:.3f}"
+    if cover:
+        pic = ["-loop", "1", "-framerate", str(fps), "-i", str(cover)]
+        vf = (f"[0:v]scale={GROUND_W}:{GROUND_H}:force_original_aspect_ratio=increase,crop={GROUND_W}:{GROUND_H},"
+              f"boxblur=40:2,colorchannelmixer=rr=0.3:gg=0.3:bb=0.3[bg];[0:v]scale={COVER_PX}:{COVER_PX}:force_original_aspect_ratio="
+              f"decrease[fg];[bg][fg]overlay=(W-w)/2:{COVER_Y},format=yuv420p[v]")
+    else:
+        pic = ["-f", "lavfi", "-i", f"color=c=black:s={GROUND_W}x{GROUND_H}:r={fps}"]
+        vf = "[0:v]format=yuv420p[v]"
+    return ["ffmpeg", "-v", "error", "-y", *pic, "-ss", f"{a:.3f}", "-t", dur, "-i", str(src),
+            "-filter_complex", vf, "-map", "[v]", "-map", "1:a", "-t", dur, "-c:v", "libx264", "-tune", "stillimage",
+            "-crf", "18", "-preset", "fast", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)]
 
 SENT_GAP_S = 1.2          # a silence this long ends a sentence when punctuation is missing
 HOOK_S = 3.0
@@ -278,7 +322,7 @@ def candidates(d, lo=20, hi=40, speakers=1, style=None, top=8, key=None, canned=
     d = Path(d)
     toks = load_words(d / "words.raw.json")
     sents = sentences(toks)
-    src = next((p for p in (d / "source.mp4", d / "source.mov", d / "source.mkv", d / "source.webm") if p.exists()), None)
+    src = source(d)
     track = rms_track(src) if src else []
     cands = []
     for i, j in windows(sents, lo, hi):
@@ -372,9 +416,9 @@ def mmss(t):
 # --- page --------------------------------------------------------------------------------
 
 def preview(src, start, end, out):
+    vid = ["-vn"] if is_audio(src) else ["-vf", "scale=-2:360", "-c:v", "libx264", "-preset", "veryfast", "-crf", "33"]
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{max(0, start - PAD_IN):.3f}", "-i", str(src),
-                    "-t", f"{end - start + PAD_IN + PAD_OUT:.3f}", "-vf", "scale=-2:360", "-c:v", "libx264",
-                    "-preset", "veryfast", "-crf", "33", "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                    "-t", f"{end - start + PAD_IN + PAD_OUT:.3f}", *vid, "-c:a", "aac", "-b:a", "48k", "-ac", "1",
                     "-movflags", "+faststart", str(out)], check=True)
 
 
@@ -397,7 +441,7 @@ table{border-collapse:collapse;font-size:13px;width:100%}td{padding:2px 6px 2px 
 def page(d, recommend=()):
     d = Path(d)
     short = json.loads((d / "shortlist.json").read_text())
-    src = next((p for p in (d / "source.mp4", d / "source.mov", d / "source.mkv", d / "source.webm") if p.exists()), None)
+    src = source(d)
     rec = list(recommend)
     order = [c for r in rec for c in short if c["id"] == r] + [c for c in short if c["id"] not in rec]
     cards = []
@@ -407,8 +451,9 @@ def page(d, recommend=()):
             if src:
                 mp4 = Path(tmp) / f"{c['id']}.mp4"
                 preview(src, c["start"], c["end"], mp4)
-                vid = (f'<video controls preload="auto" src="data:video/mp4;base64,'
-                       f'{base64.b64encode(mp4.read_bytes()).decode()}"></video>')
+                tag = "audio" if is_audio(src) else "video"
+                vid = (f'<{tag} controls preload="auto" src="data:{tag}/mp4;base64,'
+                       f'{base64.b64encode(mp4.read_bytes()).decode()}"></{tag}>')
             rows = [("score", c["score"]), ("features", c["features_score"])] + list((c["jev"] or {}).items())
             table = "".join(f'<tr><td>{html.escape(k.replace("_", " "))}</td><td>{v:.2f}</td>'
                             f'<td class="b"><div class="bar"><i style="width:{v * 100:.0f}%"></i></div></td></tr>'
@@ -440,7 +485,9 @@ def trim(d, ids, name=None, edits="edits"):
     cands = {c["id"]: c for c in json.loads((d / "candidates.json").read_text())}
     raw = json.loads((d / "words.raw.json").read_text())
     raw = raw["words"] if isinstance(raw, dict) else raw
-    src = next((p for p in (d / "source.mp4", d / "source.mov", d / "source.mkv", d / "source.webm") if p.exists()), None)
+    src = source(d)
+    audio = is_audio(src)
+    cover = cover_of(d, src) if audio else None
     name, outs = name or d.name, []
     for n, cid in enumerate(ids, 1):
         if cid not in cands:
@@ -460,14 +507,18 @@ def trim(d, ids, name=None, edits="edits"):
         while words and words[-1]["type"] == "spacing":
             words.pop()
         (e / "words.raw.json").write_text(json.dumps(words, indent=1))
-        (e / "clip.json").write_text(json.dumps({"from": str(d.resolve()), "id": cid, "start": a, "end": b,
-                                                 "hook": c["hook"]}, indent=1))
-        if src:
+        meta = {"from": str(d.resolve()), "id": cid, "start": a, "end": b, "hook": c["hook"]}
+        if audio:   # no picture: the podcast's cover is the ground, the speaker's words the only text
+            meta |= {"audio_only": True, "cover": str(cover.resolve()) if cover else None, "captions": True}
+        (e / "clip.json").write_text(json.dumps(meta, indent=1))
+        if audio:
+            subprocess.run(ground_cmd(src, a, b, cover, e / "source.mp4"), check=True)
+        elif src:
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.3f}", "-i", str(src), "-t", f"{b - a:.3f}",
                             "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-c:a", "aac", "-b:a", "192k",
                             "-movflags", "+faststart", str(e / "source.mp4")], check=True)
         outs.append(e)
-        print(f"{cid} -> {e} ({b - a:.1f} s)")
+        print(f"{cid} -> {e} ({b - a:.1f} s{', audio over ' + (cover.name if cover else 'black') if audio else ''})")
     return outs
 
 
@@ -552,7 +603,9 @@ def link_source(video, clips_dir, link=os.link, symlink=os.symlink):
         sys.exit(f"ERROR: no such file: {video}")
     d = Path(clips_dir)
     d.mkdir(parents=True, exist_ok=True)
-    dst = d / "source.mp4"   # every step names it so; ffmpeg reads the container, not the extension
+    # every step names it so; ffmpeg reads the container, not the extension. Audio keeps its own, so trim
+    # knows to give it a picture.
+    dst = d / ("source" + (src.suffix.lower() if is_audio(src) else ".mp4"))
     if dst.exists() or dst.is_symlink():
         if dst.exists() and os.path.samefile(dst, src):
             return dst, "already there"
@@ -677,6 +730,29 @@ def demo():
         assert how == "symlink" and dst.is_symlink() and dst.read_bytes() == b"video", how
         dst, how = link_source(v, Path(td) / "c", link=no, symlink=no)
         assert how == "copy" and not dst.is_symlink() and dst.read_bytes() == b"video", how
+    # an audio-only podcast: found like a video, and each clip is its audio over the podcast's own cover
+    with tempfile.TemporaryDirectory() as td:
+        d, mp3 = Path(td) / "pod", Path(td) / "Episode.MP3"
+        ff = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi"]
+        subprocess.run(ff + ["-i", "sine=f=220:d=6", str(mp3)], check=True)
+        dst, _ = link_source(mp3, d)
+        assert dst.name == "source.mp3" and source(d) == dst and is_audio(dst), dst
+        subprocess.run(ff + ["-i", "color=c=0x3a6ea5:s=600x600", "-frames:v", "1", str(d / "cover.png")], check=True)
+        ws = [{"text": t, "start": 0.5 + k * 0.5, "end": 0.9 + k * 0.5, "type": "word"}
+              for k, t in enumerate("why does this work so well.".split())]
+        (d / "words.raw.json").write_text(json.dumps(ws))
+        (d / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.5, "end": 3.4, "hook": "why does this"}]))
+        for has_cover in (True, False):
+            if not has_cover:
+                (d / "cover.png").unlink()   # a sine has no embedded art: a black ground, never an invented one
+            e = trim(d, ["c0"], edits=Path(td) / "edits")[0]
+            meta = json.loads((e / "clip.json").read_text())
+            assert meta["audio_only"] and meta["captions"] is True, meta
+            assert (meta["cover"] or "").endswith("cover.png") == has_cover, meta
+            got = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height", "-of",
+                                  "json", str(e / "source.mp4")], capture_output=True, text=True, check=True).stdout
+            kinds = {x["codec_type"]: x for x in json.loads(got)["streams"]}
+            assert set(kinds) == {"video", "audio"} and (kinds["video"]["width"], kinds["video"]["height"]) == (1080, 1920)
     print("clips ok")
 
 
