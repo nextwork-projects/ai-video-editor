@@ -173,13 +173,15 @@ def scene_land(c, words, k, lead=None):
     """(word time, landed time) of a scene card. The word is the trigger word's first time at or after
     the card's own word (plan starts a scene SCENE_LEAD_S x k early, an overlay card OVERLAY_LEAD_S x k
     early: pass that as `lead`, so start + CARD_LEAD_S is not it).
-    A scene counts as landed when its transition is half done: start + 0.31 s x k (Scene.tsx runs 0.62 s x k)."""
+    A scene counts as landed when its transition is half done: start + 0.31 s x k (Scene.tsx runs 0.62 s x k);
+    a hard cut in ("cut") has no lead and is landed on its first frame."""
     from plan import CARD_LEAD_S, SCENE_LEAD_S, clean
-    lead = SCENE_LEAD_S if lead is None else lead
+    cut = c.get("transition_in") == "cut"
+    lead = 0.0 if cut else SCENE_LEAD_S if lead is None else lead
     t, floor = clean(c["trigger_word"]).lower(), c["start"] + CARD_LEAD_S - 0.05
     hit = next((w["start"] for w in words if clean(w["text"]).lower() == t and w["start"] >= floor), None)
     word = hit if hit is not None else c["start"] + CARD_LEAD_S + lead * k
-    return word, c["start"] + 0.31 * k
+    return word, c["start"] + (0 if cut else 0.31 * k)
 
 
 def landing(area, f0, fps):
@@ -1043,6 +1045,7 @@ def demo():
     w, lt = scene_land(sc, [{"text": "notion", "start": 2.0}, {"text": "notion", "start": 5.0}], k)
     assert w == 5.0 and abs(lt - (sc["start"] + 0.31 * k)) < 1e-9, (w, lt)
     assert abs(scene_land({"trigger_word": "x", "start": 1.0}, [], 1.0)[0] - 1.4) < 1e-9
+    assert scene_land({**sc, "start": 4.9, "transition_in": "cut"}, [{"text": "notion", "start": 5.0}], k) == (5.0, 4.9)
     # an overlay card starts OVERLAY_LEAD_S x k early: its word is found the same way, never start + CARD_LEAD_S
     from plan import OVERLAY_LEAD_S, overlay_led
     ov = {"src": "images/a.png", "trigger_word": "jev", "start": round(5.0 - 0.1 - OVERLAY_LEAD_S, 3), "layout": "box"}

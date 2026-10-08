@@ -91,7 +91,8 @@ SCENE_BOX = [0, 0, 100, 100]            # "use the scene box" (the renderer's, c
 SCENE_TYPE_BOX = {True: [6, 13, 88, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
 TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
 # A scene's transition in takes about 0.62 s x the personality's k (Scene.tsx). The scene starts this
-# much earlier than a box card, so the ground has mostly grown by the word.
+# much earlier than a box card, so the ground has mostly grown by the word. A "cut" in has nothing to grow:
+# it is whole on its first frame, so it starts where a box card does (CARD_LEAD_S before its word).
 SCENE_LEAD_S = 0.3
 # An overlay's entrance (motion.ts dropIn: expo.out over 0.62 s x k) carries half its ink, what quality.py counts as
 # landed (LAND_SHARE), this long x k after it starts: 0.06 and 0.08 s on the sample take's captures. plan.py starts
@@ -1202,11 +1203,16 @@ def as_scene(card, face, style, n):
     """A full-frame cut-away: the scene box, the transitions (style.json "transitions" cycled; an empty
     list, a creator who only cuts, gives hard cuts; no list gives match in / iris out; a beat's own win)
     and the focus they grow from (the head at the card's start)."""
-    cyc = ["cut"] if style.get("transitions") == [] else style.get("transitions") or []
+    cyc = scene_cycle(style)
     card.update({"layout": "scene", "box": list(SCENE_BOX), "focus": card.get("focus") or head_centre(face, card["start"])})
     card.setdefault("transition_in", cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
     card.setdefault("transition_out", cyc[n % len(cyc)] if cyc else TRANSITIONS[1])
     return card
+
+
+def scene_cycle(style):
+    """The transitions scene cards cycle through: style.json "transitions", ["cut"] when it is []."""
+    return ["cut"] if style.get("transitions") == [] else style.get("transitions") or []
 
 
 def _tw(text, fs, wt=700):
@@ -1291,7 +1297,7 @@ def overlay_led(c):
 
 
 def lay_out(cards, aspect, face, style, split_ok):
-    """Gives every card its layout. A scene starts SCENE_LEAD_S x k earlier (never before the card
+    """Gives every card its layout. A scene starts SCENE_LEAD_S x k earlier, a hard cut in no earlier (never before the card
     before it in its lane ends). Returns (cards, any card in the split panel)."""
     n = 0
     lead = SCENE_LEAD_S * MOTION_K.get(pick_motion(style), 1.0)
@@ -1302,7 +1308,9 @@ def lay_out(cards, aspect, face, style, split_ok):
             f = "scene"        # no panel in overlay: a full-frame cut-away instead
         c["_f"] = f
         if f == "scene":
-            c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - lead), 3)
+            cyc = scene_cycle(style)
+            tin = c.get("transition_in") or (cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
+            c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - (0 if tin == "cut" else lead)), 3)
             as_scene(c, face, style, n)
             n += 1
         else:
@@ -1837,6 +1845,11 @@ def demo():
     # a creator measured as only cutting ("transitions": []) gets hard cuts, not the match/iris default
     sc = [c for c in build({**style, "transitions": []}, words, vm, visuals=tv)["cards"] if c.get("layout") == "scene"]
     assert [(c["transition_in"], c["transition_out"]) for c in sc] == [("cut", "cut")], sc
+    # a hard cut lands on its first frame: no SCENE_LEAD_S, it starts CARD_LEAD_S before its word like a box card;
+    # a scene whose ground grows (match) keeps the lead
+    wn = next(w["start"] for w in words if clean(w["text"]).lower() == "notion")
+    assert sc[0]["start"] == round(wn - CARD_LEAD_S, 3), (sc[0]["start"], wn)
+    assert sl["start"] == round(max(0.0, wn - CARD_LEAD_S - SCENE_LEAD_S * MOTION_K["smooth"]), 3) < sc[0]["start"], sl["start"]
     sp2 = build(style, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=tv[:1])
     assert "layout" not in sp2 and [c["layout"] for c in sp2["cards"]] == ["box", "scene"], sp2["cards"]
     assert build(style, words, vm, visuals=[{"word": "zooms", "kind": "anim", "type": "counter", "opt_in": True, "props": {"to": 3}}])["cards"] == []
@@ -2031,7 +2044,8 @@ def main():
         print(f"note: {sp} {'is empty' if style == {} else 'not found'}; planning with the default style. To keep it "
               f"with the edit: python3 {Path(profile.__file__)} style {edit_dir}", file=sys.stderr)
         style = profile.default_style(prof)
-    style = taste.merge(style, taste.load_json())
+    style = profile.fill_transitions(taste.merge(style, taste.load_json()),
+                                     lambda m: print(f"note: {m}", file=sys.stderr))
     plan = build(style, json.loads(Path(a.words).read_text()),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")

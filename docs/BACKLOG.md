@@ -30,10 +30,6 @@ Sources:
   still-edge box; tracks from the moving-footage test pick up photo borders on a black ground
   while the photo colourises (most of the false finds).
 
-- Teardowns made before `"transitions": []` was written leave the key out for a creator who only cuts,
-  so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
-  SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
-
 - Modal: the hedge (a second copy of a piece still running at 2x the median) ran live only on a
   stand-in function; no sample-take render has hit a slow container since it shipped. The estimate
   counts the whole upload even when Modal already holds the footage (a re-render uploads in 3-4 s).

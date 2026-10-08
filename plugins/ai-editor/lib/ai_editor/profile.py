@@ -222,6 +222,27 @@ def default_style(prof=None):
     return answers(json.loads(json.dumps(DEFAULT_STYLE)), prof or {})
 
 
+# A cut kind -> style-edit's scene transition: the same map and 5% floor as creator-teardown visual.py
+# TRANSITION / transitions_of (hard, jump and zoom-punch cuts have none).
+CUT_TRANSITION = {"whip": "push", "match": "match", "mask": "wipe", "dissolve": "fade"}
+
+
+def fill_transitions(style, warn=print):
+    """A style.json from a teardown made before visual.py wrote "transitions": derive them from the measured
+    pace.cut_kinds ([] for a creator who only cuts). No cut kinds measured: leave style-edit's default and,
+    for a creator's style, say re-running the teardown gets them. Never guessed."""
+    if "transitions" in style or style.get("handle", "default") == "default":
+        return style
+    ck = (style.get("pace") or {}).get("cut_kinds")
+    if ck:
+        style["transitions"] = [CUT_TRANSITION[k] for k, v in sorted(ck.items(), key=lambda kv: -kv[1])
+                                if k in CUT_TRANSITION and v >= 5]
+    elif ck is None:
+        warn(f"style.json for {style['handle']} has no \"transitions\" and no measured cut kinds, so scenes use "
+             "match / iris; re-run the creator-teardown (visual.py) to get the creator's transitions")
+    return style
+
+
 # ---------- blending creators ----------
 PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion", "transitions"),
          "visuals": ("graphics", "look", "layout", "cats", "events")}
@@ -320,6 +341,15 @@ def demo():
     assert s["captions"]["size_pct"] == 7 and s["captions"]["effect"] == "karaoke" and s["sfx"] is False, s
     assert s["blend"] == {"captions": "b", "pace": "b", "visuals": "a"} and s["pace"]["median_shot_s"] == 1.2
     assert s["transitions"] == [], s     # the pace creator's transitions come with pace (b only cuts)
+    # a teardown older than "transitions": its measured cut kinds give them; with none measured, a note, no guess
+    w = []
+    assert fill_transitions({"handle": "x", "pace": {"cut_kinds": {"hard": 92, "jump": 8}}}, w.append)["transitions"] == []
+    assert fill_transitions({"handle": "x", "pace": {"cut_kinds": {"hard": 70, "whip": 20, "mask": 3}}}, w.append)["transitions"] == ["push"]
+    assert fill_transitions({"handle": "x", "transitions": ["fade"], "pace": {"cut_kinds": {"hard": 100}}}, w.append)["transitions"] == ["fade"]
+    assert "transitions" not in fill_transitions({"handle": "x", "pace": {"cut_kinds": {}}}, w.append) and not w
+    assert "transitions" not in fill_transitions(default_style(), w.append) and not w
+    assert "transitions" not in fill_transitions({"handle": "x", "pace": {"median_shot_s": 2}}, w.append) and len(w) == 1, w
+    assert "re-run" in w[0] and "visual.py" in w[0], w
     lk = resolve_look(s, {}, warn=lambda m: None)
     assert lk["ground"] == "#DEDACC" and lk["accent"] == "#E5482C" and "font" not in lk, lk    # Inter refused
     w = []

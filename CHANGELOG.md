@@ -4,6 +4,15 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A scene cut in hard (`cut`) started SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a
+  transition that grows, so the picture changed up to 0.4 s early. It now starts where a box card
+  does, CARD_LEAD_S before its word; match, iris and the other growing transitions keep the lead.
+  `quality.py` counts a cut scene as landed on its first frame. Tests: `plan.py demo`, `quality.py demo`.
+- Teardowns made before `"transitions"` was written left the key out, so a creator who only cuts
+  still got match / iris. `profile.fill_transitions` (run by plan.py on load) now derives them from the
+  style's measured `pace.cut_kinds`, the same rule as visual.py; a style with no cut kinds keeps the
+  default and plan.py says re-running the teardown gets the creator's transitions. Test: `profile.py demo`.
+
 - The code kind guess called white one- and two-line titles over photos "photo" or "UI recording".
   `text_fill` is now the share of the box all its OCR lines cover (it was the biggest line), and one
   to three lines covering half the box or more is a text card before the moving test (the picture
