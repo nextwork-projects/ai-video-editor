@@ -30,9 +30,9 @@ Sources:
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
   SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
 
-- Modal's wall time is 2-3x `edit.py estimate`. The 3.4-minute sample take: estimate 2.1 min, render
-  6.5 min on 9 containers and 7.4 min on 19. Upload took 45 s, containers started up to 225 s late, and
-  the slowest piece ran 1.5-1.8x the average. More containers made it slower, not faster.
+- Modal: the hedge (a second copy of a piece still running at 2x the median) ran live only on a
+  stand-in function; no sample-take render has hit a slow container since it shipped. The estimate
+  counts the whole upload even when Modal already holds the footage (a re-render uploads in 3-4 s).
 
 Carried over (still untested live):
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download

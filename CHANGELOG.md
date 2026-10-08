@@ -4,6 +4,25 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Modal renders took 5.2 min on the 3.4-minute sample take where the estimate said 2.9 min. Measured
+  causes: the upload sent the bundle as ~3,700 small files, one request each (44 s, 40 s even when
+  nothing had changed); one container in each render ran its piece 2-10x slower than the rest (213 s
+  against a 107 s average; another time 368 s against 16-61 s); the pieces downloaded one after
+  another after the last finished (39 s). Containers started 4-18 s after submit, not 225 s: that
+  figure had the download and join counted as start-up.
+- Fixes: the code goes up as one tar with fixed file times, so Modal skips it by hash when unchanged
+  (upload 44 s -> 22 s new, 3-4 s repeat). Each container takes three pieces from a shared queue, and
+  once the queue is empty a piece still running at twice the median gets a second copy on another
+  container; the first to finish counts. Pieces download as they finish. Containers: as many as keep
+  the 23 s billed boot under 20% of each one's bill (17 for the sample take).
+- The estimate now adds upload, start, the work over the containers times a straggle factor, and the
+  tail (last download and the join), each measured on the last render and saved to `modal.json`;
+  before the first render, the sample take's (`edit.py` `MODAL_MEASURED`). Sample take after: 184 s
+  (estimate 3.1 min) and 257 s on a laptop at load average 131 (122 s of the join under that load),
+  $0.18-0.19 on the bill as before. Tests: `edit.py demo` (container count, pieces, the estimate
+  from given speeds), `modal_render.py demo` (the tar is identical across file times, the measured
+  speeds, a stuck piece replaced and cancelled).
+
 - Modal render tested live on the 3.4-minute sample take (6,167 frames). It failed on every container:
   render.mjs asked for one tab per core Node reports, and Remotion caps at `nproc` (4 on a Modal
   container). render.mjs now takes Remotion's own ceiling. Test: `modal_render.py demo <bundle> <plan>

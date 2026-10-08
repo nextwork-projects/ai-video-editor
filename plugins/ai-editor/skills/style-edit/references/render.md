@@ -7,8 +7,11 @@ SKILL.md steps 6-9.
 
 `edit.py estimate` never renders the whole video. Laptop: seconds per frame from a 2-second benchmark
 the first time, then from the last full laptop render of 10 s or more (`~/.ai-video-editor/laptop.json`).
-Modal: from the last Modal render (`~/.ai-video-editor/modal.json`); before the first one, a guess of
-0.29 s per frame per machine and 70 s of start-up, said as a guess in the printed line.
+Modal: upload + container start + the work over the containers times a straggle factor + the tail
+(the last download and the join), each measured on the last Modal render
+(`~/.ai-video-editor/modal.json`); before the first one, the sample take's (`edit.py`
+`MODAL_MEASURED`, where each is defined), said as a guess in the printed line. The upload is counted
+in full, though footage Modal already holds is skipped.
 
 ## Laptop
 
@@ -45,16 +48,24 @@ Needs the setup skill's step 5b. `edit.py` bundles the renderer with the media i
 1. The render machine is a Modal image built once in the user's account and cached: Debian, Node 22,
    the renderer's npm packages from the laptop's `package-lock.json`, Chrome Headless Shell and
    Remotion's Linux libraries. A plugin update that changes `package.json` rebuilds it.
-2. The bundle (source maps dropped) goes up once to the `ai-video-editor-renders` Modal Volume,
-   in a folder for this render.
-3. The frames are split into pieces of about 90 s of work each (at least 150 frames, at most 40
-   machines). Each piece renders on its own container (4 physical cores, 8 GB) with
-   `render.mjs chunk`, the same command the GitHub workflow runs, all at once (`starmap`).
-4. The pieces come back and join on the laptop with the GitHub workflow's join (`edit.py JOIN`):
-   video copied, audio cut to each piece's frames and encoded to AAC once.
+2. The bundle goes up to the `ai-video-editor-renders` Modal Volume, in a folder for this render:
+   the code as one tar with fixed file times (no source maps but the one Remotion opens), the media
+   beside it. Modal skips a file it already holds by hash, so a re-render of the same footage
+   uploads in a few seconds. The bundle was ~3,700 small files, one request each: 40 s even when
+   nothing had changed.
+3. Containers (4 physical cores, 8 GB): as many as keep the 23 s billed boot under 20% of each one's
+   bill (`MODAL_OVERHEAD`, at most 40), each given three pieces (`MODAL_PIECES`, at least 100 frames)
+   from a shared queue, so a fast container takes more. Each piece runs `render.mjs chunk`, the same
+   command the GitHub workflow runs, on a copy of the code unpacked once per container. Once the
+   queue is empty, a piece still running at twice the median piece time gets a second copy on
+   another container and the first to finish counts (one piece once took 368 s where the other 53
+   took 16-61 s).
+4. Each piece downloads as soon as it is done, and the pieces join on the laptop with the GitHub
+   workflow's join (`edit.py JOIN`): video copied, audio cut to each piece's frames and encoded to
+   AAC once.
 5. The render's folder on the Volume is deleted, after the app has stopped every container (one
    still running after another piece failed would write the folder back). The last line printed is JSON: wall time, upload
-   time, CPU seconds, cost, measured seconds per frame. `edit.py` saves it to
+   time, cost, and the speeds the next estimate reads. `edit.py` saves it to
    `~/.ai-video-editor/modal.json` for the next estimate.
 
 Cost is worked out from Modal's published rates (modal.com/pricing, read 2026-10-06): $0.0000131
