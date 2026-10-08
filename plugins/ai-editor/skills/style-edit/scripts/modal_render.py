@@ -11,24 +11,33 @@ Runs in the editor venv, where `setup.py modal` installs the modal package. edit
 `render` prints one JSON line last: wall_s, chunks, cpu_s, usd. edit.py stores it in
 ~/.ai-video-editor/modal.json, which the next estimate reads.
 """
+import contextlib
 import json
 import math
 import os
+import shutil
+import statistics
 import subprocess
 import sys
+import tarfile
 import tempfile
+import threading
 import time
 import uuid
+from concurrent import futures
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import modal
+
+BOOT = time.time()      # in a container: when it imported this file, so its start-up is measurable
 
 if modal.is_local():
     # Sizes, rates, chunking and the estimate live in edit.py (stdlib, so `edit.py estimate` works
     # without modal installed).
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from edit import (HOME, JOIN, MODAL_CPU as CPU, MODAL_MAX_CONTAINERS, MODAL_MEM_MB as MEM_MB,
-                      modal_cost as cost, modal_ranges as ranges, modal_speed as speed)
+                      modal_cost as cost, modal_plan as plan_pieces, modal_speed as speed)
     REMOTION = HOME / "remotion"
 else:   # inside a container only render_chunk runs, and it needs none of that
     CPU = MEM_MB = MODAL_MAX_CONTAINERS = None
@@ -56,25 +65,59 @@ image = (modal.Image.debian_slim(python_version="3.12")
          .add_local_file(REMOTION / "render.mjs", "/r/render.mjs"))
 vol = modal.Volume.from_name("ai-video-editor-renders", create_if_missing=True)
 VOL_DIR, RENDER_MJS = "/vol", "/r/render.mjs"     # where the container sees them (demo points them here)
+LOCAL_DIR = tempfile.gettempdir()                 # the container's own disk
+HEDGE = 2
 app = modal.App("ai-video-editor")
 
 
 @app.function(image=image, volumes={"/vol": vol}, cpu=CPU, memory=MEM_MB, timeout=1800, retries=1,
-              max_containers=MODAL_MAX_CONTAINERS)
-def render_chunk(job, i, a, b, concurrency):
+              max_containers=MODAL_MAX_CONTAINERS, scaledown_window=2)   # Modal's default bills 60 s idle per container
+def render_chunk(job, i, a, b, copy=0):
     import resource
     t0, ru0 = time.time(), resource.getrusage(resource.RUSAGE_CHILDREN)
-    out = f"{VOL_DIR}/{job}/chunks/chunk-{i:02d}.mkv"
+    bundle = unpack(job)
+    out = f"{VOL_DIR}/{job}/chunks/chunk-{i:03d}-{copy}.mkv"
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    r = subprocess.run(["node", RENDER_MJS, "chunk", f"{VOL_DIR}/{job}/bundle", f"{VOL_DIR}/{job}/plan.json", out,
-                        str(a), str(b), f"--concurrency={concurrency}"], cwd=os.path.dirname(RENDER_MJS),
+    r = subprocess.run(["node", RENDER_MJS, "chunk", bundle, f"{VOL_DIR}/{job}/plan.json", out,
+                        str(a), str(b)], cwd=os.path.dirname(RENDER_MJS),   # render.mjs: one tab per core it sees
                        capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"chunk {i} (frames {a}-{b}) failed:\n{r.stderr[-3000:]}")
     vol.commit()
     ru = resource.getrusage(resource.RUSAGE_CHILDREN)     # a reused container counts from its first input
     cpu = ru.ru_utime + ru.ru_stime - ru0.ru_utime - ru0.ru_stime
-    return {"i": i, "frames": b - a + 1, "wall_s": time.time() - t0, "cpu_s": cpu}
+    return {"i": i, "frames": b - a + 1, "wall_s": time.time() - t0, "cpu_s": cpu, "boot": BOOT, "t0": t0,
+            "out": out[len(VOL_DIR):]}
+
+
+def pack(bundle_dir, out):
+    """The bundle's code as one tar, byte-identical whenever the code is (no times, owners or source
+    maps but the one Remotion opens), so Modal skips it by hash on the next render. One file, not ~3,700: the upload was one
+    request per file. The footage goes up beside it on its own, also skipped by hash when unchanged."""
+    with tarfile.open(out, "w", format=tarfile.USTAR_FORMAT) as tf:
+        for f in sorted(Path(bundle_dir).rglob("*")):
+            rel = f.relative_to(bundle_dir)
+            if f.is_file() and rel.parts[0] != "public" and (f.suffix != ".map" or f.name == "bundle.js.map"):
+                ti = tf.gettarinfo(f, rel.as_posix())
+                ti.mtime, ti.uid, ti.gid, ti.uname, ti.gname = 0, 0, 0, "", ""
+                with open(f, "rb") as fh:
+                    tf.addfile(ti, fh)
+
+
+def unpack(job):
+    """In the container: the code onto local disk once (later pieces on the container reuse it), the
+    footage left on the volume and linked in."""
+    local = os.path.join(LOCAL_DIR, f"ave-{job}")
+    if not os.path.exists(local):
+        tmp = f"{local}.{os.getpid()}"
+        with tarfile.open(f"{VOL_DIR}/{job}/code.tar") as tf:
+            tf.extractall(tmp, filter="data")
+        os.symlink(f"{VOL_DIR}/{job}/public", os.path.join(tmp, "public"))
+        try:
+            os.replace(tmp, local)
+        except OSError:     # another piece on this container unpacked it first
+            shutil.rmtree(tmp)
+    return local
 
 
 @app.function(image=modal.Image.debian_slim(), timeout=120)
@@ -93,40 +136,113 @@ def join(chunk_dir, chunks, fps, out):
 def render(bundle_dir, plan_path, out):
     plan = json.loads(Path(plan_path).read_text())
     frames, fps = plan["durationInFrames"], plan["fps"]
-    r = ranges(frames, speed()[0])
+    n, r = plan_pieces(frames, speed()[0]["s_per_frame"])
     job = uuid.uuid4().hex[:12]
+    media = sum(f.stat().st_size for f in Path(bundle_dir, "public").rglob("*") if f.is_file())
+    done = []
     t0 = time.time()
-    with modal.enable_output(), app.run():
-        print(f"uploading {bundle_dir} ({sum(f.stat().st_size for f in Path(bundle_dir).rglob('*') if f.is_file()) / 1e6:.0f} MB)", flush=True)
-        with vol.batch_upload(force=True) as up:
-            up.put_directory(str(bundle_dir), f"/{job}/bundle")
-            up.put_file(str(plan_path), f"/{job}/plan.json")
-        t_up = time.time() - t0
-        print(f"rendering {frames} frames on {len(r)} container{'s' * (len(r) > 1)}", flush=True)
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            cdir, code = Path(t) / "chunks", Path(t) / "code.tar"
+            cdir.mkdir()
+            pack(bundle_dir, code)
+            up_bytes = code.stat().st_size + media
+            with modal.enable_output(), app.run(), ThreadPoolExecutor(8) as pool:
+                print(f"uploading {up_bytes / 1e6:.0f} MB (skipped when Modal already holds it)", flush=True)
+                with vol.batch_upload(force=True) as up:
+                    up.put_file(str(code), f"/{job}/code.tar")
+                    up.put_directory(str(Path(bundle_dir, "public")), f"/{job}/public")
+                    up.put_file(str(plan_path), f"/{job}/plan.json")
+                t_up = time.time() - t0
+                render_chunk.update_autoscaler(max_containers=n)
+                print(f"rendering {frames} frames in {len(r)} pieces on {n} container{'s' * (n > 1)}", flush=True)
+                t_sub, gets = time.time(), []
+                # each piece downloads as soon as it is done, while the others render
+                for c in run_pieces(lambda *x: render_chunk.spawn(job, *x), r, n):
+                    done.append(c)
+                    gets.append(pool.submit(fetch, c, cdir))
+                t_ren = time.time()
+                for g in gets:
+                    g.result()
+            join(cdir, [{"i": f"{i:03d}", "from": a, "to": b} for i, (a, b) in enumerate(r)], fps, out)
+    finally:
+        # Only after app.run() has stopped every container: one still running when another chunk
+        # failed (or its retry) writes its folder back onto the volume when it exits.
         try:
-            done = list(render_chunk.starmap([(job, i, a, b, CPU * 2) for i, (a, b) in enumerate(r)]))
-            with tempfile.TemporaryDirectory() as t:
-                cdir = Path(t) / "chunks"
-                cdir.mkdir()
-                for c in done:
-                    with open(cdir / f"chunk-{c['i']:02d}.mkv", "wb") as f:
-                        vol.read_file_into_fileobj(f"/{job}/chunks/chunk-{c['i']:02d}.mkv", f)
-                join(cdir, [{"i": f"{i:02d}", "from": a, "to": b} for i, (a, b) in enumerate(r)], fps, out)
-        finally:
             vol.remove_file(f"/{job}", recursive=True)
-    wall = time.time() - t0
-    usd = cost(done)
-    # Container seconds per frame (Chrome launch included), and everything else past the upload and
-    # the longest container: boot, download, join.
-    spf_m = sum(c["wall_s"] for c in done) / frames
-    longest = max(done, key=lambda c: c["wall_s"])
-    res = {"wall_s": round(wall, 1), "upload_s": round(t_up, 1), "chunks": len(done), "frames": frames,
-           "cpu_s": round(sum(c["cpu_s"] for c in done), 1), "usd": round(usd, 4),
-           "s_per_frame": round(spf_m, 4),
-           "startup_s": round(max(0.0, wall - t_up - longest["wall_s"]), 1)}
-    print(f"rendered {out} in {wall:.1f} s on {len(done)} containers; about ${usd:.3f} at Modal's rates "
-          f"(the Modal dashboard has the exact bill)")
+        except Exception as e:      # nothing uploaded yet; never hide the error that got us here
+            print(f"could not delete /{job} from the ai-video-editor-renders volume: {e}", file=sys.stderr)
+    res = measure(done, frames, t0, t_up, t_sub, t_ren, time.time(), up_bytes)
+    print(f"rendered {out} in {res['wall_s']:.1f} s on {res['containers']} containers; about ${res['usd']:.3f} at Modal's "
+          f"rates (the Modal dashboard has the exact bill)")
     print(json.dumps(res))
+
+
+def fetch(c, cdir):
+    with open(cdir / f"chunk-{c['i']:03d}.mkv", "wb") as f:
+        vol.read_file_into_fileobj(c["out"], f)
+
+
+def run_pieces(spawn, r, n, poll=5.0):
+    """Yield each piece's result as it finishes, every piece once. Once no piece is left waiting for a
+    container, one still running HEDGE x the median piece time later gets a second copy on another
+    container and the first copy to finish counts: one slow container (a 115-frame piece took 368 s
+    where the other 53 took 16-61 s) no longer holds up the render. The other copy is cancelled."""
+    stop, futs, done, hedged, t_dry = threading.Event(), {}, {}, set(), None
+    pool = ThreadPoolExecutor(len(r) + n)
+
+    def go(i, copy):
+        fc = spawn(i, *r[i], copy)
+        futs[pool.submit(wait_for, fc, stop)] = (i, fc)
+    try:
+        for f in [pool.submit(go, i, 0) for i in range(len(r))]:    # one request each: send them at once
+            f.result()
+        while len(done) < len(r):
+            fin, _ = futures.wait(list(futs), timeout=poll, return_when=futures.FIRST_COMPLETED)
+            for f in fin:
+                i, _ = futs.pop(f)
+                if f.exception() and any(j == i for j, _ in futs.values()):
+                    continue        # the other copy can still finish it
+                if i not in done:
+                    done[i] = f.result()
+                    yield done[i]
+            left = [i for i in range(len(r)) if i not in done]
+            if t_dry is None and len(left) <= n:
+                t_dry = time.time()
+            if t_dry and done and time.time() - t_dry > HEDGE * statistics.median(c["wall_s"] for c in done.values()):
+                for i in set(left) - hedged:
+                    hedged.add(i)
+                    go(i, 1)
+    finally:
+        stop.set()
+        for _, fc in futs.values():
+            with contextlib.suppress(Exception):
+                fc.cancel()
+        pool.shutdown(wait=False)
+
+
+def wait_for(fc, stop):
+    """A spawned piece's result, checking every few seconds whether it is still wanted."""
+    while not stop.is_set():
+        try:
+            return fc.get(timeout=3)
+        except TimeoutError:    # Python's: no result yet (a piece that timed out raises Modal's own)
+            pass
+
+
+def measure(done, frames, t0, t_up, t_sub, t_ren, t_end, up_bytes):
+    """What the next estimate reads (edit.py MODAL_MEASURED says what each is)."""
+    boots = {c["boot"] for c in done}           # one per container
+    n, work = len(boots), sum(c["wall_s"] for c in done)
+    start = max(0.0, max(boots) - t_sub)
+    res = {"wall_s": round(t_end - t0, 1), "upload_s": round(t_up, 1), "pieces": len(done), "containers": n,
+           "frames": frames, "cpu_s": round(sum(c["cpu_s"] for c in done), 1), "usd": round(cost(work, n), 4),
+           "s_per_frame": round(work / frames, 4), "start_s": round(start, 1),
+           "straggle": round(max(1.0, (t_ren - t_sub - start) / (work / n)), 2), "tail_s": round(t_end - t_ren, 1)}
+    # ponytail: footage Modal already held goes up in a second; that time says nothing about the uplink
+    if t_up > 10:
+        res["up_bytes_s"] = round(up_bytes / t_up)
+    return res
 
 
 def demo():
@@ -134,25 +250,75 @@ def demo():
     output path: render() end to end with Modal faked, so the real upload calls, the real container
     body (render_chunk run here with .local) and the real join all run, in three pieces."""
     assert render_chunk and hello and image
+    with tempfile.TemporaryDirectory() as t:
+        # the code goes up as one tar, the same bytes when the code is the same (Modal then skips it)
+        b = Path(t, "b")
+        (b / "public").mkdir(parents=True)
+        for f, x in (("bundle.js", "js"), ("1.bundle.js", "font"), ("bundle.js.map", "map"), ("1.bundle.js.map", "map"), ("public/cut.mp4", "mp4")):
+            Path(b, f).write_text(x)
+        pack(b, Path(t, "1.tar"))
+        os.utime(b / "bundle.js", (1, 1))
+        pack(b, Path(t, "2.tar"))
+        assert Path(t, "1.tar").read_bytes() == Path(t, "2.tar").read_bytes(), "a new file time changed the tar"
+        assert tarfile.open(Path(t, "1.tar")).getnames() == ["1.bundle.js", "bundle.js", "bundle.js.map"]
+    # what the next estimate reads: 2 containers, the slow one takes one piece while the fast one takes three
+    pcs = [{"boot": 105, "t0": 110, "wall_s": w, "cpu_s": 0} for w in (30, 30, 30)] + \
+          [{"boot": 108, "t0": 110, "wall_s": 80, "cpu_s": 0}]
+    m = measure(pcs, 1000, 0, 40, 100, 200, 230, 152e6)
+    assert m["containers"] == 2 and m["start_s"] == 8 and m["s_per_frame"] == 0.17 and m["tail_s"] == 30, m
+    assert m["straggle"] == round((100 - 8) / 85, 2) and m["up_bytes_s"] == 3.8e6, m
+    assert "up_bytes_s" not in measure(pcs, 1000, 0, 2, 100, 200, 230, 152e6), "a skipped upload is not a speed"
+    # a piece stuck on a slow container gets a second copy once the queue is empty; the first to finish counts
+    calls = []
+
+    def spawn(i, a, b, copy):
+        calls.append(Done({"i": i, "copy": copy, "wall_s": 0.01}, hang=(i, copy) == (2, 0)))
+        return calls[-1]
+    t = time.time()
+    got = list(run_pieces(spawn, [[0, 9], [10, 19], [20, 29], [30, 39]], 2, poll=0.01))
+    assert sorted((c["i"], c["copy"]) for c in got) == [(0, 0), (1, 0), (2, 1), (3, 0)], got
+    assert [c.cancelled for c in calls if c.hang] == [True] and time.time() - t < 5, time.time() - t
     if len(sys.argv) > 2:
         mocked_render(*sys.argv[2:5])
     print("demo ok")
+
+
+class Done:
+    """A FunctionCall that has finished (or, with `hang`, never will)."""
+    def __init__(self, result=None, hang=False):
+        self.result, self.hang, self.cancelled = result, hang, False
+
+    def get(self, timeout=None):
+        if self.hang:
+            time.sleep(timeout)
+            raise TimeoutError()
+        return self.result
+
+    def cancel(self):
+        self.cancelled = True
 
 
 class FakeVolume:
     """The Volume calls render() and render_chunk make, on a local folder."""
     def __init__(self, root):
         self.root = Path(root)
+        self.app_running = False
+
+    @contextlib.contextmanager
+    def app_run(self):
+        self.app_running = True
+        try:
+            yield
+        finally:
+            self.app_running = False
 
     def _p(self, p):
         return self.root / p.lstrip("/")
 
     def batch_upload(self, force=False):
-        import contextlib
         return contextlib.nullcontext(self)
 
     def put_directory(self, src, dst):
-        import shutil
         shutil.copytree(src, self._p(dst))
 
     def put_file(self, src, dst):
@@ -163,7 +329,9 @@ class FakeVolume:
         return f.write(self._p(p).read_bytes())
 
     def remove_file(self, p, recursive=False):
-        import shutil
+        # a container still running (a retry, or a chunk going on after another failed) writes back
+        # into the job's folder, so the folder goes only once app.run() has stopped them all
+        assert not self.app_running, "the job's folder was deleted while the app could still write to it"
         shutil.rmtree(self._p(p))
 
     def commit(self):
@@ -171,17 +339,34 @@ class FakeVolume:
 
 
 def mocked_render(bundle_dir, plan_path, out):
-    import contextlib
     g = globals()
     body = render_chunk.local
-    third = lambda n, spf: [[a, min(n, a + math.ceil(n / 3)) - 1] for a in range(0, n, math.ceil(n / 3))]
-    with tempfile.TemporaryDirectory() as t:
-        saved = {k: g[k] for k in ("vol", "VOL_DIR", "RENDER_MJS", "app", "render_chunk", "ranges")}
+    third = lambda n, spf: (1, [[a, min(n, a + math.ceil(n / 3)) - 1] for a in range(0, n, math.ceil(n / 3))])
+
+    one_at_a_time = threading.Lock()     # run_pieces sends the pieces from several threads
+
+    def chunk_on_container(*x):
+        # A Modal container with cpu=4 shows Node more cores than `nproc` (4), and Remotion takes the
+        # lower: a fake nproc on PATH gives this computer the same split.
+        with one_at_a_time, tempfile.TemporaryDirectory() as bin_dir:
+            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n")
+            Path(bin_dir, "nproc").chmod(0o755)
+            path = os.environ["PATH"]
+            os.environ["PATH"] = bin_dir + os.pathsep + path
+            try:
+                return body(*x)
+            finally:
+                os.environ["PATH"] = path
+
+    with tempfile.TemporaryDirectory() as t, tempfile.TemporaryDirectory() as disk:
+        saved = {k: g[k] for k in ("vol", "VOL_DIR", "LOCAL_DIR", "RENDER_MJS", "app", "render_chunk", "plan_pieces")}
         saved_out = modal.enable_output
+        fv = FakeVolume(t)
         try:
-            g.update(vol=FakeVolume(t), VOL_DIR=t, RENDER_MJS=str(REMOTION / "render.mjs"), ranges=third,
-                     app=type("A", (), {"run": lambda self: contextlib.nullcontext()})(),
-                     render_chunk=type("F", (), {"starmap": lambda self, xs: [body(*x) for x in xs]})())
+            g.update(vol=fv, VOL_DIR=t, LOCAL_DIR=disk, RENDER_MJS=str(REMOTION / "render.mjs"), plan_pieces=third,
+                     app=type("A", (), {"run": lambda self: fv.app_run()})(),
+                     render_chunk=type("F", (), {"update_autoscaler": lambda self, **k: None,
+                                                 "spawn": lambda self, *x: Done(chunk_on_container(*x))})())
             modal.enable_output = contextlib.nullcontext
             render(bundle_dir, plan_path, out)
             assert not any(Path(t).iterdir()), "the render's folder was left on the volume"

@@ -222,6 +222,27 @@ def default_style(prof=None):
     return answers(json.loads(json.dumps(DEFAULT_STYLE)), prof or {})
 
 
+# A cut kind -> style-edit's scene transition: the same map and 5% floor as creator-teardown visual.py
+# TRANSITION / transitions_of (hard, jump and zoom-punch cuts have none).
+CUT_TRANSITION = {"whip": "push", "match": "match", "mask": "wipe", "dissolve": "fade"}
+
+
+def fill_transitions(style, warn=print):
+    """A style.json from a teardown made before visual.py wrote "transitions": derive them from the measured
+    pace.cut_kinds ([] for a creator who only cuts). No cut kinds measured: leave style-edit's default and,
+    for a creator's style, say re-running the teardown gets them. Never guessed."""
+    if "transitions" in style or style.get("handle", "default") == "default":
+        return style
+    ck = (style.get("pace") or {}).get("cut_kinds")
+    if ck:
+        style["transitions"] = [CUT_TRANSITION[k] for k, v in sorted(ck.items(), key=lambda kv: -kv[1])
+                                if k in CUT_TRANSITION and v >= 5]
+    elif ck is None:
+        warn(f"style.json for {style['handle']} has no \"transitions\" and no measured cut kinds, so scenes use "
+             "match / iris; re-run the creator-teardown (visual.py) to get the creator's transitions")
+    return style
+
+
 # ---------- blending creators ----------
 PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion", "transitions"),
          "visuals": ("graphics", "look", "layout", "cats", "events")}
@@ -275,6 +296,9 @@ def write_style(edit_dir, root=Path("."), out=None):
         sys.exit("ERROR: no creator style.json found for the profile's creators")
     else:
         style = blend(styles, prof["creators"], prof)
+    clip = Path(edit_dir) / "clip.json"
+    if clip.exists() and json.loads(clip.read_text()).get("audio_only"):   # a podcast clip: the words are the picture
+        style["captions"] = {**style.get("captions", {}), "present": True}
     out = Path(out or Path(edit_dir) / "style.json")
     out.parent.mkdir(parents=True, exist_ok=True)   # start writes the style before cut makes edits/<name>/
     out.write_text(json.dumps(style, indent=1))
@@ -308,6 +332,12 @@ def demo():
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
         assert json.loads(out.read_text())["handle"] == "default"
+        # captions off in the profile, but an audio-only podcast clip keeps them: its words are the picture
+        save({"captions": {"on": False}})
+        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}))
+        assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is True
+        (Path(d) / "clip.json").unlink()
+        assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is False
         # start runs `style edits/<name>` before cut has made the folder: it is created, exit 0
         r = subprocess.run([sys.executable, __file__, "style", str(Path(d) / "edits" / "new")],
                            capture_output=True, text=True, env=dict(os.environ, AI_EDITOR_HOME=d))
@@ -320,6 +350,15 @@ def demo():
     assert s["captions"]["size_pct"] == 7 and s["captions"]["effect"] == "karaoke" and s["sfx"] is False, s
     assert s["blend"] == {"captions": "b", "pace": "b", "visuals": "a"} and s["pace"]["median_shot_s"] == 1.2
     assert s["transitions"] == [], s     # the pace creator's transitions come with pace (b only cuts)
+    # a teardown older than "transitions": its measured cut kinds give them; with none measured, a note, no guess
+    w = []
+    assert fill_transitions({"handle": "x", "pace": {"cut_kinds": {"hard": 92, "jump": 8}}}, w.append)["transitions"] == []
+    assert fill_transitions({"handle": "x", "pace": {"cut_kinds": {"hard": 70, "whip": 20, "mask": 3}}}, w.append)["transitions"] == ["push"]
+    assert fill_transitions({"handle": "x", "transitions": ["fade"], "pace": {"cut_kinds": {"hard": 100}}}, w.append)["transitions"] == ["fade"]
+    assert "transitions" not in fill_transitions({"handle": "x", "pace": {"cut_kinds": {}}}, w.append) and not w
+    assert "transitions" not in fill_transitions(default_style(), w.append) and not w
+    assert "transitions" not in fill_transitions({"handle": "x", "pace": {"median_shot_s": 2}}, w.append) and len(w) == 1, w
+    assert "re-run" in w[0] and "visual.py" in w[0], w
     lk = resolve_look(s, {}, warn=lambda m: None)
     assert lk["ground"] == "#DEDACC" and lk["accent"] == "#E5482C" and "font" not in lk, lk    # Inter refused
     w = []
@@ -343,6 +382,10 @@ def demo():
         r = subprocess.run([sys.executable, __file__, "set", "audience", "builders"], capture_output=True,
                            text=True, env=env)
         assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text())["audience"] == "builders"
+        # the two forms mixed: the message names the argument that is not key=value
+        r = subprocess.run([sys.executable, __file__, "set", "goal", "follow", "platform=youtube"], capture_output=True,
+                           text=True, env=env)
+        assert r.returncode == 1 and "'goal' is not key=value" in r.stderr, r.stderr
     print("profile ok")
 
 
@@ -357,14 +400,16 @@ def main():
         print("\n".join(missing(group)) or "(all answered)")
     elif len(a) >= 2 and a[0] == "set":
         pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
-        if any(len(p) != 2 or not p[0] for p in pairs):
-            sys.exit("usage: profile.py set key=value [key=value ...]  (or: set key value)")
+        bad = [x for x, p in zip(a[1:], pairs) if len(p) != 2 or not p[0]]
+        if bad:
+            sys.exit(f"profile.py set: {bad[0]!r} is not key=value. Write every answer as key=value "
+                     "(the `set key value` form takes one answer alone)")
         prof = set_pairs(json.loads(path().read_text()) if path().exists() else {}, pairs)
         print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
         print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else
-                                              "no creator: the default style (DEFAULT_STYLE)"))
+                                              "no creator: the default style (smooth zooms about every 6 s, 3-word captions)"))
     else:
         print(__doc__)
         sys.exit(2)

@@ -22,6 +22,8 @@ What got installed is recorded in ~/.ai-video-editor/env.json. AI_EDITOR_HOME mo
   python3 setup.py modal      install Modal (cloud renders) in the venv, then say how to log in
   python3 setup.py modal-check   one tiny function on Modal: proves the login works
   python3 setup.py matte      download the person-matting model (15 MB) for cards behind the speaker
+  python3 setup.py later <step>   save an optional step for later (typesafe gemini elevenlabs style modal matte)
+  python3 setup.py todo       every optional step not done yet ("finish setup")
   python3 setup.py demo       self-check
 
 Exit codes: 0 ready or done, 1 something to fix, 2 usage.
@@ -38,7 +40,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
-from ai_editor import keys, models  # noqa: E402
+from ai_editor import keys, models, profile  # noqa: E402
 
 OS = platform.system()  # Darwin, Windows, Linux
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
@@ -338,7 +340,8 @@ def saved_logins(home=None):
     root = Path(home or HOME) / "browser"
     if not root.is_dir():
         return []
-    return [(d.name, int((time.time() - (d / "Default").stat().st_mtime) // 86400), d)
+    # max(0, ...): a folder written a moment ago can carry an mtime just ahead of time.time() (Windows)
+    return [(d.name, max(0, int((time.time() - (d / "Default").stat().st_mtime) // 86400)), d)
             for d in sorted(root.iterdir()) if (d / "Default").is_dir()]
 
 
@@ -368,8 +371,25 @@ def later_load():
         return []
 
 
+MATTE = "rvm_mobilenetv3_fp32.onnx"
+STEP_HELP = {**KEY_HELP, "style": "the style questions (2 min)", "modal": "cloud renders on Modal (3 min)",
+             "matte": "cards behind the speaker (15 MB download)"}
+STEPS = tuple(STEP_HELP)   # every optional step `later` and `todo` know
+
+
+def step_done():
+    """Optional step -> is it done? The same checks doctor's rows read."""
+    return {**{k: (lambda k=k: bool(keys.get(k)[0])) for k in KEY_HELP},
+            "style": lambda: not profile.missing(profile.STYLE_QUESTIONS),
+            "modal": lambda: modal_status() == "ready",
+            "matte": lambda: (models.DIR / MATTE).exists()}
+
+
 def later(name):
     """Remember a skipped step (a key name, "modal", "style", "matte")."""
+    if name not in STEPS:
+        print(f"Unknown step: {name}. Steps: {', '.join(STEPS)}", file=sys.stderr)
+        return 2
     items = [x for x in later_load() if x != name] + [name]
     HOME.mkdir(parents=True, exist_ok=True)
     LATER.write_text(json.dumps(items))
@@ -379,21 +399,16 @@ def later(name):
 
 def still_later():
     """Skipped steps that are still not done."""
-    done = {"modal": lambda: modal_status() == "ready"}
-    out = []
-    for x in later_load():
-        if x in KEY_HELP and keys.get(x)[0]:
-            continue
-        if x in done and done[x]():
-            continue
-        out.append(x)
-    return out
+    done = step_done()
+    return [x for x in later_load() if not (x in done and done[x]())]
 
 
-def todo():
-    items = still_later()
-    print("\n".join(f"later  {x:<11} {KEY_HELP.get(x, '')}" for x in items) or "Nothing saved for later.")
-    return 0
+def todo(done=None):
+    """Every optional step not done yet, saved for later or never asked (bootstrap skips them all)."""
+    done = done or step_done()
+    items = [x for x in STEPS if not done[x]()]
+    print("\n".join(f"todo   {x:<11} {STEP_HELP[x]}" for x in items) or "Nothing left to finish.")
+    return items
 
 
 def clip_kind(text):
@@ -543,6 +558,15 @@ def sync_tree(src, dst):
             shutil.copy2(f, to)
 
 
+def quiet(cmd, cwd, what):
+    """A tool's own chatter ("added 369 packages in 3s", "Has browser at /private/...") kept back; shown
+    only when the step fails, then a one-line reason."""
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True)
+    if r.returncode:
+        print((r.stdout + r.stderr).strip()[-3000:])
+        sys.exit(f"ERROR: {what} failed (exit {r.returncode}); its output is above.")
+
+
 def step_remotion(force=False):
     npm = shutil.which("npm")
     if not npm:
@@ -553,11 +577,11 @@ def step_remotion(force=False):
     if force or drift(env_load(), {}, remotion_installed() or "missing")["renderer"]:
         # npm ci: exactly package-lock.json, never a re-resolve. --ignore-scripts: the one install
         # script (esbuild's) only re-checks a binary npm already placed; newer npm warns about it.
-        subprocess.run([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"],
-                       cwd=REMOTION_HOME, check=True)
+        quiet([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], REMOTION_HOME,
+              "installing the renderer's packages (npm ci)")
         done = "installed"
     if not list((REMOTION_HOME / "node_modules" / ".remotion").glob("chrome-headless-shell/*")):
-        subprocess.run([shutil.which("npx"), "remotion", "browser", "ensure"], cwd=REMOTION_HOME, check=True)
+        quiet([shutil.which("npx"), "remotion", "browser", "ensure"], REMOTION_HOME, "downloading the render browser")
         done = "installed"
     env_save(node_lock=file_sha(NPM_LOCK), node=version(["node", "--version"]),
              npm=version([npm, "--version"]))
@@ -664,7 +688,7 @@ def step_matte(force=False):
     """The Robust Video Matting model matte.py cuts the speaker out with, then a 10-frame test cut."""
     if not VPY.exists():
         sys.exit("Run the venv step first.")
-    rel = "rvm_mobilenetv3_fp32.onnx"
+    rel = MATTE
     fresh = not (models.DIR / rel).exists()
     script = PLUGIN / "skills" / "style-edit" / "scripts" / "matte.py"
     subprocess.run([str(VPY), str(script), "fetch"], check=True)
@@ -677,6 +701,18 @@ def step_matte(force=False):
 
 
 def demo():
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):     # a tool's chatter is kept back on success...
+        quiet([sys.executable, "-c", "print('added 369 packages in 3s')"], ".", "x")
+    assert out.getvalue() == "", out.getvalue()
+    with contextlib.redirect_stdout(out):     # ...and shown, with a plain reason, on failure
+        try:
+            quiet([sys.executable, "-c", "import sys; print('npm ERR! code E404'); sys.exit(1)"], ".", "npm ci")
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            assert "npm ci failed" in str(e.code) and "E404" in out.getvalue(), (e.code, out.getvalue())
     miss = key_line("gemini", "x", "no look pass", None)
     assert "add my gemini key" in miss and "clipboard" in miss and "terminal" not in miss, miss
     assert key_line("gemini", "looks", "x", "the GEMINI_API_KEY variable").startswith("ok "), "found key row"
@@ -712,6 +748,12 @@ def demo():
         HOME, LATER = Path(d), Path(d) / "later.json"
         later("style"); later("style")
         assert later_load() == ["style"] and "style" in still_later()
+        assert later("bogus") == 2 and later_load() == ["style"]   # an unknown step is refused, not saved
+    # finish setup after a bare bootstrap: every optional step is listed, none saved for later
+    assert todo({x: (lambda: False) for x in STEPS}) == list(STEPS) == [
+        "typesafe", "gemini", "elevenlabs", "style", "modal", "matte"]
+    assert todo({x: (lambda x=x: x != "gemini") for x in STEPS}) == ["gemini"]
+    assert set(step_done()) == set(STEPS)
     HOME, LATER = keep
     # Saved logins: one row each, with its age and the logout offer; a folder with no profile is not one
     with tempfile.TemporaryDirectory() as d:

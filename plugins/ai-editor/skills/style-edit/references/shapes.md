@@ -4,6 +4,14 @@ The files Claude writes in style-edit, and the rules plan.py holds them to. Read
 visuals.json. More on each format and where it comes from: `visuals.md`; every file's full shape:
 `contracts.md` (for people, not needed to run the skill).
 
+visuals.json is one JSON array, one object per beat, in spoken order. A whole two-beat file:
+
+```json
+[{"word": "notion", "nth": 1, "kind": "logo", "brand": "Notion", "domain": "notion.com"},
+ {"word": "faster", "nth": 1, "kind": "capture", "url": "https://example.com/benchmarks", "format": "sticker",
+  "marks": [{"kind": "highlight", "find": "10x faster", "at_word": "faster"}], "hold_s": 2.5}]
+```
+
 ## images.json (the user's own pictures, first on screen)
 
 `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]`, optional `layout`, `hold_s`,

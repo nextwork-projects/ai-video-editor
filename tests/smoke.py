@@ -31,6 +31,16 @@ def run(*cmd, cwd):
         sys.exit(f"SMOKE FAIL: exit {r.returncode} from {cmd[1] if len(cmd) > 1 else cmd[0]}")
 
 
+def run_out(*cmd, cwd):
+    """run, with the output kept (and printed) so a step can be checked for noise a user should never see."""
+    print("$", " ".join(map(str, cmd)), flush=True)
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True)
+    print(r.stdout + r.stderr, end="", flush=True)
+    if r.returncode:
+        sys.exit(f"SMOKE FAIL: exit {r.returncode} from {cmd[1] if len(cmd) > 1 else cmd[0]}")
+    return r.stdout + r.stderr
+
+
 def main():
     work = Path(tempfile.mkdtemp(prefix="ave-smoke-"))
     try:
@@ -72,7 +82,9 @@ def steps(work):
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", cwd=work)
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json",
         "--layout", "split", "--out", edit / "plan-split.json", cwd=work)
-    run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    out = run_out(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    if "GSAP target" in out:     # a tween on an element the card did not draw (the flow scene's veil)
+        sys.exit("SMOKE FAIL: the stills printed GSAP 'target not found' warnings")
     # graphics behind the speaker: the capture card goes behind, the speaker is cut out under it
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", "--layout", "overlay",
         "--behind", "on", "--out", edit / "plan-behind.json", cwd=work)
@@ -86,6 +98,7 @@ def steps(work):
         if not out or abs(float(out) - 4) > 0.3:
             sys.exit(f"SMOKE FAIL: {f} duration {out!r}, expected about 4 s")
     contrast(work)
+    podcast(work)
     stills = list((edit / "stills").glob("*.png"))
     if not stills:
         sys.exit("SMOKE FAIL: no stills")
@@ -118,6 +131,39 @@ def contrast(work):
         if name != "dark":
             run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
             run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on a contrast FAIL
+
+
+def podcast(work):
+    """An audio-only podcast clip: clips.py trim puts the audio over the podcast's cover, then the real
+    renderer draws the speaker's words on it, the cover moving all the way through (14 s, past the 6 s a
+    frame may hold still), and check.py render passes with no "nothing moves" WARN."""
+    pod = work / "clips" / "pod"
+    pod.mkdir(parents=True)
+    run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=180:d=16", pod / "source.mp3", cwd=work)
+    run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=800x800", "-frames:v", "1", pod / "cover.png", cwd=work)
+    said = ("this is the part nobody tells you about. most people quit in the first week. "
+            "the ones who stay do one small thing every day. and that is the whole secret.").split()
+    words = [{"text": t, "start": round(0.4 + i * 0.5, 2), "end": round(0.8 + i * 0.5, 2), "type": "word"}
+             for i, t in enumerate(said)]
+    (pod / "words.raw.json").write_text(json.dumps(words))
+    (pod / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.4, "end": words[-1]["end"],
+                                                      "hook": "this is the part"}]))
+    run(PY, SK / "clips/scripts/clips.py", "trim", pod, "c0", "--edits", work / "edits", cwd=work)
+    ed = work / "edits" / "pod-clip1"
+    if not json.loads((ed / "clip.json").read_text()).get("audio_only"):
+        sys.exit("SMOKE FAIL: an audio source's clip is not marked audio_only")
+    (ed / "source.mp4").rename(ed / "cut.mp4")
+    (ed / "captions.json").write_text((ed / "words.raw.json").read_text())
+    style = {"handle": "pod", "captions": {"present": True, "words_per_caption": 3, "y_pct": 72, "size_pct": 5.5,
+             "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": True}}
+    (work / "pod.json").write_text(json.dumps(style))
+    run(PY, SK / "style-edit/scripts/plan.py", work / "pod.json", ed / "captions.json", "--no-sfx", cwd=work)
+    run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
+    run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on any FAIL
+    still = [f["what"] for f in json.loads((ed / "check.json").read_text())["render"]["findings"]
+             if "nothing moves" in f["what"] or "push did not render" in f["what"]]
+    if still:
+        sys.exit(f"SMOKE FAIL: the podcast clip holds still: {still}")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ import math
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080)}
@@ -91,7 +92,8 @@ SCENE_BOX = [0, 0, 100, 100]            # "use the scene box" (the renderer's, c
 SCENE_TYPE_BOX = {True: [6, 13, 88, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
 TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
 # A scene's transition in takes about 0.62 s x the personality's k (Scene.tsx). The scene starts this
-# much earlier than a box card, so the ground has mostly grown by the word.
+# much earlier than a box card, so the ground has mostly grown by the word. A "cut" in has nothing to grow:
+# it is whole on its first frame, so it starts where a box card does (CARD_LEAD_S before its word).
 SCENE_LEAD_S = 0.3
 # An overlay's entrance (motion.ts dropIn: expo.out over 0.62 s x k) carries half its ink, what quality.py counts as
 # landed (LAND_SHARE), this long x k after it starts: 0.06 and 0.08 s on the sample take's captures. plan.py starts
@@ -186,6 +188,26 @@ def zoom_times(words, on, cuts):
     return out
 
 
+# An audio-only clip (clips.py trim): the renderer draws the show's cover and moves it, so the frame never holds still.
+COVER_PUSH, COVER_GROUND, COVER_PULSE = 1.12, 1.06, 1.02   # cover's end scale, ground's start scale, punch on a sentence
+
+
+def audio_cover(edit_dir, words):
+    """plan "cover" for an audio-only clip with artwork (clip.json from clips.py trim), else None. Pulses: sentence
+    starts, never in the opening half second and at least a second apart."""
+    cj = edit_dir and Path(edit_dir) / "clip.json"
+    meta = json.loads(cj.read_text()) if cj and cj.exists() else {}
+    if not (meta.get("audio_only") and meta.get("cover") and meta.get("cover_box")
+            and (Path(edit_dir) / meta["cover"]).exists()):
+        return None
+    pulses = []
+    for t in zoom_times(words, "sentence_start", ()):
+        if t >= 0.5 and (not pulses or t - pulses[-1] >= 1.0):
+            pulses.append(round(t, 3))
+    return {"src": meta["cover"], "box": meta["cover_box"], "push": COVER_PUSH, "ground_push": COVER_GROUND,
+            "pulse": COVER_PULSE, "pulses": pulses}
+
+
 def card_gap_s(style):
     """The longest stretch with no card: 2 x the creator's measured mean gap between cards, else GAP_S."""
     pm = graphics(style, "graphics").get("per_min")
@@ -250,21 +272,29 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None, quiet=()):
 
 
 ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start to when it has settled
+PUNCH_S = 0.16           # StyleEdit.tsx PUNCH_S: how long a punch zoom takes to travel
 
 
 def clear_entrances(zooms, cards):
-    """A zoom change never lands while a card is entering: it moves to just before the card starts (a zoom that
-    gets shorter than 0.5 s, or runs into the one before, is dropped). Two moves at once compete for the eye,
-    and the render check cannot time a card's landing while the footage under it jumps."""
+    """A zoom change never lands while a card is entering: it moves to finish just before the card starts, or,
+    for a full-frame scene, to its middle, hidden under it (the footage comes back at the new zoom, like a cut).
+    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap);
+    a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
+    cannot time a card's landing while the footage under it jumps."""
     for c in cards:
-        a, b = c["start"] - ENTER_S[0], c["start"] + ENTER_S[1]
+        a, b = c["start"] - ENTER_S[0] - PUNCH_S, c["start"] + ENTER_S[1]
+        to = round((c["start"] + c["end"]) / 2, 3) if c.get("layout") == "scene" else round(max(0.0, a), 3)
         for z in zooms:
             for k in ("start", "end"):
                 if a < z[k] < b:
-                    z[k] = round(max(0.0, a), 3)
+                    z[k] = to
     out = []
-    for z in zooms:
-        if z["end"] - z["start"] >= 0.5 and (not out or z["start"] >= out[-1]["end"]):
+    for z in sorted(zooms, key=lambda z: z["start"]):
+        if z["end"] - z["start"] < 0.5:
+            continue
+        if out and z["start"] < out[-1]["end"] + PUNCH_S:
+            out[-1]["end"] = max(out[-1]["end"], z["end"])
+        else:
             out.append(z)
     return out
 
@@ -754,14 +784,16 @@ def sticker_xh(c, aspect):
 
 
 XH_PER_LINE = 0.42     # a DOM line box is about 1.2 em tall and a Latin x-height about 0.5 em
+CAPTION_LEADING = 1.14  # em, Captions.tsx lineHeight: a sticker cut from a page never sets its lines tighter
+LINE_BOX_EM = 1.2
 # ponytail: a crop cut to the evidence may show the capture up to 2 frame px per PNG px (a 2x capture's body text
 # needs about 1.8 to read); soft but legible. Upgrade: re-shoot the crop at a higher deviceScaleFactor instead.
 MAX_UP = 2.0
 
 
-def evidence_lines(c):
+def evidence_lines(c, said=False):
     """The text lines (image px) a capture is shown for: those under its marks or highlight, else its largest
-    type (the headline). Inside a sticker's crop only."""
+    type (the headline; [] with said=True: only words the speaker says count). Inside a sticker's crop only."""
     lines = [ln[:4] for ln in c.get("lines") or []]
     if c.get("format") == "sticker":
         x, y, w, h = sticker_crop(c)
@@ -773,8 +805,10 @@ def evidence_lines(c):
     rects += [[a * iw, b * ih, cw * iw, ch * ih] for a, b, cw, ch in (c.get("highlight") or {}).get("rects") or []]
     hit = [ln for ln in lines if any(r[0] - 4 <= ln[0] + ln[2] / 2 <= r[0] + r[2] + 4 and r[1] - 4 <= ln[1] + ln[3] / 2 <= r[1] + r[3] + 4
                                      for r in rects)]
+    if hit or said:
+        return hit
     top = max(ln[3] for ln in lines)
-    return hit or [ln for ln in lines if ln[3] >= 0.85 * top]
+    return [ln for ln in lines if ln[3] >= 0.85 * top]
 
 
 def capture_scale(c, aspect):
@@ -820,18 +854,37 @@ def small_lines(c, aspect):
             and ln[1] + ln[3] <= y + h + 1 and XH_PER_LINE * ln[3] * k < READ_XH]
 
 
+def tight(ln, lines):
+    """Whether a text line (image px) has a neighbour above or below it closer than the captions' leading."""
+    return any(o[:4] != ln[:4] and o[0] < ln[0] + ln[2] and ln[0] < o[0] + o[2]
+               and 0 < abs(o[1] - ln[1]) < CAPTION_LEADING / LINE_BOX_EM * max(o[3], ln[3]) for o in lines)
+
+
 def readable_captures(cards, aspect):
     """On vertical a capture whose evidence would render under READ_XH becomes a sticker cropped to that
     evidence: the crop takes the band's shape around the evidence's first lines (as many as still read) at the
-    largest size that holds them (at most MAX_UP frame px per picture px), every line whole. One that still reads small is left for check.py to FAIL."""
+    largest size that holds them (at most MAX_UP frame px per picture px), every line whole. The evidence is the
+    words the speaker says, marked on the page ("find" / "highlight"): with none marked, or marked words set
+    tighter than the captions, the card is dropped (never a sticker of the page's own headline, never lines that
+    touch). One that still reads small is left for check.py to FAIL."""
     if aspect != "9:16":
         return cards
     W, H = SIZES[aspect]
+    keep = []
     for c in cards:
+        keep.append(c)
         if c.get("layout") == "scene" or not c.get("src") or c.get("format") in ("sticker", "plain") or not c.get("lines"):
             continue
         xh = capture_xh(c, aspect)
         if xh is None or xh >= READ_XH:
+            continue
+        ev = sorted(evidence_lines(c, said=True), key=lambda ln: (ln[1], ln[0]))
+        if not ev:
+            keep.pop()
+            print(f"warning: '{c['trigger_word']}' {c['src']}: dropped. Its text would read at {xh:.0f} px x-height "
+                  f"(under {READ_XH}) and no words the speaker says are marked on the page to cut it to. To keep it, "
+                  "give the capture beat \"format\": \"sticker\" and a mark whose \"find\" is a phrase said there, re-run capture.mjs and plan.py",
+                  file=sys.stderr)
             continue
         w, h = c["box"][2] / 100 * W, c["box"][3] / 100 * H
         e = max(8, min(w, h) / 100 * 1.6)
@@ -845,8 +898,16 @@ def readable_captures(cards, aspect):
             f = min(MAX_UP, aw / (gx1 - gx0 + 2 * pad), ah / (gy1 - gy0 + 2 * pad))
             return f, (gx0, gy0, gx1, gy1), XH_PER_LINE * sorted(ln[3] for ln in group)[len(group) // 2] * f * unit
 
+        # a headline set tighter than the captions has its letters touch once it stands alone on a card, and a
+        # crop of the picture cannot open its lines up: only a sticker beat re-sets the sentence (capture.mjs)
+        if tight(ev[0], c["lines"]):
+            keep.pop()
+            print(f"warning: '{c['trigger_word']}' {c['src']}: dropped. Its text would read at {xh:.0f} px x-height "
+                  f"(under {READ_XH}) and the marked words are set tighter than the captions ({CAPTION_LEADING} line height), "
+                  "so a crop would show their lines touching. To keep it, give the beat \"format\": \"sticker\" (capture.mjs "
+                  "re-sets the sentence with open lines), re-run capture.mjs and plan.py", file=sys.stderr)
+            continue
         # the evidence from its first line on, as many lines as still read at READ_XH
-        ev = sorted(evidence_lines(c), key=lambda ln: (ln[1], ln[0]))
         group = ev[:1]
         for ln in ev[1:]:
             if fit(group + [ln])[2] < READ_XH:
@@ -870,11 +931,11 @@ def readable_captures(cards, aspect):
             new["props"]["crop"] = [x, round(top), w, round(bot - top)]
         got = capture_xh(new, aspect)
         if got and got > xh:
-            print(f"'{c['trigger_word']}' {c['src']}: {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height; "
-                  f"cut to the evidence as a sticker, {got:.0f} px", file=sys.stderr)
+            print(f"'{c['trigger_word']}' {c['src']}: its {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height, "
+                  f"so plan.py cut it to the marked words ({len(group)} line(s)) as a sticker: {got:.0f} px", file=sys.stderr)
             c.clear()
             c.update(new)
-    return cards
+    return keep
 
 
 def heat(gl, bx):
@@ -1202,11 +1263,16 @@ def as_scene(card, face, style, n):
     """A full-frame cut-away: the scene box, the transitions (style.json "transitions" cycled; an empty
     list, a creator who only cuts, gives hard cuts; no list gives match in / iris out; a beat's own win)
     and the focus they grow from (the head at the card's start)."""
-    cyc = ["cut"] if style.get("transitions") == [] else style.get("transitions") or []
+    cyc = scene_cycle(style)
     card.update({"layout": "scene", "box": list(SCENE_BOX), "focus": card.get("focus") or head_centre(face, card["start"])})
     card.setdefault("transition_in", cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
     card.setdefault("transition_out", cyc[n % len(cyc)] if cyc else TRANSITIONS[1])
     return card
+
+
+def scene_cycle(style):
+    """The transitions scene cards cycle through: style.json "transitions", ["cut"] when it is []."""
+    return ["cut"] if style.get("transitions") == [] else style.get("transitions") or []
 
 
 def _tw(text, fs, wt=700):
@@ -1291,7 +1357,7 @@ def overlay_led(c):
 
 
 def lay_out(cards, aspect, face, style, split_ok):
-    """Gives every card its layout. A scene starts SCENE_LEAD_S x k earlier (never before the card
+    """Gives every card its layout. A scene starts SCENE_LEAD_S x k earlier, a hard cut in no earlier (never before the card
     before it in its lane ends). Returns (cards, any card in the split panel)."""
     n = 0
     lead = SCENE_LEAD_S * MOTION_K.get(pick_motion(style), 1.0)
@@ -1302,7 +1368,9 @@ def lay_out(cards, aspect, face, style, split_ok):
             f = "scene"        # no panel in overlay: a full-frame cut-away instead
         c["_f"] = f
         if f == "scene":
-            c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - lead), 3)
+            cyc = scene_cycle(style)
+            tin = c.get("transition_in") or (cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
+            c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - (0 if tin == "cut" else lead)), 3)
             as_scene(c, face, style, n)
             n += 1
         else:
@@ -1446,7 +1514,10 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
     gap = card_gap_s(style)
     quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
-    zooms = place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet)
+    cover = audio_cover(edit_dir, words)
+    if cover:   # the cover's own push replaces the zooms: two moves at once compete for the eye
+        quiet = []
+    zooms = [] if cover else place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet)
     for z in zooms if face else []:
         # grow from the top of the head, centred on it: the face holds its place and the hair never rises
         # into a card placed above the head (a zoom about the face's middle pushed the hair up into it)
@@ -1501,7 +1572,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             ox, oy = z.get("origin") or [50, 30]
             k = z["scale"]
             c["anim"]["props"]["head"] = [round(ox + (hd[0] - ox) * k, 1), round(oy + (hd[1] - oy) * k, 1), round(hd[2] * k, 1), round(hd[3] * k, 1)]
-    extra = {}
+    extra = {"cover": cover} if cover and not split_now else {}
     pans = place_pans((style.get("camera") or {}) if took(style, "pace") else {}, duration)
     if pans and not split_now:
         extra["pans"] = pans
@@ -1837,6 +1908,11 @@ def demo():
     # a creator measured as only cutting ("transitions": []) gets hard cuts, not the match/iris default
     sc = [c for c in build({**style, "transitions": []}, words, vm, visuals=tv)["cards"] if c.get("layout") == "scene"]
     assert [(c["transition_in"], c["transition_out"]) for c in sc] == [("cut", "cut")], sc
+    # a hard cut lands on its first frame: no SCENE_LEAD_S, it starts CARD_LEAD_S before its word like a box card;
+    # a scene whose ground grows (match) keeps the lead
+    wn = next(w["start"] for w in words if clean(w["text"]).lower() == "notion")
+    assert sc[0]["start"] == round(wn - CARD_LEAD_S, 3), (sc[0]["start"], wn)
+    assert sl["start"] == round(max(0.0, wn - CARD_LEAD_S - SCENE_LEAD_S * MOTION_K["smooth"]), 3) < sc[0]["start"], sl["start"]
     sp2 = build(style, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=tv[:1])
     assert "layout" not in sp2 and [c["layout"] for c in sp2["cards"]] == ["box", "scene"], sp2["cards"]
     assert build(style, words, vm, visuals=[{"word": "zooms", "kind": "anim", "type": "counter", "opt_in": True, "props": {"to": 3}}])["cards"] == []
@@ -1935,6 +2011,22 @@ def demo():
     moves = sorted([x["start"] for x in z] + [x["end"] for x in z if x["end"] < t])
     assert len(z) >= t / 10 and max(b - a for a, b in zip([0.0] + moves, moves + [t])) <= 5.0 + 1e-6, (t, moves)
     assert place_zooms({}, words, t, []) == []
+    # the sample's punch at 28.05 s, 0.15 s before a flow scene at 28.2 s, snapped: a zoom change in a scene's
+    # entrance goes under the scene (hidden); before a box card it finishes before the card starts; two zooms
+    # closer than a punch's travel join (the out move would be cut short)
+    zp = lambda a, b: {"start": a, "end": b, "scale": 1.18, "kind": "punch", "ease_s": 0}
+    sc = clear_entrances([zp(24.0, 28.5), zp(31.0, 34.0)], [{"start": 28.2, "end": 36.0, "layout": "scene"}])
+    assert [(z["start"], z["end"]) for z in sc] == [(24.0, 34.0)], sc
+    bx = clear_entrances([zp(24.0, 28.5)], [{"start": 28.2, "end": 30.0, "layout": "box"}])
+    assert bx[0]["end"] + PUNCH_S <= 28.2 - ENTER_S[0] + 1e-6, bx
+    assert len(clear_entrances([zp(1.0, 3.0), zp(3.1, 5.0)], [])) == 1
+    with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
+        assert audio_cover(td, words) is None
+        (Path(td) / "cover.png").write_bytes(b"")
+        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}))
+        cv = audio_cover(td, words)
+        assert cv["src"] == "cover.png" and cv["push"] > 1 and cv["pulses"] and cv["pulses"][0] >= 0.5, cv
+        assert all(b - a >= 1 for a, b in zip(cv["pulses"], cv["pulses"][1:])), cv["pulses"]
     # a creator's sparse zooms (no max_hold_s) leave 12 s still; inside a stretch with no card (quiet) the frame
     # changes at least every QUIET_HOLD_S, and outside it her rhythm is untouched
     sparse = {"per_min": 2, "kind": "punch", "on": "sentence_start"}
@@ -2031,7 +2123,8 @@ def main():
         print(f"note: {sp} {'is empty' if style == {} else 'not found'}; planning with the default style. To keep it "
               f"with the edit: python3 {Path(profile.__file__)} style {edit_dir}", file=sys.stderr)
         style = profile.default_style(prof)
-    style = taste.merge(style, taste.load_json())
+    style = profile.fill_transitions(taste.merge(style, taste.load_json()),
+                                     lambda m: print(f"note: {m}", file=sys.stderr))
     plan = build(style, json.loads(Path(a.words).read_text()),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
@@ -2050,6 +2143,12 @@ def main():
               "under the voice; sfx.py music lays one at that level (the style-edit Sound step)", file=sys.stderr)
     from preview import apply_overrides   # edits/<name>/overrides.json, written by the preview page
     plan = apply_overrides(plan, edit_dir, out.name)
+    import matte   # a re-plan keeps the speaker's cutout wherever matte.py already cut every frame it needs
+    if matte.behind_ranges(plan):
+        plan["cutouts"] = matte.kept(plan, edit_dir)
+        if len(plan["cutouts"]) < len(matte.behind_ranges(plan)):
+            print(f"behind cards: run matte.py {edit_dir}" + (f" --plan {out.name}" if out.name != "plan.json" else "")
+                  + " (it cuts only the frames not cut yet)", file=sys.stderr)
     out.write_text(json.dumps(plan, indent=1))
     from ai_tells import check_plan as ai_tells, for_brand   # the AI-made look (references/ai-tells.md)
     for f in for_brand(ai_tells(plan, visuals), prof.get("brand")):

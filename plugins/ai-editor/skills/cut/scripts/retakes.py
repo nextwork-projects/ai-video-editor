@@ -578,8 +578,28 @@ def fix(d, pairs):
                 s = swap(t["text"], old, new)
                 if s != t["text"]:
                     t["text"], n = s, n + 1
+        if name == "captions.json" and not isinstance(data, dict):
+            data = one_word_each(data)
         f.write_text(json.dumps(data, indent=1))
     return n
+
+
+def one_word_each(toks):
+    """A token holding several words ("use." corrected to "are using.") becomes one token per word, the
+    original's time shared by letter count, so a caption never renders it as one word ("areusing")."""
+    out = []
+    for t in toks:
+        parts = t["text"].split()
+        if len(parts) < 2:
+            out.append(t)
+            continue
+        a, span, n = t["start"], t["end"] - t["start"], sum(map(len, parts))
+        for p in parts:
+            b = a + span * len(p) / n
+            out.append({**t, "text": p, "start": round(a, 3), "end": round(b, 3)})
+            a = b
+        out[-1]["end"] = t["end"]
+    return out
 
 
 def caption_words(heard, cut, names=(), fixes=None):
@@ -609,7 +629,7 @@ def caption_words(heard, cut, names=(), fixes=None):
         if core.lower() in spell:
             w["text"] = w["text"].replace(core, spell[core.lower()], 1)
     changed = [(a, w["text"]) for a, w in zip(was, hw) if a != w["text"]]
-    return [w for w in hw if w["text"].strip()], changed
+    return one_word_each([w for w in hw if w["text"].strip()]), changed
 
 
 def captions(d):

@@ -38,7 +38,7 @@ the lock's `--python-version` floor or `requirements.in` needs a look before use
 ## Version tags
 
 Dependency ranges such as ai-editor's `creator-teardown ^2.0.0` resolve against git tags named
-`<plugin>--v<version>`. No such tag exists yet. After the release commit is merged, from a clean
+`<plugin>--v<version>` (first pushed: `ai-editor--v2.0.0`, `creator-teardown--v2.3.0`). After the release commit is merged, from a clean
 checkout of `main`:
 
 ```bash

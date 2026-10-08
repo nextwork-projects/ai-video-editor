@@ -150,7 +150,30 @@ def test_scribe_network_error_is_a_message():
         T.urllib.request.urlopen = old
 
 
+def test_recheck_prints_one_line():
+    """Re-transcribed stretches end in one plain line, not one line per word with its timings."""
+    import contextlib
+    import io
+    import build_timeline as B
+    import transcribe as T
+    words = [{"text": "one", "start": 1.0, "end": 2.0, "type": "word"}, {"text": "AI", "start": 3.0, "end": 4.5, "type": "word"}]
+    saved = B.window_rms_db, B.derive_noise_db, B.unheard
+    B.window_rms_db, B.derive_noise_db = (lambda wav: []), (lambda lvl: (-40.0, {}))
+    B.unheard = lambda toks, lvl, noise: [(0, 1.0), (1, 1.2)]
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            got = T.recheck("a.wav", words, lambda a, b: [{"text": "not", "start": a, "end": a + 0.3, "type": "word"},
+                                                         {"text": "a", "start": a + 0.4, "end": b, "type": "word"}] if a == 1.0 else [])
+    finally:
+        B.window_rms_db, B.derive_noise_db, B.unheard = saved
+    lines = out.getvalue().splitlines()
+    assert lines == ["2 place(s) where one word held more speech: 1 heard again, 1 marked in transcript.txt"], lines
+    assert [w["text"] for w in got if w["type"] == "word"] == ["not", "a", "AI"], got
+
+
 if __name__ == "__main__":
+    test_recheck_prints_one_line()
     test_window_property()
     test_real_renders()
     test_music_bed()

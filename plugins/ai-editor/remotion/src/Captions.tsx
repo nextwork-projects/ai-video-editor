@@ -46,11 +46,11 @@ export type CaptionStyle = {
 };
 
 export const useFamily = (name: string | undefined, weight: number) => {
-  const [family, setFamily] = useState<string | null>(name ? null : "system-ui, sans-serif");
+  const [family, setFamily] = useState<string | null>(null);
   const [handle] = useState(() => delayRender(`font ${name}`));
   // the stressed word draws one weight heavier (CaptionLine), so that weight loads too
   useEffect(() => {
-    (name ? loadFamily(name, [weight, Math.min(900, weight + 100)]) : Promise.resolve("system-ui, sans-serif"))
+    loadFamily(name, [weight, Math.min(900, weight + 100)])
       .then(async (f) => { await document.fonts.ready; setFamily(f); })
       .finally(() => continueRender(handle));
   }, [name, weight, handle]);

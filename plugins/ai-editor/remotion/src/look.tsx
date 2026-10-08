@@ -97,12 +97,16 @@ export const shadowOf = (look: Look, u: number) =>
       : "none";
 
 // ---------- fonts ----------
+// No font named, or one Google Fonts does not have: Inter. system-ui is SF Pro on a Mac and another
+// font on the Linux render machines, so the stills and a cloud render would differ.
+const FALLBACK = "Inter";
 const cache = new Map<string, Promise<string>>();
-export const loadFamily = (name: string, weights: number[]): Promise<string> => {
+export const loadFamily = (name: string | undefined, weights: number[]): Promise<string> => {
   const key = `${name}:${weights.join(",")}`;
   if (!cache.has(key)) {
-    const entry = getAvailableFonts().find((f) => f.fontFamily === name);
-    cache.set(key, !entry ? Promise.resolve("system-ui, sans-serif") : entry.load().then(async (font) => {
+    const fonts = getAvailableFonts();
+    const entry = fonts.find((f) => f.fontFamily === name) ?? fonts.find((f) => f.fontFamily === FALLBACK)!;
+    cache.set(key, entry.load().then(async (font) => {
       const have = Object.keys(font.getInfo().fonts.normal ?? {}).map(Number);
       const near = (w: number) => (have.length ? have.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a)) : w);
       const loaded = font.loadFont("normal", { weights: [...new Set(weights.map((w) => String(near(w))))], subsets: ["latin"] });

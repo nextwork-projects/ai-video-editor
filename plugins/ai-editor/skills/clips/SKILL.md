@@ -18,6 +18,7 @@ One long video in. The best few short clips out, each a finished vertical edit i
 ```
 clips/<name>/
   source.mp4          the long video (a symlink for a local file; never modify the original)
+  source.mp3, cover.jpg  instead, for an audio-only podcast: its audio and the show's artwork
   words.raw.json      one transcript of the whole thing (never read it)
   candidates.json     every candidate with its features and Jev answers (never read it)
   shortlist.md        the top 8 that do not overlap, about 1,500 tokens: the only file you read
@@ -67,13 +68,16 @@ It uses the venv's yt-dlp (setup installs it there, not on the PATH), caps the d
 1080x1920 clip needs no 4K; a 20-minute talk at 4K is several GB) and prints the file path:
 `clips/<name>/source.mp4`. Exit 3: the site wants a login (YouTube's "confirm you're not a bot").
 Ask in the question box before re-running with `--cookies-from-browser chrome` (or their browser).
+A podcast (RSS feed or Apple Podcasts show link): `route` lists its newest episodes as `ask` options; ask
+which one in the question box (newest first), then `fetch "<option url>" clips/<option name> --direct --cover "<option image>"`:
+the audio lands as `source.mp3` (or its own extension) and the show's artwork as `cover.jpg`.
 Only download what the user has the right to reuse: their own video, or one
 they have permission for. Say so once if the link is someone else's.
 
 ## 2. Transcribe once
 
 ```bash
-$PY "$C/transcribe.py" clips/<name>/source.mp4 clips/<name>/words.raw.json
+$PY "$C/transcribe.py" clips/<name>/source.mp4 clips/<name>/words.raw.json   # the file fetch printed: source.mp3 for audio
 ```
 
 Say the time first: Whisper takes 1-4 minutes per 3 minutes of video on a laptop (free), Scribe
@@ -124,7 +128,12 @@ python3 "$K" trim clips/<name> c12 c40 c7          # -> edits/<name>-clip1, -cli
 ```
 
 Each edit folder gets `source.mp4` (frame-accurate, padded without catching the next word) and
-`words.raw.json` re-timed to it. Before the clips run, ask the music question once for all of them
+`words.raw.json` re-timed to it. An audio-only source (`source.mp3`) has no picture: trim makes each
+clip's `source.mp4` its audio over the podcast's own cover (the cover blurred and dimmed to fill 1080x1920,
+the sharp cover above the captions; no artwork: black), and `clip.json` says `audio_only`. With a cover, the
+render moves it: a slow push on the cover, the ground drifting against it, a small punch on each sentence start. For those,
+don't ask a layout: overlay, reframe no, no cutout, captions on (`profile.py style` keeps them on). Say once
+that each clip is the audio over the show's cover with the speaker's words as captions. Before the clips run, ask the music question once for all of them
 (style-edit `references/plan.md` "Music"; skip it when the profile says `sound.music: false`).
 
 **All clips at once** (Claude Code, or any agent with subagents): launch one `clip-editor` agent

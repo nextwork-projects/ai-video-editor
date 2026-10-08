@@ -193,6 +193,13 @@ export const punch = (tl: gsap.core.Timeline, el: Element | undefined, at: Pos, 
   tl.to(el, { scale: 1, duration: 0.45, ease: "elastic.out(1, 0.5)" }, ">");
 };
 
+/** `punch` as a per-frame scale, for values React computes: the latest hit in `ats` (seconds) at time t. */
+export const punchAt = (t: number, ats: number[], k = 1.025) => {
+  const d = t - Math.max(-1e9, ...ats.filter((a) => a <= t));
+  if (d < 0.1) return 1 + (k - 1) * ease("power2.out")(d / 0.1);
+  return d < 0.55 ? 1 + (k - 1) * (1 - ease("elastic.out(1, 0.5)")((d - 0.1) / 0.45)) : 1;
+};
+
 /** Out upward, faster than the entrance, on the personality's .in ease, blurring as it goes. */
 export const exitUp = (tl: gsap.core.Timeline, el: Element | undefined, m: Motion, dur: number, px: number) => {
   if (!el || dur <= m.out * 2) return;

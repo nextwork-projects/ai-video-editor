@@ -4,6 +4,220 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.1.0, creator-teardown 2.4.0 (2026-10-08)
+
+- Setup times are now measured, not guessed. Six clean GitHub runs of the e2e job (2026-10-08) took
+  25-36 s to install from zero on Linux, 33-49 s on a Mac, 66-75 s on Windows (packages 11-33 s,
+  renderer with Chrome 8-33 s), with the tiny test model. README and the setup skill quote these.
+  `tests/fresh_install.py` ends with a table of each step's time, also in the job summary on CI.
+  Test: `fresh_install.py demo` (in demos.sh).
+
+- A beginner who left the names question blank got no logos or captures: `route.py beats` marked only the
+  profile's `names`. It now also marks any word written with a capital inside a sentence and says which ones
+  are not in the profile. The sample take's beats list Jev, Claude, Haiku, Opus and Fable. Test: `route.py demo`.
+
+- Output a new user could not read. face.py and `check.py render` no longer print OpenCV's "Targets are not
+  supported by the new graph engine" WARN (its log is set to errors where the detector is made).
+  `check.py render` no longer prints seven ffmpeg "Broken pipe" lines after its summary (a frame reader that
+  stops early stops ffmpeg first). The flow scene tweened a veil it never draws on a scene's ground: 15 "GSAP
+  target undefined not found" lines on the sample's stills, now 0. Setup keeps npm's "added 369 packages" and
+  "Has browser at ..." back unless the step fails, and a model download names the file, not its pinned URL.
+  `transcribe.py` prints one line for its re-heard words, `profile.py style` says "the default style (smooth
+  zooms about every 6 s, 3-word captions)", and the sound kit prints one line, "4-5 dB under your voice".
+  Tests: `face.py demo`, `check.py demo`, `setup.py demo`, `models.py`, `test_media.py`, `sfx.py demo` (now in
+  demos.sh), smoke.py (stills fail on any GSAP target warning).
+
+- `verify_cut.py` SURVIVED lines gave no time, so a doubled "and, and" went on into captions. Each line now
+  prints its cut time, its source time and the spans.json entry to add (`after` set). Test: `verify_cut.py
+  demo` (in demos.sh).
+
+- Intake wording disagreed with itself. One id list everywhere: `audience` and `names` per video (the
+  audience answer also saves `goal`), the style questions in three calls that start, setup step 8 and
+  intake.md share. With no creator the caption option reads "clean, 3 words at a time". `profile.py set`
+  given a bare `key value` among `key=value` pairs names the argument that is wrong. Test: `profile.py demo`.
+
+- Render estimates. The laptop benchmark times Chrome's start-up apart from the frames (it was folded into
+  the per-frame speed); on the 44.9 s sample cut the estimate was within 25% of the render in 3 of 4 tries.
+  The GitHub Actions and Lambda lines say "Not set up yet" the way Modal's does. README and cloud.md carry
+  one set of numbers, each named by what was rendered: the 44.9 s cut on Modal 2.7 min on 3 machines, about
+  $0.03; the uncut 3.4-minute take $0.18-0.19 on the bill; $0.06 for 60 s and $0.54 for 10 min (estimates).
+  Test: `edit.py demo`.
+
+- Stale docs. motion.md and contracts.md: a hard-cut scene starts `CARD_LEAD_S` before its word.
+  teardown-page.md: slow-drifting footage goes to `drift_dets`, with what it misses. plan.md: how the matte
+  `--modal` cost is worked out. render-watcher covers Modal. contracts.md: `flow` is a full-frame scene on
+  vertical and a box on wide, as plan.py does it.
+
+- Link routing. A Drive link carries its share how-to only for a failed download, and its edit folder is
+  named after the file. Podcast analytics redirects (podtrac, chartable, podsights, op3 and others) are
+  stripped to the host's own file. An Instagram reel yt-dlp cannot open comes back with a note saying so.
+  Test: `links.py demo`.
+
+- style-edit shapes.md opens with a whole two-beat visuals.json, so the file's shape (one JSON array of
+  beats) is shown before the per-pick table.
+
+- A vertical capture too small to read became a sticker of the page's own headline, which the speaker never
+  said, with its tight lines touching. plan.py now cuts a capture to a sticker only around words marked on
+  the page (`find` or `highlight`). With none marked, or marked words set tighter than the captions' line
+  height (1.14), it drops the card and says why and what to add (a sticker beat with a `find`, which
+  capture.mjs re-sets with open lines). The message for a cut says plan.py did it. Test: `check.py demo`
+  (the sample's two unmarked captures drop; the marked headline set 150 px apart on 212 px lines drops; an
+  open line becomes a sticker).
+
+- The default render WARNed a one-frame zoom snap and a jittering logo, with fixes the model could not act
+  on ("render with the current StyleEdit.tsx"). plan.py moves a zoom change out of a card's entrance so the
+  punch finishes before the card starts, or, for a full-frame scene, to the scene's middle where it is
+  hidden; two zooms closer than a punch's 0.16 s travel join into one. `quality.py` skips zoom moves under a
+  scene, reads one just before a scene only up to its start, and now catches a zoom that drops out and
+  straight back in one frame. Its jitter check needs 2+ frames of movement each side of a turn, so a thin
+  logo edge flickering through a fade no longer counts. The logo sting lost its ring, which popped in on one
+  frame. Zoom, jitter and cover WARNs now name a style.json, visuals.json or plan.json change. The sample's
+  default render: 0 FAIL, only the loudness WARN. Tests: `plan.py demo` (the 28.05 s punch before a scene),
+  `quality.py demo` (the out-and-back snap; the logo's one-frame flicker).
+
+- Someone else's short video recommended editing it as your own. A public TikTok or YouTube Short pasted
+  without `--own` now asks with **Copy this creator's style** first; **Edit it as my video** is second.
+  Every `ask` item from `links.py route` carries its `question`, which start/SKILL.md says word for word.
+  Test: `links.py demo` (a 136 s TikTok and a 39 s Short put `creator` first; every ask has a question).
+
+- "Finish setup" after the one-command install found nothing to finish. `setup.py todo` now lists every
+  optional step not done yet (the three keys, the style questions, Modal, the matte), from the same checks
+  doctor reads, whether or not it was saved for later. `setup.py later <step>` refuses an unknown step with
+  exit 2 and the list of steps. setup/SKILL.md no longer asks for times doctor does not print. Test:
+  `setup.py demo`.
+
+- Audio-only podcast clips held still: only the captions moved, and `check.py render` WARNed "nothing moves"
+  for the whole clip. The renderer now draws the cover itself (plan `cover`, from `clip.json`): a slow push
+  on the sharp cover to 1.12x and the blurred ground easing back from 1.06x and drifting down, both on one
+  `sine.inOut` over the clip in log space, plus a 1.02x `punch` on each sentence start (motion.ts
+  `punchAt`). No zooms on those clips. The cover is 640 px at y 320 so the push stays inside the 9:16 safe
+  frame. `quality.py` counts the cover as moving where its edge travels 0.5 px/s or more, and measures the
+  push on the render (WARN when under half the plan). Tests: `tests/smoke.py` renders a 16 s audio clip and
+  fails on a "nothing moves" WARN (it did before this change); `plan.py`, `quality.py`, `clips.py` demos.
+  Live on a public feed episode, a 25 s clip: render 35 s, check render 0 FAIL 0 WARN, push planned 0.113,
+  measured 0.113 log-scale.
+
+- An audio-only podcast stopped at clips: a feed or Spotify episode downloads `source.mp3`, and
+  `clips.py` looked only for `source.mp4/mov/mkv/webm`. One `source()` lookup now finds video or audio
+  (mp3, m4a, aac, wav, ogg, flac, opus) for candidates, page and trim; `link` keeps an audio file's
+  extension. `links.py` reads each episode's artwork from the feed (the episode's itunes:image, else the
+  show's) into the episode options, and `fetch --direct --cover <image>` (or a Spotify link) saves it as
+  `cover.jpg` next to the audio. `trim` makes each audio clip a 1080x1920 video: the cover blurred and
+  dimmed to 30% fills the frame, the sharp cover sits above the captions (no artwork: the file's
+  embedded art, else black); `clip.json` says `audio_only` and `profile.py style` keeps captions on for
+  it. The picks page plays audio previews. Tests: `clips.py demo`, `links.py demo`, `profile.py demo`,
+  and `tests/smoke.py` renders a synthetic audio clip through the real renderer with `check.py render`
+  0 FAIL. Live on a public 4-minute news feed episode: episode list 0.2 s, download with cover 1.5 s,
+  Whisper 32 s, candidates 0.4 s, picks page 1.5 s, trim 5 s, render 14 s, check render 0 FAIL.
+
+- A podcast feed link (RSS or Atom, 442 episodes) went straight to clips with no episode picked, and
+  yt-dlp `--no-playlist` was still walking the feed after 5 minutes. `links.py route` now reads the feed
+  itself (stdlib, 15 s timeout, 32 MB cap; an Apple Podcasts show page through the iTunes lookup API)
+  and returns an `ask` with the newest 10 episodes (title, date, length, audio url), the newest 3 as
+  options, newest first. `fetch --direct` downloads only the picked file, no yt-dlp; a feed passed to
+  `fetch` says to pick an episode. Every yt-dlp call on a link that can be a playlist (`probe`, `fetch`,
+  product-video's music step) adds `--playlist-items 1` and a hard timeout (60 s to read, 30 min to
+  download) that ends in a sentence saying what to paste instead. clips/SKILL.md says what a podcast
+  link does. Measured on one public feed: episode list in 0.65 s, download started 1.7 s later.
+
+- `check.py render` FAILed a behind card the cutout already covers ("drawn over the face ... up to 41%
+  of the head", fix: face.py, plan again, which loops). It looked the matte up by its 4-a-second
+  sample number instead of the plan's frame, so no matte was found, and ffmpeg's fps filter handed
+  it the render 0.1 s off the footage it compared with (mid zoom-out at 3.5 s). It now samples exact
+  frames and reads the matte the render drew at that frame; a behind card counts as on the face only
+  where it shows on the speaker's solid matte. A behind card with no matte there says to run matte.py.
+  On the sample take: 3 face FAILs -> none. Test: `check.py demo`.
+- A re-plan dropped the cutouts, and matte.py re-cut a whole range when a card moved (195 frames,
+  49.5 s, for 30 new ones). Matte frames are now named by their frame of the cut, in one folder per
+  cut and output size, and only frames not cut yet are cut; plan.py keeps every cutout whose frames
+  are all there. On the sample take, a re-plan with the same ranges needs no matte run, and one that
+  moves a card cuts 30 frames in 10 s; the cutout folder is 179 MB, was 278 MB. matte.py `--estimate`
+  prints the frames, time and cost and stops. style-edit step 4 runs matte after music's re-plan and
+  says to run it after any later plan. `check.py plan` and plan.py print the real edit path (was a
+  literal `edits/<name>`). Plans made before this need plan.py and matte.py again before a render.
+  Tests: `matte.py demo`, `check.py demo`.
+
+- A caption correction into several words ("use." heard, the cut says "are using.") was one token,
+  which plan.py's word cleaning glued into "areusing" on stills and the render, and `check.py render`
+  flagged as a LOOK. `retakes.py caption_words` and `retakes.py fix` on captions.json now write one
+  token per word, the original word's time shared by letter count. Clip edits run the same captions
+  step. Test: `test_retakes.py` (one heard word corrected into two gives two non-overlapping tokens).
+- A scene cut in hard (`cut`) started SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a
+  transition that grows, so the picture changed up to 0.4 s early. It now starts where a box card
+  does, CARD_LEAD_S before its word; match, iris and the other growing transitions keep the lead.
+  `quality.py` counts a cut scene as landed on its first frame. Tests: `plan.py demo`, `quality.py demo`.
+- Teardowns made before `"transitions"` was written left the key out, so a creator who only cuts
+  still got match / iris. `profile.fill_transitions` (run by plan.py on load) now derives them from the
+  style's measured `pace.cut_kinds`, the same rule as visual.py; a style with no cut kinds keeps the
+  default and plan.py says re-running the teardown gets the creator's transitions. Test: `profile.py demo`.
+
+- The code kind guess called white one- and two-line titles over photos "photo" or "UI recording".
+  `text_fill` is now the share of the box all its OCR lines cover (it was the biggest line), and one
+  to three lines covering half the box or more is a text card before the moving test (the picture
+  between the letters can move). On the hand-labelled titles of two public slow-drift videos: 6/16
+  -> 16/16 and 2/4 -> 4/4 text card (the documentary with look.py's caption marks cleared; with
+  them, 2/16 both ways, see Next). Test: `graphics.py demo` (a two-line title over a moving photo).
+- `laid_on` dropped titles that arrive and leave on cuts. A drift track is now also kept when it
+  starts or ends on a cut (from visual.json or a frame-wide jump) with one to three OCR lines
+  inside, or when a hard cut inside its run changes the picture between its letters but not the
+  letters. Test: `graphics.py demo` (generated stills, a title held across a cut with no OCR, a
+  title from one cut to the next with OCR). Measured: documentary precision / recall 0.00 / 0.00
+  before and after; generated stills 0.00 / 0.00 -> 0.05 / 0.25 (the title that lands on a cut is
+  found). What still misses them is in Next.
+
+- Modal renders took 5.2 min on the 3.4-minute sample take where the estimate said 2.9 min. Measured
+  causes: the upload sent the bundle as ~3,700 small files, one request each (44 s, 40 s even when
+  nothing had changed); one container in each render ran its piece 2-10x slower than the rest (213 s
+  against a 107 s average; another time 368 s against 16-61 s); the pieces downloaded one after
+  another after the last finished (39 s). Containers started 4-18 s after submit, not 225 s: that
+  figure had the download and join counted as start-up.
+- Fixes: the code goes up as one tar with fixed file times, so Modal skips it by hash when unchanged
+  (upload 44 s -> 22 s new, 3-4 s repeat). Each container takes three pieces from a shared queue, and
+  once the queue is empty a piece still running at twice the median gets a second copy on another
+  container; the first to finish counts. Pieces download as they finish. Containers: as many as keep
+  the 23 s billed boot under 20% of each one's bill (17 for the sample take).
+- The estimate now adds upload, start, the work over the containers times a straggle factor, and the
+  tail (last download and the join), each measured on the last render and saved to `modal.json`;
+  before the first render, the sample take's (`edit.py` `MODAL_MEASURED`). Sample take after: 184 s
+  (estimate 3.1 min) and 257 s on a laptop at load average 131 (122 s of the join under that load),
+  $0.18-0.19 on the bill as before. Tests: `edit.py demo` (container count, pieces, the estimate
+  from given speeds), `modal_render.py demo` (the tar is identical across file times, the measured
+  speeds, a stuck piece replaced and cancelled).
+
+- Modal render tested live on the 3.4-minute sample take (6,167 frames). It failed on every container:
+  render.mjs asked for one tab per core Node reports, and Remotion caps at `nproc` (4 on a Modal
+  container). render.mjs now takes Remotion's own ceiling. Test: `modal_render.py demo <bundle> <plan>
+  <out>` with a fake `nproc` of 4.
+- A failed Modal render left the job's folder on the Volume: a container still running wrote it back
+  after the delete. The delete now waits until the app has stopped. Test: the same demo.
+- Modal billed each container 60 s idle after its piece. `scaledown_window=2` cuts that.
+- The printed Modal cost was 28% under the bill ($0.131 against $0.181). Chrome uses about 4.6 of the
+  4 cores requested and each container is billed about 23 s past its piece; the cost now counts both.
+  First-render guesses moved to the measured 0.29 s a frame and 70 s of start-up. Test: `edit.py demo`.
+- Captions with no font named rendered in system-ui: SF Pro on a Mac, another font on Modal, GitHub
+  Actions and Lambda, so the render did not match the approved stills. They now load Inter, as does any
+  font Google Fonts does not have. Test: `tests/check_plugins.py`.
+- Measured: image build about 2 min once (NodeSource's signed apt source works), render 6.5 min,
+  $0.18 on the bill, `check.py render` 0 FAIL, the Volume empty afterwards.
+
+- Teardown graphics found nothing over footage that only drifts (slow pushes on stills, dissolves
+  between them). New in overlay mode: `drift_dets` keeps hard edges that hold exactly still for
+  +-1 s while the picture's other edges move, and drops a box whose surround holds still too (the
+  fixed point of a push). A drift track is grown on its own lettering (`grow_drift`), snapped to the
+  OCR lines it holds (`to_text`), and kept only when its box changes at its entrance or exit while
+  the rest of the frame does not (`laid_on`). Samples in a dissolve or on a cut find nothing.
+  Faces that turn up all over the frame (portraits in a documentary) no longer count as a speaker,
+  so such a video gets overlay mode. Test: `graphics.py demo` (a title over a slow push, a hard cut
+  with nothing on it).
+- look.py marked held titles as captions when there was no transcript: OCR misreads of a held line
+  restarted its run, so the 4 s limit never fired, and the caption band then hid the titles from
+  graphics.py. A line now carries on a nearly identical one from the sample before. Test:
+  `look.py demo`.
+- Re-scored on one public documentary (colourised stills, slow pushes, dissolves, 8 hand-labelled
+  one- and two-line titles; 90 s): precision 0.00 / recall 0.00 before, 1.00 / 1.00 after. OCR read a
+  line inside every title; 3 of 8 were marked captions before (and set the caption band), 0 after.
+  The code kind guess still calls most of these titles "photo".
+
 ## ai-editor 2.0.0, creator-teardown 2.3.0 (2026-10-07)
 
 - Teardown graphics in overlay mode (moving footage, no steady speaker) had no entrance or exit.

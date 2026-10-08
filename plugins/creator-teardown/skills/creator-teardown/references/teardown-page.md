@@ -43,7 +43,9 @@ in it or a hard rectangular edge, and up for under 60% of the video. Fixture (`g
 panning 3-shot clip with a card, an app tile, a screenshot, a still sky and a moving ball): precision
 and recall 0.00 / 0.00 in plate mode, 1.00 / 1.00 in overlay mode. Entrances and exits there track
 the graphic's settled picture (position: slide, size: scale, how much shows: cut or fade) and fit the
-same eases. Ceiling: footage that barely moves (slow-drifting stills) gives no detections.
+same eases. Footage that only drifts (a slow push on a still) goes to `drift_dets`: lettering held still for
++-1 s while the picture moves. Ceiling: titles up for under 2 s, and thin lettering with no ground over a busy
+picture, are missed.
 
 **Kinds.** Code guesses first (moving: b-roll or a UI recording; small, near-square, 8 colours or
 fewer, a line of text at most, none running out of it and none filling half the box: a logo; 4+ OCR lines: a screenshot; text

@@ -19,7 +19,7 @@ import { Anim, AnimCard } from "./Anims";
 import { Captions, CaptionStyle, Chunk } from "./Captions";
 import { Capture, Mark } from "./Capture";
 import { Look, Texture, resolveLook, useFonts } from "./look";
-import { Motion, ease, pickMotion, prog } from "./motion";
+import { Motion, ease, pickMotion, prog, punchAt } from "./motion";
 import { Sfx } from "./Sfx";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
 import { groundCovers } from "./ground";
@@ -53,7 +53,7 @@ export type Card = {
   key?: [number, number, number, number]; // behind: the region plan.py keeps clear of the head, % of the frame
 };
 // The speaker cut out of the cut (matte.py): a folder of RGBA PNGs (000000.png = frame `from`), frames from..to of the cut.
-type Cutout = { src: string; from: number; to: number };
+type Cutout = { src: string; from: number; to: number }; // src/<frame of the cut>.png, frames from..to (matte.py)
 // "split": the visual in a top panel on `ground`, the speaker in a window under the seam. Percent of the frame.
 type Layout = {
   mode: "overlay" | "split";
@@ -77,6 +77,32 @@ export type Plan = {
   motion?: string | { personality?: string }; // snappy | smooth | punchy | calm
   cutouts?: Cutout[];
   pans?: Pan[];
+  cover?: Cover;
+};
+// An audio-only clip (clips.py trim): the show's cover over a blurred, dimmed copy of itself. box: % of the frame.
+// push: the cover's scale at the end; ground_push: the ground's scale at the start (it eases back to 1 as the
+// cover grows); pulses: sentence starts, each a small punch.
+export type Cover = { src: string; box: [number, number, number, number]; push: number; ground_push: number;
+  pulse: number; pulses: number[] };
+
+/** Cover and ground move together on one sine.inOut over the whole clip, in log space, so neither stops
+ *  until the clip ends. */
+const CoverView: React.FC<{ c: Cover; t: number; dur: number; m: Motion; width: number; height: number }> = ({ c, t, dur, m, width, height }) => {
+  const p = prog(t, 0, dur, "sine.inOut");
+  const [x, y, w, h] = c.box;
+  const u = Math.min(width, height) / 100;
+  const img = staticFile(c.src);
+  return (
+    <AbsoluteFill style={{ backgroundColor: "#000", overflow: "hidden" }}>
+      <AbsoluteFill style={{ transform: `translateY(${m.drift * u * p}px) scale(${1.1 * Math.pow(c.ground_push, 1 - p)})` }}>
+        <Img src={img} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(40px) brightness(0.3)" }} />
+      </AbsoluteFill>
+      <div style={{ position: "absolute", left: (x / 100) * width, top: (y / 100) * height, width: (w / 100) * width,
+        height: (h / 100) * height, transform: `scale(${Math.pow(c.push, p) * punchAt(t, c.pulses, c.pulse)})` }}>
+        <Img src={img} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+      </div>
+    </AbsoluteFill>
+  );
 };
 
 export const calculateMetadata: CalculateMetadataFunction<Plan> = ({ props }) => ({
@@ -277,7 +303,7 @@ const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: n
   return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, flat: true };
 };
 
-export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans }) => {
+export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const t = frame / fps;
@@ -307,13 +333,14 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         <AbsoluteFill style={cam}>
           {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </AbsoluteFill>
+        {cover ? <CoverView c={cover} t={t} dur={durationInFrames / fps} m={m} width={width} height={height} /> : null}
         {behindViews}
         {/* the speaker over the behind cards, on the footage's own move, only while one is up */}
         {(cutouts ?? []).filter((c) => frame >= c.from && frame <= c.to).map((c) => (
           // fades in over the handle before the card (its refined edge differs a little from the raw camera)
           <AbsoluteFill key={c.src} style={{ ...cam, opacity: Math.min(1, c.from === 0 ? 1 : (frame - c.from + 1) / (CUT_FADE_S * fps),
             c.to >= durationInFrames - 1 ? 1 : (c.to - frame + 1) / (CUT_FADE_S * fps)) }}>
-            <Img src={staticFile(`${c.src}/${String(frame - c.from).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </AbsoluteFill>
         ))}
         {cardViews}

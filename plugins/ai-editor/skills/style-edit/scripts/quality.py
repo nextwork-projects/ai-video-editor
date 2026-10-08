@@ -24,10 +24,13 @@ On the frame each card has settled (the same moment as its still):
 On each zoom move (frames round its start and end, the face band, ORB + a similarity fit frame to frame):
   zoom snap   one frame carries most of the change (an instant step, not a move)
   zoom jerk   the zoom's speed reverses or surges again mid-move (a smooth move rises and falls once)
+An audio clip's cover (plan "cover"): moving where its planned push carries its edge COVER_MIN_PX_S or more,
+and through each sentence's punch; its push measured on the render from the first frame to the last.
 On the audio: integrated loudness and true peak (ffmpeg ebur128), and every sound cue's level
 against the voice (render minus cut, sample-aligned). On the files: a render older than its inputs.
 """
 import json
+import math
 import re
 import subprocess
 import sys
@@ -66,6 +69,8 @@ ZOOM_MIN_LOG = 0.03    # a zoom changing log-scale less than this (3%) is too sm
 SNAP_SHARE = 0.6       # one frame carrying this share of a zoom's change is a snap. A 0.16 s power2.out punch
                        # puts 39% in its first frame at 30 fps; an instant punch puts 100%
 JERK_SHARE = 0.3       # a second speed peak (or a reversal) over this share of the first: the move surges
+COVER_MIN_PX_S = 0.5   # an audio clip's cover: its edge travelling this many output px a second is moving
+                       # (about one px every two seconds; slower reads as a still picture)
 DARK_V, DARK_SHARE = 0.2, 0.45          # near-black panel: value under 0.2, low colour, 45%+ of the card
 NEON_S, NEON_V, NEON_SHARE = 0.4, 0.75, 0.003   # bright saturated pixels, 0.3%+ of the card
 NEON_HUES = (90, 330)  # degrees: green-cyan-blue-violet-magenta, the glow hues; not print reds/yellows
@@ -151,21 +156,28 @@ def spikes(d, skip=()):
 
 
 def jitter(series):
-    """Turns in a position series taken at speed on both sides: [(index, min(in, out) / peak)]."""
+    """Turns in a position series taken at speed on both sides: [(index, min(in, out) / peak)]. Each side must
+    move for 2+ frames: an edge that steps out for one frame and back is the ink threshold flickering on a
+    fading or thin-edged card (a logo's rays), not the card turning back."""
     import numpy as np
     d = np.diff(np.asarray(series, float))
     peak = float(np.abs(d).max()) if len(d) else 0.0
     if peak < REV_MIN_PX:
         return []
-    out, last = [], None          # last = (sign, speed) of the last non-zero step
+    runs = []                     # [sign, steps, speed of its first step, speed of its last step, index of its first]
     for i, v in enumerate(d):
         if v == 0:
             continue
-        if last and np.sign(v) != last[0]:
-            r = min(last[1], abs(v)) / peak
-            if r >= REV_RATIO and min(last[1], abs(v)) >= 1:
-                out.append((i, round(r, 2)))
-        last = (np.sign(v), abs(v))
+        if runs and np.sign(v) == runs[-1][0]:
+            runs[-1][1] += 1
+            runs[-1][3] = abs(v)
+        else:
+            runs.append([np.sign(v), 1, abs(v), abs(v), i])
+    out = []
+    for a, b in zip(runs, runs[1:]):
+        r = min(a[3], b[2]) / peak
+        if a[1] >= 2 and b[1] >= 2 and r >= REV_RATIO and min(a[3], b[2]) >= 1:
+            out.append((b[4], round(r, 2)))
     return out
 
 
@@ -173,13 +185,15 @@ def scene_land(c, words, k, lead=None):
     """(word time, landed time) of a scene card. The word is the trigger word's first time at or after
     the card's own word (plan starts a scene SCENE_LEAD_S x k early, an overlay card OVERLAY_LEAD_S x k
     early: pass that as `lead`, so start + CARD_LEAD_S is not it).
-    A scene counts as landed when its transition is half done: start + 0.31 s x k (Scene.tsx runs 0.62 s x k)."""
+    A scene counts as landed when its transition is half done: start + 0.31 s x k (Scene.tsx runs 0.62 s x k);
+    a hard cut in ("cut") has no lead and is landed on its first frame."""
     from plan import CARD_LEAD_S, SCENE_LEAD_S, clean
-    lead = SCENE_LEAD_S if lead is None else lead
+    cut = c.get("transition_in") == "cut"
+    lead = 0.0 if cut else SCENE_LEAD_S if lead is None else lead
     t, floor = clean(c["trigger_word"]).lower(), c["start"] + CARD_LEAD_S - 0.05
     hit = next((w["start"] for w in words if clean(w["text"]).lower() == t and w["start"] >= floor), None)
     word = hit if hit is not None else c["start"] + CARD_LEAD_S + lead * k
-    return word, c["start"] + 0.31 * k
+    return word, c["start"] + (0 if cut else 0.31 * k)
 
 
 def landing(area, f0, fps):
@@ -572,11 +586,13 @@ def zoom_steps(frames):
     return out
 
 
-def zoom_verdict(steps):
-    """None (smooth, or too small to judge), "snap" or "jerk" for one zoom move's per-frame log-scale steps."""
+def zoom_verdict(steps, planned=0.0):
+    """None (smooth, or too small to judge), "snap" or "jerk" for one zoom move's per-frame log-scale steps.
+    planned: the move's log-scale; a frame jumping most of it while the move nets nothing (out and straight
+    back in) is a snap too."""
     tot = sum(steps)
     if abs(tot) < ZOOM_MIN_LOG:
-        return None
+        return "snap" if planned >= ZOOM_MIN_LOG and steps and max(map(abs, steps)) > SNAP_SHARE * planned else None
     v = [x if tot > 0 else -x for x in steps]       # speed along the move
     peak = max(v)
     if peak > SNAP_SHARE * abs(tot):
@@ -590,22 +606,62 @@ def zoom_verdict(steps):
 
 
 def zoom_moves(video, plan, w=270, h=480):
-    """[(t, kind, steps)] for every zoom move on the render: in at start, back out at end."""
+    """[(t, kind, steps, planned log-scale)] for every zoom move on the render: in at start, back out at end.
+    A move under a full-frame scene is hidden (not judged); one just before a scene is read up to its start."""
     import numpy as np
     fps = plan["fps"]
+    scenes = [(c["start"], c["end"]) for c in plan.get("cards") or [] if c.get("layout") == "scene"]
     out = []
     for z in plan["zooms"]:
         e = max(0.8, z.get("ease_s") or 0) if z.get("kind") == "push" and z.get("ease_s") else 0.16
         for t in (z["start"], z["end"] - (e if z.get("kind") == "push" and z.get("ease_s") else 0)):
-            a, d = max(0.0, t - 0.1), e + 0.25
+            if any(a <= t < b for a, b in scenes):
+                continue
+            a = max(0.0, t - 0.1)
+            d = min([e + 0.25] + [s0 - a for s0, _ in scenes if s0 > t])
             raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", str(video), "-vf",
                                   f"fps={fps},scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
             fr = np.frombuffer(raw, np.uint8)[: len(raw) // (w * h) * w * h].reshape(-1, h, w)
             o = (z.get("origin") or [50, 30])[1] / 100
             band = fr[:, int(max(0, o) * h):int(min(1, o + 0.3) * h)]     # the head down from its top (the origin): not cards, not captions
             if len(band) >= 3:
-                out.append((round(t, 2), z.get("kind", "punch"), zoom_steps(list(band))))
+                out.append((round(t, 2), z.get("kind", "punch"), zoom_steps(list(band)), math.log(z.get("scale") or 1)))
     return out
+
+
+def sine_in_out(p):
+    return (1 - math.cos(math.pi * min(1.0, max(0.0, p)))) / 2
+
+
+def cover_moving(cover, dur, width, fps, nfr):
+    """Frames where an audio clip's cover is moving (StyleEdit.tsx CoverView): its log-space push on one
+    sine.inOut over the clip, and each punch (motion.ts punchAt, 0.55 s)."""
+    import numpy as np
+    half = cover["box"][2] / 100 * width / 2
+    t = np.arange(nfr) / fps
+    rate = math.log(cover["push"]) * math.pi / (2 * dur) * np.sin(np.pi * t / dur)   # d(log scale)/dt
+    out = rate * half >= COVER_MIN_PX_S
+    for a in cover.get("pulses") or []:
+        out[(t >= a) & (t < a + 0.55)] = True
+    return out
+
+
+def cover_push(video, cover, dur, width, height):
+    """(planned, measured) log-scale of the cover from the start to the last frame no punch is moving."""
+    import numpy as np
+    b = dur - 0.1
+    while any(a <= b < a + 0.55 for a in cover.get("pulses") or []):
+        b -= 0.1
+    x, y, w, h = (v / 100 * s for v, s in zip(cover["box"], (width, height, width, height)))
+    k = cover["push"] * cover.get("pulse", 1)
+    x0, y0 = max(0, int(x - w * (k - 1) / 2)), max(0, int(y - h * (k - 1) / 2))
+    x1, y1 = min(width, int(x + w * (1 + (k - 1) / 2))), min(height, int(y + h * (1 + (k - 1) / 2)))
+    grab = []
+    for t in (0.0, b):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", "-vf",
+                              f"crop={x1 - x0}:{y1 - y0}:{x0}:{y0},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+        grab.append(np.frombuffer(raw, np.uint8)[:(x1 - x0) * (y1 - y0)].reshape(y1 - y0, x1 - x0))
+    return math.log(cover["push"]) * sine_in_out(b / dur), zoom_steps(grab)[0]
 
 
 def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
@@ -680,7 +736,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             # edge differs a little from the raw camera), so his pixels read as footage here
             k = any(cards[i].get("layer") == "behind" for i in up) and \
                 next((x for x in plan.get("cutouts") or [] if x["from"] <= n <= x["to"]), None)
-            png = k and edit / k["src"] / f"{n - k['from']:06d}.png"
+            png = k and edit / k["src"] / f"{n:06d}.png"
             if png and png.exists():
                 al = cv2.resize(cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3], (W, H), interpolation=cv2.INTER_AREA)
                 person = cv2.dilate((cv2.warpAffine(al, zm, (W, H)) > 0).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
@@ -742,6 +798,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if z.get("ease_s"):
             for a in (z["start"], z["end"] - z["ease_s"]):
                 moving[int(a * fps):int((a + z["ease_s"]) * fps)] = True
+    if plan.get("cover"):
+        moving |= cover_moving(plan["cover"], dur, plan["width"], fps, nfr)
+        want, got = cover_push(video, plan["cover"], dur, plan["width"], plan["height"])
+        meas["cover_push"] = {"planned": round(want, 4), "measured": round(got, 4)}
+        if want >= ZOOM_MIN_LOG / 3 and got < want / 2:
+            out.append(F("WARN", 0.0, f"the cover's push did not render: {got:.3f} of {want:.3f} log-scale",
+                         "check plan.json cover.src names a file in the edit folder, then render again"))
     pace = (style or {}).get("pace") or {}
     static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
     runs, k0 = [], None
@@ -759,13 +822,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     mins = dur / 60
     landed = []
     meas["zoom_moves"] = []
-    for t, kind, st in zoom_moves(video, plan):
-        v = zoom_verdict(st)
+    for t, kind, st, planned in zoom_moves(video, plan):
+        v = zoom_verdict(st, planned)
         meas["zoom_moves"].append({"t": t, "kind": kind, "verdict": v,
                                    "peak_share": round(max(map(abs, st)) / max(1e-6, abs(sum(st))), 2) if st else None})
         if v:
             out.append(F("WARN", t, f"the {kind} zoom at {t:.2f} s {'snaps in one frame' if v == 'snap' else 'surges or reverses mid-move'}",
-                         "render with the current StyleEdit.tsx (eased punches, pushes of 0.8 s or more); a zoom on a cut hides in the cut"))
+                         "set \"kind\": \"push\" under \"zoom\" in style.json (an eased move of 0.8 s or more), then plan and render again"))
     meas["rhythm"] = {"cuts_per_min": round((len(hard) + len(jump)) / mins, 1),
                       "moves_per_min": round(len(moves) / mins, 1),
                       "zooms_per_min": round(len(plan["zooms"]) / mins, 1)}
@@ -840,7 +903,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             r["jitter"] = max(w for _, w in worst)
             out.append(F("WARN", c["start"], f"{name}'s outline turns back at speed {len(worst)} time(s) "
                          f"(worst {r['jitter']:.0%} of its peak speed both sides of the turn)",
-                         "jitter: ease into turns (spring damping up, or one axis at a time)"))
+                         "give the beat \"entrance\": \"fade\" in visuals.json, then plan and render again"))
 
     if style:
         for nm, got, want in (("cuts", meas["rhythm"]["cuts_per_min"], (pace.get("cuts_per_10s") or 0) * 6),
@@ -1013,6 +1076,17 @@ def demo():
     assert zoom_verdict(zoom_steps([at(1.2 ** out2(min(1, i / 5))) for i in range(9)])) is None
     assert zoom_verdict(zoom_steps([at(1.2 ** ((1 - np.cos(np.pi * i / 24)) / 2)) for i in range(25)])) is None
     assert zoom_verdict([0.01, 0.03, 0.005, 0.03, 0.01]) == "jerk" and zoom_verdict([0.01] * 2) is None
+    # two punches touching: 1.2x drops to 1x in one frame and eases straight back, netting nothing: a snap
+    back = zoom_steps([at(1.2)] * 3 + [at(1.2 ** out2(min(1, i / 5))) for i in range(6)])
+    assert zoom_verdict(back) is None and zoom_verdict(back, math.log(1.2)) == "snap"
+    # every WARN's fix is something the model can do: never "render with the current renderer"
+    assert "current StyleEdit" not in Path(__file__).read_text().replace('"current StyleEdit" not in', "")
+    # an audio clip's cover: a 12% push over 22 s moves all but its first and last second; a punch fills a gap
+    cv = {"box": [20.4, 16.7, 59.3, 33.3], "push": 1.12, "pulses": []}
+    mv = cover_moving(cv, 22.0, 1080, 30, 660)
+    assert mv[45:615].all() and not mv[0] and not mv[-1], (mv.argmax(), len(mv) - mv[::-1].argmax())
+    assert cover_moving({**cv, "pulses": [0.0]}, 22.0, 1080, 30, 660)[:16].all()
+    assert not cover_moving({**cv, "push": 1.0}, 22.0, 1080, 30, 660).any()
     # freeze: render flat for 4 frames while footage moves
     dr, db = [1.0] * 10, [1.0] * 10
     dr[3:7] = [0.01] * 4
@@ -1029,6 +1103,10 @@ def demo():
     assert jitter([0, 5, 10, 15, 20, 15, 10, 5])
     assert not jitter(list(30 * np.sin(np.linspace(0, np.pi, 40))))
     assert not jitter([0, 1, 0, 1, 0])                           # 1 px flicker: under the visible floor
+    # the sample's 'Claude' logo fading in: its top edge flickers 5 px for one frame as thin rays cross the ink
+    # threshold (WARN "turns back at speed 4 time(s)"); a spring's wobble over several frames still counts
+    assert not jitter([36, 35, 29, 29, 34, 29, 29, 29, 28, 28, 28])
+    assert jitter([0, 6, 12, 18, 22, 18, 14, 10, 12, 14, 16])
     # landing: pop from nothing at f0=30, lands half-way on frame 32
     area = [0, 0, 0, 0, 200, 600, 900, 1000] + [1000] * 20
     land, v = landing(area, 30, 30)
@@ -1043,6 +1121,7 @@ def demo():
     w, lt = scene_land(sc, [{"text": "notion", "start": 2.0}, {"text": "notion", "start": 5.0}], k)
     assert w == 5.0 and abs(lt - (sc["start"] + 0.31 * k)) < 1e-9, (w, lt)
     assert abs(scene_land({"trigger_word": "x", "start": 1.0}, [], 1.0)[0] - 1.4) < 1e-9
+    assert scene_land({**sc, "start": 4.9, "transition_in": "cut"}, [{"text": "notion", "start": 5.0}], k) == (5.0, 4.9)
     # an overlay card starts OVERLAY_LEAD_S x k early: its word is found the same way, never start + CARD_LEAD_S
     from plan import OVERLAY_LEAD_S, overlay_led
     ov = {"src": "images/a.png", "trigger_word": "jev", "start": round(5.0 - 0.1 - OVERLAY_LEAD_S, 3), "layout": "box"}

@@ -34,7 +34,7 @@ videos, websites, music. Each item has a `kind`:
 
 | kind | do |
 |---|---|
-| `ask` | One question in the question box for all `ask` items together (at most four), the `options` labels in the order given, the first marked "(Recommended)". The answer becomes the kind. |
+| `ask` | One question box for all `ask` items together (at most four): each item's `question` word for word, its `options` labels in order, the first marked "(Recommended)". The answer becomes the kind. |
 | `creator` | creator-teardown quick mode on `handle` and `platform` (no platform: ask, TikTok first). With `urls`, write them to `picks.txt` and use `list <handle> --urls picks.txt`. Save it as the profile creator. |
 | `own` | `python3 "$L" fetch "<url>" edits/<name>` (`name` is in the item). It prints the file path; that is the video for step 1. |
 | `long` | the clips skill, with this link as its source. |
@@ -62,13 +62,13 @@ python3 "$P" missing --video     # audience, names: asked for every video
 python3 "$P" missing --style     # normally answered at setup; ask here only if setup was skipped
 ```
 
-Prints the question ids with no saved answer. The style questions (platform, creators, liked
-videos, brand, own photos, avoid, captions, sound, behind) are asked once at the end of setup. When
-any id is printed, read `references/intake.md` (the questions, their options and the `set` command for
-each) and ask only those ids, at most four per call. Save each answer as soon as it comes in.
+Prints the question ids with no saved answer. The style questions are asked once at the end of
+setup. When any id is printed, read `references/intake.md` (the questions, their calls and options, and the
+`set` command for each) and ask only those ids. Save each answer as soon as it comes in.
 
-`goal` and `names` belong to this video: ask "Same goal and names as last time?" on later videos
-(one question, yes as the first option) instead of the full intake. Everything else is asked once.
+`audience` and `names` belong to this video (the audience answer also saves `goal`): ask "Same
+audience and names as last time?" on later videos (one question, yes as the first option) instead of
+the full intake. Everything else is asked once.
 The profile lives in `~/.ai-video-editor/profile.json`; `python3 "$P" show` prints it. On "just edit
 it" or "use the defaults", save nothing and go on: every answer has a default.
 
@@ -82,7 +82,7 @@ Do each step in order, skipping what is already done. Read each skill's SKILL.md
    several creators in parallel when the platform allows.
 3. **Blend the style**: `python3 "$P" style edits/<name>` writes `edits/<name>/style.json`, each part
    (captions, pace, visuals) from the creator the user picked for it, with the caption and sound
-   answers laid over. With no creator it writes the default style (smooth zooms about every 5 s,
+   answers laid over. With no creator it writes the default style (smooth zooms about every 6 s,
    3-word captions). If it stops with `no creator style.json found`, step 2 did not finish for a
    creator: run it again.
 4. **cut** on the raw take, from its step 0b (start has already decided: cut, wait for the cut page

@@ -6,7 +6,8 @@
     python3 route.py demo                        self-check (offline)
 
 beats: code splits captions.json into sentences (times kept in code), marks the profile's named
-products, tools and people found in each, then, when a TypeSafe key is saved, asks Jev once per
+products, tools and people found in each, plus any word written with a capital inside a sentence (a
+product or person the profile does not list: "Jev", "Claude", "Haiku"), then, when a TypeSafe key is saved, asks Jev once per
 sentence to pick one of: none, a capture format (capture:shot, capture:browser, capture:sticker), post, logo,
 or an overlay format (logo_cluster, chat, terminal, toasts, side_by_side, video_card). Without a key every pick is null and Claude decides from
 the same file. Either way Claude (or the template-filler agent) writes visuals.json. When edits/NAME/style.json
@@ -64,6 +65,23 @@ def named(text, names):
     """The profile's names that appear in a sentence, matched on whole words, case-insensitive."""
     low = f" {re.sub(r'[^a-z0-9 ]+', ' ', text.lower())} "
     return [n["name"] for n in names if f" {re.sub(r'[^a-z0-9 ]+', ' ', n['name'].lower()).strip()} " in low]
+
+
+NOT_NAMES = {"i", "i'm", "i'll", "i've", "i'd", "ai", "ok"}
+
+
+def found_names(beats):
+    """Words written with a capital letter anywhere but a sentence's first word: the products, tools and
+    people said, when the profile's names question was left blank. ponytail: a capital-letter heuristic,
+    so it relies on the transcriber's casing (Whisper and Scribe capitalise names); a lower-case
+    transcript finds none."""
+    out = []
+    for b in beats:
+        for w in re.findall(r"[A-Za-z][\w'-]*", b["text"])[1:]:
+            w = w.strip("'-")
+            if w[:1].isupper() and w.lower() not in NOT_NAMES and w not in out:
+                out.append(w)
+    return out
 
 
 def key():
@@ -152,6 +170,12 @@ def demo():
     for b in bs:
         b["names"] = named(b["text"], names)
     assert bs[0]["names"] == ["Jev"] and bs[1]["names"] == ["Claude"] and bs[2]["names"] == []
+    # the names question left blank: the sample take's own capitalised names are found, sentence starts are not
+    sample = sentences([{"text": t, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, t in enumerate(
+        "I built a router with Jev that picks my Claude model. Jev is good at different things. If it's a small "
+        "task, it'll automatically use the Haiku model. If it's harder, it'll use Opus. I'm sure AI helps.".split())])
+    assert found_names(sample) == ["Jev", "Claude", "Haiku", "Opus"], found_names(sample)
+    assert named(sample[1]["text"], [{"name": n} for n in found_names(sample)]) == ["Jev"]
     canned = {"s0": {"type": "choice", "probabilities": {"none": 0.1, "capture:shot": 0.8, "logo": 0.1}},
               "s1": {"type": "choice", "probabilities": {"none": 0.2, "capture:sticker": 0.7}},
               "s2": {"type": "choice", "probabilities": {"none": 0.9}}}
@@ -196,8 +220,14 @@ def main():
         from ai_editor import profile
         prof = profile.load()
         beats = sentences(words)
+        names = [n if isinstance(n, dict) else {"name": n} for n in prof.get("names") or []]
+        have = {n["name"].lower() for n in names}
+        extra = [w for w in found_names(beats) if w.lower() not in have]
+        if extra:
+            print(f"names in the words, not in the profile: {', '.join(extra)} (add a domain for any that is not "
+                  "famous: profile.py set names)")
         for b in beats:
-            b["names"] = named(b["text"], prof.get("names") or [])
+            b["names"] = named(b["text"], names + [{"name": w} for w in extra])
         st = edit / "style.json"
         pref = prefer(json.loads(st.read_text())) if st.exists() else {}
         if pref:

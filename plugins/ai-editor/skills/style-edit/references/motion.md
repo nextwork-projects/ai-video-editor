@@ -136,8 +136,9 @@ A scene card in plan.json:
   head checks for this shape. Any other box is used as given.
 - `focus`: `[x, y]` % of the frame where `match` and `iris` open from and close to. plan.py passes the
   head centre from face.json at the card's start, so the cut grows out of the speaker's face.
-- Timing: plan.py starts a scene `SCENE_LEAD_S` (0.3 s) x the personality's duration multiplier
-  before its word, so the match or iris is half done on the word.
+- Timing: plan.py starts a scene `CARD_LEAD_S` (0.1 s) plus `SCENE_LEAD_S` (0.3 s) x the
+  personality's duration multiplier before its word, so the match or iris is half done on the word. A
+  hard-cut scene (`transition_in` `cut`) is whole on its first frame: it starts `CARD_LEAD_S` before its word.
 - Captions over a scene draw in the scene's own ink and accent, with no stroke or shadow (white on
   paper would vanish). When every word being said is already in the scene's type, the captions hide:
   the scene is the caption.
@@ -180,7 +181,7 @@ pass"). `src` is a file in `images/`.
 | type | shows | props | example |
 |---|---|---|---|
 | `flow` | the diagram (`Diagrams.tsx`, below): real logos on white node cards, wires that draw, a packet that runs a wire and lands on the word | `nodes: [Part]` (1-6), `split?: [Part]` (2-4), `tasks?: [{text, word, heavy?}]`, `accent?`, `tag?: {text, at}` | `{"nodes": [{"logo": "github", "label": "push", "word": "push"}, {"logo": "vercel", "label": "live", "word": "live"}]}` |
-| `logo_sting` | the real logo lands, a ring expands off it, a light sweep crosses it inside its own silhouette | `src`, `label?` | `{"src": "images/logo-notion.svg", "label": "Notion"}` |
+| `logo_sting` | the real logo lands, a light sweep crosses it inside its own silhouette | `src`, `label?` | `{"src": "images/logo-notion.svg", "label": "Notion"}` |
 | `social_post` | a real X post, Reddit post or YouTube comment rises in, words fade up, the quoted phrase gets a marker, likes bump. `name` and `text` are required and must be copied from the real post (the X syndication endpoint gives text and counts); the render stops with an error without them, never a placeholder | `platform` (x/reddit/youtube), `name`, `handle?`, `avatar?`, `text`, `highlight?`, `likes?`, `replies?`, `reposts?`, `time?`, `subreddit?`, `logo_src?`, `excerpt?` (true: when the whole text would set under 5% of the frame width, only the sentence holding `highlight`, with ellipses) | `{"platform": "x", "name": "...", "handle": "...", "text": "<copied verbatim>", "highlight": "<the phrase said>", "likes": "1.2K"}` |
 | `arrow_callout` | a label pill pops, a hand-drawn arrow draws from it to a point | `label`, `point: [fx, fy]` (fractions of the card box), `side?` (auto/left/right) | `{"label": "this setting", "point": [0.72, 0.3]}` |
 | `icon_burst` | the subject springs in and throws flat confetti on seeded Physics2D arcs | `src?` or `text?`, `count?` (18), `seed?`, `at?` | `{"src": "images/logo-python.svg", "count": 22}` |

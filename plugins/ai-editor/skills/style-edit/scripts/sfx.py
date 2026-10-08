@@ -145,10 +145,9 @@ def build(edit_dir, speech=None):
         target = speech + offset
         write(out / f"{name}.wav", x, 10 ** ((target - loudest50(x)) / 20), nch)
         cues[name] = {"attack_s": attack(x), "db": round(target, 1)}
-        print(f".sfx/{name}.wav  {len(x) / SR:.2f} s  loudest 50 ms {target:.1f} dBFS  hit at {cues[name]['attack_s']} s")
     kit = {"speech_db": round(speech, 1), "cut_mtime": cut.stat().st_mtime if cut.exists() else 0, "cues": cues}
     (out / "kit.json").write_text(json.dumps(kit, indent=1))
-    print(f"speech {speech:.1f} dBFS; cues sit {-min(o for _, o in KIT.values())}-{-max(o for _, o in KIT.values())} dB under it")
+    print(summary())
     return kit
 
 
@@ -162,8 +161,15 @@ def kit(edit_dir):
     return build(edit_dir)
 
 
+def summary(kit=KIT):
+    """The one line a sound-kit build prints: how many cues and how far under the voice, smaller number first."""
+    under = sorted(-o for _, o in kit.values())
+    return f"{len(kit)} sound cues in .sfx/, {under[0]}-{under[-1]} dB under your voice"
+
+
 def demo():
     import tempfile
+    assert summary({"a": ("", -5), "b": ("", -4)}) == "2 sound cues in .sfx/, 4-5 dB under your voice", summary()
     with tempfile.TemporaryDirectory() as d:
         k = build(d, speech=-21.0)
         for name, (_, offset) in KIT.items():

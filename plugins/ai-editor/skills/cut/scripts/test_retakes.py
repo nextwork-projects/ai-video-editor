@@ -173,6 +173,24 @@ def test_fix_is_remembered_and_captions_use_the_cut_spelling():
         assert words[1]["text"] == "Haiku" and (Path(d) / "captions.txt").exists(), words
 
 
+def test_a_multi_word_correction_is_one_token_per_word():
+    """The cut says "are using." where the re-transcription heard one word "use.": two caption tokens that share
+    the heard word's time without overlapping, never one "are using." token (rendered "areusing")."""
+    cut = [{"text": "we", "start": 0.0, "end": 0.2, "type": "word"}, {"text": "are", "start": 0.3, "end": 0.45, "type": "word"},
+           {"text": "using.", "start": 0.45, "end": 0.8, "type": "word"}]
+    heard = [{"text": "we", "start": 0.0, "end": 0.2, "type": "word"}, {"text": "use.", "start": 0.3, "end": 0.8, "type": "word"}]
+    words, changed = R.caption_words(heard, cut)
+    assert [w["text"] for w in words] == ["we", "are", "using."], words
+    a, b = words[1], words[2]
+    assert a["start"] == 0.3 and b["end"] == 0.8 and a["start"] < a["end"] <= b["start"] < b["end"], words
+    assert R.one_word_each([{"text": "x y", "start": 1.0, "end": 1.0}])[1]["start"] == 1.0   # zero length stays valid
+    with tempfile.TemporaryDirectory() as d:        # a fix into two words on captions.json splits there too
+        (Path(d) / "captions.json").write_text(json.dumps(take("we use.")))
+        R.fix(d, [("use", "are using")])
+        got = json.loads((Path(d) / "captions.json").read_text())
+        assert [w["text"] for w in got] == ["we", "are", "using."] and got[1]["end"] <= got[2]["start"], got
+
+
 def test_verify_counts_a_misheard_name_as_heard_differently():
     """Same audio, two passes: 'jev' at 1.2 s heard as 'jeff' is not a missing word; a word gone from the
     audio (nothing heard at its time) still is."""

@@ -99,7 +99,7 @@ Pacing, one rule: a card where a sentence names something real (a product, site,
 figure on the page that published it), never two at once; otherwise the speaker carries it. No stretch
 without a card over `card_gap_s` (10 s, or twice a copied creator's measured gap); where a longer one names
 nothing, never make a visual up: plan.py adds zoom changes (`references/plan.md` "Pacing"). Vertical
-captures must read on a phone (`check.py plan` FAILs text under 28 px x-height, and a hook capture with no `find`).
+captures must read on a phone: give each a `find` (plan.py drops a small one with none).
 
 ## 4. Plan
 
@@ -113,10 +113,10 @@ python3 "$S/plan.py" edits/<name>/style.json edits/<name>/captions.json [--aspec
 Writes `edits/<name>/plan.json`. Read every warning it prints. What it does (look, contrast, layout,
 timing, captions, zooms, a second shape with `--out`): `references/plan.md`.
 
-1. **Behind the speaker:** when the profile says `"behind": true`, run `matte.py` now
-   (`references/plan.md` "Behind the speaker"); say its time or cost first. Skip it when the profile says no.
-2. **Music:** unless the profile says `sound.music: false`, ask the music question and lay the bed
+1. **Music:** unless the profile says `sound.music: false`, ask the music question and lay the bed
    (`references/plan.md` "Music"), then run plan.py again. Sound cues need nothing: plan.py adds them.
+2. **Behind the speaker:** if the profile says `"behind": true`, run `matte.py` after the last plan.py run and
+   again after any later one (it cuts only new frames); say its `--estimate` first (`references/plan.md`).
 3. **Check the plan:**
 
 ```bash

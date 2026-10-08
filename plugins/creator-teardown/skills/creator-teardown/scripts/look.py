@@ -185,15 +185,22 @@ def find_captions(samples, words):
             else:
                 ln["cap"] = n <= 7 and abs(x + w / 2 - 0.5) < 0.15 and h > 0.012
     # Titles and screen text that happen to be spoken stay up; captions do not.
-    run, prev = Counter(), {}
+    # A line carries on one from the sample before when it reads nearly the same: OCR misreads a
+    # title held over a busy picture ("Rhode Island", "Rhodelsland"), which must not restart its run.
+    prev, longest = [], Counter()
     for s in samples:
-        cur = {norm(ln["text"]) for ln in s["lines"]}
-        for k in cur:
-            run[k] = prev.get(k, 0) + 1
-        prev = {k: run[k] for k in cur}
+        cur = []
         for ln in s["lines"]:
-            ln["run"] = run[norm(ln["text"])]
-    long_runs = {norm(ln["text"]) for s in samples for ln in s["lines"] if ln["run"] > 4 * SAMPLE_FPS}
+            k = norm(ln["text"])
+            r, c = max(((r, c) for pk, r, c in prev if pk == k or difflib.SequenceMatcher(None, pk, k).ratio() >= 0.8),
+                       default=(0, len(longest)))
+            ln["run"] = r + 1
+            longest[c] = max(longest[c], r + 1)
+            cur.append((k, r + 1, c))
+            ln["chain"] = c
+        prev = cur
+    long_runs = {norm(ln["text"]) for s in samples for ln in s["lines"]
+                 if longest[ln.pop("chain")] > 4 * SAMPLE_FPS}
     ys = []
     for s in samples:
         for ln in s["lines"]:
@@ -1206,6 +1213,12 @@ def demo():
     4 frames. A blue card fades in over 6 frames at 3.0 s and leaves at 4.5 s.
     The OCR is the real engine when one is installed, else a stand-in that knows where the
     text was drawn, so CI checks the measuring without an OCR package."""
+    # A centred title held 6 s with no transcript, OCR misreading it every few samples over a busy
+    # picture: a title, not a caption.
+    reads = ["2nd Rhode Island Infantry", "2nd Rhodelsland Infantry", "$2nd Rhode Island Infantry"]
+    held = [{"t": k / SAMPLE_FPS, "lines": [{"text": reads[k % 3], "box": [0.3, 0.9, 0.4, 0.05]}]} for k in range(18)]
+    find_captions(held, [])
+    assert not any(ln["cap"] for s in held for ln in s["lines"]), held[0]
     from PIL import Image, ImageDraw, ImageFont
     W, H, FPS, SIZE = 540, 960, 30, 48
     font = ImageFont.load_default(size=SIZE)

@@ -19,7 +19,7 @@ sentence what the tool is for. Run the command once they say yes. Check after ev
 ## 0. Say the plan first
 
 Before running anything, tell the user in plain words what setup does and why, as this list
-(fill the times from doctor once it has run):
+(the times are typical; say them as given):
 
 1. **Tools** (2-10 min, free): the programs that cut and draw the video. Required.
 2. **Keys** (about 5 min, free or under a cent a video): three accounts that make every edit
@@ -32,7 +32,7 @@ Then ask in the question box: **Start with the tools (Recommended)** / **Only ad
 Every step can be skipped and finished later: on a skip, run `python3 "$U" later <step>`
 (`typesafe`, `gemini`, `elevenlabs`, `modal`, `style`, `matte`) and say "Saved. Say *finish setup*
 any time to add it." When the user says "finish setup" (or "add my <x> key"), run
-`python3 "$U" todo` and go straight to those steps only.
+`python3 "$U" todo` and go straight to the steps it lists (every optional step not done yet).
 
 Work through them with a header on every step, e.g. **Step 2 of 4, keys: TypeSafe (1 of 3)**. For
 each step say what it is, why it helps them, what it costs, and what skipping it means. One short
@@ -93,8 +93,8 @@ python3 "$U" model
 ```
 
 `venv` installs faster-whisper (free transcription on this computer), numpy, pillow and yt-dlp
-into the venv in `~/.ai-video-editor` (`AI_EDITOR_HOME` moves it), at the exact versions in `requirements/requirements.lock` (about
-1 minute). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
+into the venv in `~/.ai-video-editor` (`AI_EDITOR_HOME` moves it), at the exact versions in `requirements/requirements.lock` (11-33 s
+on GitHub's clean runners). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
 `Python 3.10+ needed`: go back to step 1's Python line. `Run the venv step first.`: run `venv`.
 
 ## 4. The renderer
@@ -104,7 +104,7 @@ python3 "$U" remotion
 ```
 
 Copies the renderer to `~/.ai-video-editor/remotion` and installs exactly its `package-lock.json`
-with `npm ci` (about 700 MB, under a minute on a fast line). This is the biggest download: say so
+with `npm ci` (about 700 MB; with Chrome's headless shell, 8-33 s on GitHub's clean runners). This is the biggest download: say so
 first. If the user wants to start a creator teardown while it runs, run it in the background and
 carry on: the teardown does not need it. `npm missing`: install Node (step 2) first.
 
@@ -173,9 +173,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" missing --style
 
 Ask those ids in the question box, at most four per call, using the wording, options and `set`
 commands in `${CLAUDE_PLUGIN_ROOT}/skills/start/references/intake.md` (the rows that are not
-per video). Two calls usually cover it: first platform, creators, what to take from each, and the
-specific videos they love (links); then brand, own photos folder, what to avoid, captions, sound
-and "Let graphics sit behind you?". Every question has a recommended first option.
+per video), in its three style calls: what to copy (platform, creators, what to take, liked videos),
+what makes it yours (brand, own photos, avoid, captions), then sound and "Let graphics sit behind
+you?". Every question has a recommended first option.
 
 On **Yes** to graphics behind you, download the matting model now (15 MB, once), so the first edit
 does not stop for it:

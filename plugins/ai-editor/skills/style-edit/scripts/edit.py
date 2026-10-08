@@ -101,6 +101,7 @@ def prepare_public(edit, plan, tag):
     rels += re.findall(r'"(images/[^"]+)"', json.dumps([[c.get("anim"), c.get("props")] for c in plan["cards"]]))
     rels += [c["src"] for c in plan.get("sfx", [])]   # sound cues, from sfx.py
     rels += [plan["music"]["src"]] if plan.get("music") else []   # the music bed, from sfx.py music
+    rels += [plan["cover"]["src"]] if plan.get("cover") else []   # an audio clip's cover, from clips.py trim
     for c in plan.get("cutouts", []):   # the speaker cut out for behind cards: a folder of PNGs from matte.py
         if not (edit / c["src"]).is_dir():
             sys.exit(f"ERROR: {edit / c['src']} missing (run matte.py)")
@@ -169,9 +170,15 @@ def laptop_speed(plan_path, pub):
         return json.loads(LAPTOP_JSON.read_text())
     except (OSError, ValueError):
         b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
-        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "source": "benchmark"}
+        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "start_s": b.get("start_s", 0), "source": "benchmark"}
         LAPTOP_JSON.write_text(json.dumps(m))
         return m
+
+
+def laptop_s(lap, frames):
+    """A laptop render's seconds: bundling, Chrome's start-up once (a benchmark times it apart; a full
+    render's speed already holds it), then every frame."""
+    return lap["bundle_s"] + lap.get("start_s", 0) + lap["s_per_frame"] * frames
 
 
 def save_json(path, data):
@@ -182,51 +189,70 @@ def save_json(path, data):
 # Modal (modal.com): one container per chunk, all at once. Rates from modal.com/pricing, read
 # 2026-10-06: CPU $0.0000131 per physical core per second, memory $0.00000222 per GiB per second,
 # billed on the higher of what is requested and what is used. modal_render.py does the render.
-MODAL_CPU = 4                  # physical cores per container (8 vCPU)
+MODAL_CPU = 4                  # physical cores requested per container
 MODAL_MEM_MB = 8192
 MODAL_CPU_USD_S = 0.0000131
 MODAL_MEM_USD_S = 0.00000222
-MODAL_CHUNK_S = 90             # each container renders about 90 s worth of frames
+# Measured on the bill, 2026-10-07 (the 205.6 s sample take, 9 and 19 containers): Chrome uses about
+# 4.6 cores of the 4 requested, and each container is billed about 23 s past its render (boot, image).
+# ponytail: one take on one day; re-measure when the bill and the printed cost drift apart.
+MODAL_CORES_BILLED = 4.6
+MODAL_BOOT_S = 23
 MODAL_MAX_CONTAINERS = 40
-MODAL_MIN_CHUNK = 150
+# Containers: as many as keep the billed boot under MODAL_OVERHEAD of each container's bill (23 s of
+# boot over about 115 s of work). Starting one takes seconds (measured below), so more containers are
+# faster, only dearer. Each container gets MODAL_PIECES pieces from a shared queue: one that runs fast
+# takes the next piece, so a slow container (some ran 3x slower on the same frames) holds up less.
+MODAL_OVERHEAD = 0.2
+MODAL_PIECES = 3
+MODAL_MIN_PIECE = 100          # frames; each piece starts Node and Chrome again
 MODAL_JSON = HOME / "modal.json"   # the last Modal render's measured speed
-MODAL_S_PER_FRAME = 0.12       # container seconds per 1080p frame until a render measures it
-MODAL_STARTUP_S = 30           # past the upload and the longest chunk: boot, download, join
-MODAL_UP_BYTES_S = 10e6        # upload speed guess
+# Until this computer's first Modal render, the sample take's (6,167 frames, 2026-10-07, 16 containers
+# x 3 pieces, 184 s in all; the upload speed from the render before it, 200 MB in 21.5 s):
+#   s_per_frame  container seconds per 1080p frame, Node and Chrome start included (piece times / frames)
+#   start_s      submit to the last container starting (4-18 s over four renders)
+#   straggle     the render phase past start_s over the ideal, container seconds / containers
+#   tail_s       the last piece done to the joined file: the rest of the download and the join
+#   up_bytes_s   upload speed, which is the uplink of the computer that measured it
+# Each Modal render saves its own to MODAL_JSON and the next estimate uses those.
+MODAL_MEASURED = {"s_per_frame": 0.331, "start_s": 7, "straggle": 1.26, "tail_s": 12, "up_bytes_s": 9.3e6}
 
 
-def modal_ranges(frames, s_per_frame):
-    """Inclusive [from, to] pieces, each about MODAL_CHUNK_S of work on one container."""
-    per = max(MODAL_MIN_CHUNK, math.ceil(MODAL_CHUNK_S / s_per_frame))
-    k = min(MODAL_MAX_CONTAINERS, math.ceil(frames / per))
+def modal_plan(frames, s_per_frame):
+    """(containers, pieces): pieces are inclusive [from, to] frame ranges, MODAL_PIECES per container."""
+    n = max(1, min(MODAL_MAX_CONTAINERS, int(frames * s_per_frame * MODAL_OVERHEAD / MODAL_BOOT_S)))
+    k = max(1, min(n * MODAL_PIECES, frames // MODAL_MIN_PIECE))
     step = math.ceil(frames / k)
-    return [[a, min(frames, a + step) - 1] for a in range(0, frames, step)]
+    pieces = [[a, min(frames, a + step) - 1] for a in range(0, frames, step)]
+    return min(n, len(pieces)), pieces
 
 
-def modal_cost(chunks):
-    """USD for chunks [{wall_s, cpu_s}]: core-seconds are the higher of the request (cores x wall)
-    and the use (cpu_s is vCPU seconds; a Modal core is 2 vCPU). Memory at the request."""
-    core_s = sum(max(MODAL_CPU * c["wall_s"], c["cpu_s"] / 2) for c in chunks)
-    mem_s = sum(MODAL_MEM_MB / 1024 * c["wall_s"] for c in chunks)
-    return core_s * MODAL_CPU_USD_S + mem_s * MODAL_MEM_USD_S
+def modal_cost(container_s, containers):
+    """USD for container_s seconds of rendering on `containers` containers: each is also billed
+    MODAL_BOOT_S, at the cores Chrome really uses (more than the request, which Modal bills) and the
+    memory requested."""
+    s = container_s + containers * MODAL_BOOT_S
+    return s * (max(MODAL_CPU, MODAL_CORES_BILLED) * MODAL_CPU_USD_S + MODAL_MEM_MB / 1024 * MODAL_MEM_USD_S)
 
 
 def modal_speed():
-    """(s_per_frame, startup_s, measured?) from the last Modal render, else the guesses above."""
+    """(speeds, measured?): the last Modal render's measurements over the sample take's."""
     try:
         m = json.loads(MODAL_JSON.read_text())
-        return m["s_per_frame"], m["startup_s"], True
-    except (OSError, ValueError, KeyError):
-        return MODAL_S_PER_FRAME, MODAL_STARTUP_S, False
+        return {**MODAL_MEASURED, **{k: m[k] for k in MODAL_MEASURED if k in m}}, "straggle" in m
+    except (OSError, ValueError):
+        return dict(MODAL_MEASURED), False
 
 
-def modal_estimate(frames, media_bytes):
-    """(wall s, usd, containers, measured?)"""
-    spf, startup, measured = modal_speed()
-    r = modal_ranges(frames, spf)
-    wall = media_bytes / MODAL_UP_BYTES_S + startup + max(b - a + 1 for a, b in r) * spf
-    usd = modal_cost([{"wall_s": 10 + (b - a + 1) * spf, "cpu_s": 0} for a, b in r])   # ~10 s boot each
-    return wall, usd, len(r), measured
+def modal_estimate(frames, media_bytes, m=None):
+    """(wall s, usd, containers, measured?): upload + start + the render on n containers, slowed by the
+    straggle factor + the tail. The upload is counted in full; footage Modal already holds is skipped by
+    hash and goes up in about a second."""
+    m, measured = (m, True) if m else modal_speed()
+    work = frames * m["s_per_frame"]
+    n, _ = modal_plan(frames, m["s_per_frame"])
+    wall = media_bytes / m["up_bytes_s"] + m["start_s"] + work / n * m["straggle"] + m["tail_s"]
+    return wall, modal_cost(work, n), n, measured
 
 
 def venv_python():
@@ -241,6 +267,22 @@ def modal_ready():
     return has_pkg and has_token
 
 
+def gh_ready():
+    """gh installed and logged in (`gh auth status` reads the saved login)."""
+    return bool(shutil.which("gh")) and subprocess.run(["gh", "auth", "status"], capture_output=True).returncode == 0
+
+
+def aws_ready(env=None, home=None):
+    """AWS keys in the environment or saved by `setup.py awskey`, or a profile in ~/.aws (no network call)."""
+    env = aws_env() if env is None else env
+    return (any(env.get(k) for k in ("AWS_ACCESS_KEY_ID", "REMOTION_AWS_ACCESS_KEY_ID", "AWS_PROFILE"))
+            or (Path(home or Path.home()) / ".aws" / "credentials").exists())
+
+
+def not_set_up(ready, step):
+    return "" if ready else f" Not set up yet: the setup skill's {step} runs first."
+
+
 def render_modal(edit, plan_path, pub, out):
     bundle_dir = edit / ".modal-bundle"
     node("bundle", pub, bundle_dir)
@@ -251,7 +293,7 @@ def render_modal(edit, plan_path, pub, out):
     if r.returncode:
         sys.exit("ERROR: the Modal render failed (above). Nothing was written to " + str(out))
     m = json.loads(r.stdout.strip().splitlines()[-1])
-    save_json(MODAL_JSON, m)
+    save_json(MODAL_JSON, {**modal_speed()[0], **m})    # an upload Modal skipped keeps the last uplink speed
 
 
 def render_laptop(edit, plan_path, pub, out, draft):
@@ -307,17 +349,18 @@ def estimate(plan_path, pub):
     frames = plan["durationInFrames"]
     media = sum(f.stat().st_size for f in pub.rglob("*") if f.is_file())
     lap = laptop_speed(plan_path, pub)
-    print(f"Laptop: about {minutes(lap['bundle_s'] + lap['s_per_frame'] * frames)} ({frames} frames, speed from "
+    print(f"Laptop: about {minutes(laptop_s(lap, frames))} ({frames} frames, speed from "
           f"the last {'benchmark' if lap['source'] == 'benchmark' else lap['source']}). Free.")
     wall, usd, n, measured = modal_estimate(frames, media)
     print(f"Modal: about {minutes(wall)} on {n} machine{'s' * (n > 1)}, about ${usd:.2f} "
           f"({'speed measured on the last Modal render' if measured else 'a guess until the first Modal render'}; "
           f"the Starter plan includes $30 of free credit a month)." +
-          ("" if modal_ready() else " Not set up yet: the setup skill's Modal step runs first."))
+          not_set_up(modal_ready(), "Modal step"))
     lam = json.loads(node("lambda-estimate", plan_path).stdout.strip().splitlines()[-1])
-    print("Other: " + github_estimate(frames, plan["fps"], media))
+    print("Other: " + github_estimate(frames, plan["fps"], media) + not_set_up(gh_ready(), "GitHub CLI section"))
     print(f"Other: Lambda: about {lam['wall_s']} s on {lam['lambdas']} Lambdas in {lam['region']}, "
-          f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost.")
+          f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost."
+          + not_set_up(aws_ready(), "Lambda section"))
 
 
 # The render in parallel: `plan` splits the frames (chunk_ranges, pasted in below), one `render` job per
@@ -623,6 +666,16 @@ def contact_sheet(edit, plan_name):
 
 
 def demo():
+    import tempfile
+    # the laptop estimate: Chrome's start-up once, then every frame; every cloud line says when it is not set up
+    assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0, "start_s": 2.0}, 1000) == 55.0
+    assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0}, 1000) == 53.0
+    with tempfile.TemporaryDirectory() as d:
+        assert not aws_ready({}, d) and aws_ready({"AWS_PROFILE": "x"}, d)
+        (Path(d) / ".aws").mkdir()
+        (Path(d) / ".aws" / "credentials").write_text("")
+        assert aws_ready({}, d)
+    assert not_set_up(True, "x") == "" and "Lambda section" in not_set_up(False, "Lambda section")
     plan = {"fps": 30, "durationInFrames": 900,
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
             "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}, {"start": 25, "end": 26}]}
@@ -701,18 +754,19 @@ def demo():
     assert all(b - a + 1 > 0 for a, b in chunk_ranges(9, 1))
     assert "1 runner," in github_estimate(1326, 30, 34e6) and "fits one" in github_estimate(1326, 30, 34e6)
     assert "20 runners" in github_estimate(72000, 30, 5e9) and "3 parts" in github_estimate(72000, 30, 5e9)
-    # Modal: chunks cover every frame once, in order; about 90 s of work each; capped
-    assert modal_ranges(1326, 0.12) == [[0, 662], [663, 1325]], modal_ranges(1326, 0.12)
-    assert modal_ranges(100, 0.12) == [[0, 99]]
-    r = modal_ranges(10 * 60 * 30, 0.12)
-    assert len(r) == 24 and r[-1][1] == 17999 and all(b - a + 1 <= 750 for a, b in r), (len(r), r[-1])
-    assert len(modal_ranges(3 * 3600 * 30, 0.12)) == MODAL_MAX_CONTAINERS
-    assert [f for a, b in modal_ranges(9999, 0.05) for f in range(a, b + 1)] == list(range(9999))
-    # billed at the request when the render used less (400 core-s), at the use when it used more
-    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 6}]) - (400 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
-    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 1000}]) - (500 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
-    wall, usd, n, _ = modal_estimate(1800, 50e6)
-    assert n >= 1 and wall > 0 and 0 < usd < 0.2, (wall, usd, n)
+    # Modal: containers from the work (the billed boot stays under 20% of each one's bill), three
+    # pieces each from a shared queue, every frame once and in order, capped
+    assert modal_plan(6167, 0.345) == (18, modal_plan(6167, 0.345)[1]) and len(modal_plan(6167, 0.345)[1]) == 54
+    assert modal_plan(1326, 0.345)[0] == 3 and len(modal_plan(1326, 0.345)[1]) == 9
+    assert modal_plan(100, 0.345) == (1, [[0, 99]])
+    assert modal_plan(3 * 3600 * 30, 0.345)[0] == MODAL_MAX_CONTAINERS
+    assert [f for a, b in modal_plan(9999, 0.05)[1] for f in range(a, b + 1)] == list(range(9999))
+    # the bill for the sample take on 19 containers (1865 container-seconds of render) was $0.181
+    assert abs(modal_cost(1865, 19) - 0.181) < 0.01, modal_cost(1865, 19)
+    # the estimate is upload + start + the work on n containers times the straggle factor + the tail
+    m = {"s_per_frame": 0.3, "start_s": 10, "straggle": 1.5, "tail_s": 20, "up_bytes_s": 4e6}
+    wall, usd, n, _ = modal_estimate(6000, 140e6, m)
+    assert n == 15 and abs(wall - (35 + 10 + 1800 / 15 * 1.5 + 20)) < 1e-6 and abs(usd - modal_cost(1800, 15)) < 1e-9, (wall, n)
     print("demo ok")
 
 
