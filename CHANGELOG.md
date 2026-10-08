@@ -4,6 +4,22 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Modal render tested live on the 3.4-minute sample take (6,167 frames). It failed on every container:
+  render.mjs asked for one tab per core Node reports, and Remotion caps at `nproc` (4 on a Modal
+  container). render.mjs now takes Remotion's own ceiling. Test: `modal_render.py demo <bundle> <plan>
+  <out>` with a fake `nproc` of 4.
+- A failed Modal render left the job's folder on the Volume: a container still running wrote it back
+  after the delete. The delete now waits until the app has stopped. Test: the same demo.
+- Modal billed each container 60 s idle after its piece. `scaledown_window=2` cuts that.
+- The printed Modal cost was 28% under the bill ($0.131 against $0.181). Chrome uses about 4.6 of the
+  4 cores requested and each container is billed about 23 s past its piece; the cost now counts both.
+  First-render guesses moved to the measured 0.29 s a frame and 70 s of start-up. Test: `edit.py demo`.
+- Captions with no font named rendered in system-ui: SF Pro on a Mac, another font on Modal, GitHub
+  Actions and Lambda, so the render did not match the approved stills. They now load Inter, as does any
+  font Google Fonts does not have. Test: `tests/check_plugins.py`.
+- Measured: image build about 2 min once (NodeSource's signed apt source works), render 6.5 min,
+  $0.18 on the bill, `check.py render` 0 FAIL, the Volume empty afterwards.
+
 - Teardown graphics found nothing over footage that only drifts (slow pushes on stills, dissolves
   between them). New in overlay mode: `drift_dets` keeps hard edges that hold exactly still for
   +-1 s while the picture's other edges move, and drops a box whose surround holds still too (the

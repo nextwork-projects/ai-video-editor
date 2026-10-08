@@ -8,7 +8,7 @@ SKILL.md steps 6-9.
 `edit.py estimate` never renders the whole video. Laptop: seconds per frame from a 2-second benchmark
 the first time, then from the last full laptop render of 10 s or more (`~/.ai-video-editor/laptop.json`).
 Modal: from the last Modal render (`~/.ai-video-editor/modal.json`); before the first one, a guess of
-0.12 s per frame per machine and 30 s of start-up, said as a guess in the printed line.
+0.29 s per frame per machine and 70 s of start-up, said as a guess in the printed line.
 
 ## Laptop
 
@@ -52,14 +52,17 @@ Needs the setup skill's step 5b. `edit.py` bundles the renderer with the media i
    `render.mjs chunk`, the same command the GitHub workflow runs, all at once (`starmap`).
 4. The pieces come back and join on the laptop with the GitHub workflow's join (`edit.py JOIN`):
    video copied, audio cut to each piece's frames and encoded to AAC once.
-5. The render's folder on the Volume is deleted. The last line printed is JSON: wall time, upload
+5. The render's folder on the Volume is deleted, after the app has stopped every container (one
+   still running after another piece failed would write the folder back). The last line printed is JSON: wall time, upload
    time, CPU seconds, cost, measured seconds per frame. `edit.py` saves it to
    `~/.ai-video-editor/modal.json` for the next estimate.
 
 Cost is worked out from Modal's published rates (modal.com/pricing, read 2026-10-06): $0.0000131
 per physical core per second and $0.00000222 per GiB of memory per second, each billed on the higher
-of the request and the use. The Modal dashboard has the exact bill. Modal's billing reports API is
-for Team and Enterprise plans, so the free credit left is not shown.
+of the request and the use. Measured on the bill (2026-10-07, the 3.4-minute sample take): Chrome uses
+about 4.6 cores of the 4 requested, and each container is billed about 23 s past its piece (boot,
+image). Containers stop 2 s after their piece (`scaledown_window`), not Modal's default 60 s.
+`modal billing report --for today --show-resources` prints the exact bill per run.
 
 Checked without an account (2026-10-06): the same image built with Docker for linux/amd64 in 80 s,
 rendered frames 400-459 of the sample take there, and matched the laptop render at 38.7 dB PSNR median, the

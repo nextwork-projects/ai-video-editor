@@ -182,16 +182,21 @@ def save_json(path, data):
 # Modal (modal.com): one container per chunk, all at once. Rates from modal.com/pricing, read
 # 2026-10-06: CPU $0.0000131 per physical core per second, memory $0.00000222 per GiB per second,
 # billed on the higher of what is requested and what is used. modal_render.py does the render.
-MODAL_CPU = 4                  # physical cores per container (8 vCPU)
+MODAL_CPU = 4                  # physical cores requested per container
 MODAL_MEM_MB = 8192
 MODAL_CPU_USD_S = 0.0000131
 MODAL_MEM_USD_S = 0.00000222
+# Measured on the bill, 2026-10-07 (the 205.6 s sample take, 9 and 19 containers): Chrome uses about
+# 4.6 cores of the 4 requested, and each container is billed about 23 s past its render (boot, image).
+# ponytail: one take on one day; re-measure when the bill and the printed cost drift apart.
+MODAL_CORES_BILLED = 4.6
+MODAL_BOOT_S = 23
 MODAL_CHUNK_S = 90             # each container renders about 90 s worth of frames
 MODAL_MAX_CONTAINERS = 40
 MODAL_MIN_CHUNK = 150
 MODAL_JSON = HOME / "modal.json"   # the last Modal render's measured speed
-MODAL_S_PER_FRAME = 0.12       # container seconds per 1080p frame until a render measures it
-MODAL_STARTUP_S = 30           # past the upload and the longest chunk: boot, download, join
+MODAL_S_PER_FRAME = 0.29       # container seconds per 1080p frame until a render measures it (0.27-0.30 measured)
+MODAL_STARTUP_S = 70           # past the upload and the longest chunk: boot, download, join (69-225 s measured)
 MODAL_UP_BYTES_S = 10e6        # upload speed guess
 
 
@@ -204,11 +209,10 @@ def modal_ranges(frames, s_per_frame):
 
 
 def modal_cost(chunks):
-    """USD for chunks [{wall_s, cpu_s}]: core-seconds are the higher of the request (cores x wall)
-    and the use (cpu_s is vCPU seconds; a Modal core is 2 vCPU). Memory at the request."""
-    core_s = sum(max(MODAL_CPU * c["wall_s"], c["cpu_s"] / 2) for c in chunks)
-    mem_s = sum(MODAL_MEM_MB / 1024 * c["wall_s"] for c in chunks)
-    return core_s * MODAL_CPU_USD_S + mem_s * MODAL_MEM_USD_S
+    """USD for chunks [{wall_s}]: each container billed for its render plus MODAL_BOOT_S, at the cores
+    Chrome really uses (more than the request, which Modal bills) and the memory requested."""
+    s = sum(c["wall_s"] + MODAL_BOOT_S for c in chunks)
+    return s * (max(MODAL_CPU, MODAL_CORES_BILLED) * MODAL_CPU_USD_S + MODAL_MEM_MB / 1024 * MODAL_MEM_USD_S)
 
 
 def modal_speed():
@@ -225,7 +229,7 @@ def modal_estimate(frames, media_bytes):
     spf, startup, measured = modal_speed()
     r = modal_ranges(frames, spf)
     wall = media_bytes / MODAL_UP_BYTES_S + startup + max(b - a + 1 for a, b in r) * spf
-    usd = modal_cost([{"wall_s": 10 + (b - a + 1) * spf, "cpu_s": 0} for a, b in r])   # ~10 s boot each
+    usd = modal_cost([{"wall_s": (b - a + 1) * spf} for a, b in r])
     return wall, usd, len(r), measured
 
 
@@ -708,9 +712,9 @@ def demo():
     assert len(r) == 24 and r[-1][1] == 17999 and all(b - a + 1 <= 750 for a, b in r), (len(r), r[-1])
     assert len(modal_ranges(3 * 3600 * 30, 0.12)) == MODAL_MAX_CONTAINERS
     assert [f for a, b in modal_ranges(9999, 0.05) for f in range(a, b + 1)] == list(range(9999))
-    # billed at the request when the render used less (400 core-s), at the use when it used more
-    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 6}]) - (400 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
-    assert abs(modal_cost([{"wall_s": 100, "cpu_s": 1000}]) - (500 * MODAL_CPU_USD_S + 800 * MODAL_MEM_USD_S)) < 1e-12
+    # the bill for the sample take on 19 containers (1865 container-seconds of render) was $0.181
+    usd = modal_cost([{"wall_s": 1865 / 19}] * 19)
+    assert abs(usd - 0.181) < 0.01, usd
     wall, usd, n, _ = modal_estimate(1800, 50e6)
     assert n >= 1 and wall > 0 and 0 < usd < 0.2, (wall, usd, n)
     print("demo ok")

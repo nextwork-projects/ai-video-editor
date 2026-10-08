@@ -235,6 +235,10 @@ def main():
         # Nothing pipes a downloaded script into a shell (Claude Code's own installer excepted).
         if re.search(r"\b(curl|wget)\b(?![^\n]*claude\.ai/install\.sh)[^\n|]*\|\s*(sudo\s+(-\S+\s+)*)?(ba|z)?sh\b", text):
             errors.append(f"{p}: pipes a downloaded script into a shell; use the vendor's signed package steps")
+        # A rendered family never resolves to system-ui alone: it is SF Pro on a Mac and another font on
+        # the Linux render machines (Modal, GitHub Actions, Lambda), so the stills and the render differ.
+        if p.suffix == ".tsx" and re.search(r"""(resolve\(|null : )\s*["'`]system-ui""", text):
+            errors.append(f"{p}: a font falls back to system-ui alone; fall back to a Google font every renderer loads")
         if re.search(r"\bIMG[-_](?!1234\b)\d{4}\b", text, re.I):
             errors.append(f"{p}: names a personal test file (IMG_####); say 'the sample take'")
         for w in set(re.findall(r"[a-z0-9]{4,}", text.lower())):

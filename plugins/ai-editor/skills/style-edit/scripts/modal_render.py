@@ -11,6 +11,7 @@ Runs in the editor venv, where `setup.py modal` installs the modal package. edit
 `render` prints one JSON line last: wall_s, chunks, cpu_s, usd. edit.py stores it in
 ~/.ai-video-editor/modal.json, which the next estimate reads.
 """
+import contextlib
 import json
 import math
 import os
@@ -60,14 +61,14 @@ app = modal.App("ai-video-editor")
 
 
 @app.function(image=image, volumes={"/vol": vol}, cpu=CPU, memory=MEM_MB, timeout=1800, retries=1,
-              max_containers=MODAL_MAX_CONTAINERS)
-def render_chunk(job, i, a, b, concurrency):
+              max_containers=MODAL_MAX_CONTAINERS, scaledown_window=2)   # Modal's default bills 60 s idle per container
+def render_chunk(job, i, a, b):
     import resource
     t0, ru0 = time.time(), resource.getrusage(resource.RUSAGE_CHILDREN)
     out = f"{VOL_DIR}/{job}/chunks/chunk-{i:02d}.mkv"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     r = subprocess.run(["node", RENDER_MJS, "chunk", f"{VOL_DIR}/{job}/bundle", f"{VOL_DIR}/{job}/plan.json", out,
-                        str(a), str(b), f"--concurrency={concurrency}"], cwd=os.path.dirname(RENDER_MJS),
+                        str(a), str(b)], cwd=os.path.dirname(RENDER_MJS),   # render.mjs: one tab per core it sees
                        capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"chunk {i} (frames {a}-{b}) failed:\n{r.stderr[-3000:]}")
@@ -96,24 +97,29 @@ def render(bundle_dir, plan_path, out):
     r = ranges(frames, speed()[0])
     job = uuid.uuid4().hex[:12]
     t0 = time.time()
-    with modal.enable_output(), app.run():
-        print(f"uploading {bundle_dir} ({sum(f.stat().st_size for f in Path(bundle_dir).rglob('*') if f.is_file()) / 1e6:.0f} MB)", flush=True)
-        with vol.batch_upload(force=True) as up:
-            up.put_directory(str(bundle_dir), f"/{job}/bundle")
-            up.put_file(str(plan_path), f"/{job}/plan.json")
-        t_up = time.time() - t0
-        print(f"rendering {frames} frames on {len(r)} container{'s' * (len(r) > 1)}", flush=True)
+    try:
+        with modal.enable_output(), app.run():
+            print(f"uploading {bundle_dir} ({sum(f.stat().st_size for f in Path(bundle_dir).rglob('*') if f.is_file()) / 1e6:.0f} MB)", flush=True)
+            with vol.batch_upload(force=True) as up:
+                up.put_directory(str(bundle_dir), f"/{job}/bundle")
+                up.put_file(str(plan_path), f"/{job}/plan.json")
+            t_up = time.time() - t0
+            print(f"rendering {frames} frames on {len(r)} container{'s' * (len(r) > 1)}", flush=True)
+            done = list(render_chunk.starmap([(job, i, a, b) for i, (a, b) in enumerate(r)]))
+        with tempfile.TemporaryDirectory() as t:
+            cdir = Path(t) / "chunks"
+            cdir.mkdir()
+            for c in done:
+                with open(cdir / f"chunk-{c['i']:02d}.mkv", "wb") as f:
+                    vol.read_file_into_fileobj(f"/{job}/chunks/chunk-{c['i']:02d}.mkv", f)
+            join(cdir, [{"i": f"{i:02d}", "from": a, "to": b} for i, (a, b) in enumerate(r)], fps, out)
+    finally:
+        # Only after app.run() has stopped every container: one still running when another chunk
+        # failed (or its retry) writes its folder back onto the volume when it exits.
         try:
-            done = list(render_chunk.starmap([(job, i, a, b, CPU * 2) for i, (a, b) in enumerate(r)]))
-            with tempfile.TemporaryDirectory() as t:
-                cdir = Path(t) / "chunks"
-                cdir.mkdir()
-                for c in done:
-                    with open(cdir / f"chunk-{c['i']:02d}.mkv", "wb") as f:
-                        vol.read_file_into_fileobj(f"/{job}/chunks/chunk-{c['i']:02d}.mkv", f)
-                join(cdir, [{"i": f"{i:02d}", "from": a, "to": b} for i, (a, b) in enumerate(r)], fps, out)
-        finally:
             vol.remove_file(f"/{job}", recursive=True)
+        except Exception as e:      # nothing uploaded yet; never hide the error that got us here
+            print(f"could not delete /{job} from the ai-video-editor-renders volume: {e}", file=sys.stderr)
     wall = time.time() - t0
     usd = cost(done)
     # Container seconds per frame (Chrome launch included), and everything else past the upload and
@@ -143,12 +149,20 @@ class FakeVolume:
     """The Volume calls render() and render_chunk make, on a local folder."""
     def __init__(self, root):
         self.root = Path(root)
+        self.app_running = False
+
+    @contextlib.contextmanager
+    def app_run(self):
+        self.app_running = True
+        try:
+            yield
+        finally:
+            self.app_running = False
 
     def _p(self, p):
         return self.root / p.lstrip("/")
 
     def batch_upload(self, force=False):
-        import contextlib
         return contextlib.nullcontext(self)
 
     def put_directory(self, src, dst):
@@ -164,6 +178,9 @@ class FakeVolume:
 
     def remove_file(self, p, recursive=False):
         import shutil
+        # a container still running (a retry, or a chunk going on after another failed) writes back
+        # into the job's folder, so the folder goes only once app.run() has stopped them all
+        assert not self.app_running, "the job's folder was deleted while the app could still write to it"
         shutil.rmtree(self._p(p))
 
     def commit(self):
@@ -171,17 +188,31 @@ class FakeVolume:
 
 
 def mocked_render(bundle_dir, plan_path, out):
-    import contextlib
     g = globals()
     body = render_chunk.local
     third = lambda n, spf: [[a, min(n, a + math.ceil(n / 3)) - 1] for a in range(0, n, math.ceil(n / 3))]
+
+    def chunk_on_container(*x):
+        # A Modal container with cpu=4 shows Node more cores than `nproc` (4), and Remotion takes the
+        # lower: a fake nproc on PATH gives this computer the same split.
+        with tempfile.TemporaryDirectory() as bin_dir:
+            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n")
+            Path(bin_dir, "nproc").chmod(0o755)
+            path = os.environ["PATH"]
+            os.environ["PATH"] = bin_dir + os.pathsep + path
+            try:
+                return body(*x)
+            finally:
+                os.environ["PATH"] = path
+
     with tempfile.TemporaryDirectory() as t:
         saved = {k: g[k] for k in ("vol", "VOL_DIR", "RENDER_MJS", "app", "render_chunk", "ranges")}
         saved_out = modal.enable_output
+        fv = FakeVolume(t)
         try:
-            g.update(vol=FakeVolume(t), VOL_DIR=t, RENDER_MJS=str(REMOTION / "render.mjs"), ranges=third,
-                     app=type("A", (), {"run": lambda self: contextlib.nullcontext()})(),
-                     render_chunk=type("F", (), {"starmap": lambda self, xs: [body(*x) for x in xs]})())
+            g.update(vol=fv, VOL_DIR=t, RENDER_MJS=str(REMOTION / "render.mjs"), ranges=third,
+                     app=type("A", (), {"run": lambda self: fv.app_run()})(),
+                     render_chunk=type("F", (), {"starmap": lambda self, xs: [chunk_on_container(*x) for x in xs]})())
             modal.enable_output = contextlib.nullcontext
             render(bundle_dir, plan_path, out)
             assert not any(Path(t).iterdir()), "the render's folder was left on the volume"

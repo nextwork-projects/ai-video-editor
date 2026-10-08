@@ -19,7 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
-import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
+import { RenderInternals, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENTRY = path.join(HERE, "src", "index.ts");
@@ -41,7 +41,9 @@ const flags = Object.fromEntries(args.filter((a) => a.startsWith("--"))
   .map((a) => { const [k, v] = a.slice(2).split("="); return [k, v ?? true]; }));
 const pos = args.filter((a) => !a.startsWith("--"));
 // Measured on an M4 Pro (14 cores) rendering the sample take: see skills/style-edit/references/render.md.
-const CORES = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
+// Remotion's own ceiling: the lower of Node's count and `nproc`. A Modal container shows Node more
+// cores than nproc, and a concurrency over nproc stops the render.
+const CORES = RenderInternals.getMaxConcurrency();
 // A busy machine (load over 70% of the cores) gets half the tabs: a starved tab misses its
 // delayRender deadline while it fetches the video. Windows reports no load average (0).
 const concurrency = () => Number(flags.concurrency) ||

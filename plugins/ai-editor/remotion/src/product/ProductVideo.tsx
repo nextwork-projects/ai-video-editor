@@ -24,7 +24,7 @@ export const productMeta: CalculateMetadataFunction<ProductPlan> = ({ props }) =
   width: props.width, height: props.height, fps: props.fps, durationInFrames: Math.max(1, props.durationInFrames),
 });
 
-// ---------- fonts: the site's own files first, then the same family from Google Fonts, then the system ----------
+// ---------- fonts: the site's own files first, then the same family from Google Fonts, then Inter ----------
 const useSiteFonts = (b: ProductPlan["brand"]) => {
   const [fam, setFam] = useState<{ ready: boolean } & Fams>({ ready: false, display: "system-ui", body: "system-ui" });
   const [h] = useState(() => delayRender("site fonts"));
@@ -33,7 +33,7 @@ const useSiteFonts = (b: ProductPlan["brand"]) => {
       const faces = b.fonts.filter((f) => f.family === family);
       if (!faces.length) {
         const g = await loadFamily(family.replace(/ Variable$/, ""), [b.display.weight, b.body.weight, 400]);
-        return g.startsWith("system-ui") ? `'${family}', system-ui, -apple-system, sans-serif` : g;
+        return g.startsWith("'Inter'") ? `'${family}', ${g}` : g;   // not on Google Fonts: Inter (loadFamily)
       }
       const name = `site-${family.replace(/\W+/g, "")}`;
       await Promise.all(faces.map(async (f) => {

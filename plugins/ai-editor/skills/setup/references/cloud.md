@@ -10,9 +10,9 @@ Say these three things first:
   each piece renders on its own machine at the same time, and the finished video comes back here.
   The laptop stays free while it runs.
 - **What it costs:** Modal's pricing page says the free Starter plan includes **$30 of free credit
-  a month**. A 60-second video costs about **$0.02** and a 10-minute video about **$0.17**, so the
-  credit covers well over a hundred long videos a month. These are estimates from Modal's rates;
-  the first real render measures the speed and every quote after uses it.
+  a month**. The 3.4-minute sample take cost **$0.18** on the bill. A 60-second video comes to about
+  **$0.05** and a 10-minute video about **$0.48**, so the credit covers about sixty 10-minute videos a
+  month. Every render measures the speed and the next quote uses it.
 - **The card:** a third-party listing says Modal gives $1 of credit at sign-up and the rest once a
   card is added. Say that, and that the sign-up page shows the current terms.
 

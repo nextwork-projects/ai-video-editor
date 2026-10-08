@@ -30,12 +30,15 @@ Sources:
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
   SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a transition that grows.
 
+- Modal's wall time is 2-3x `edit.py estimate`. The 3.4-minute sample take: estimate 2.1 min, render
+  6.5 min on 9 containers and 7.4 min on 19. Upload took 45 s, containers started up to 225 s late, and
+  the slowest piece ran 1.5-1.8x the average. More containers made it slower, not faster.
+
 Carried over (still untested live):
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download
   path, untested live (no public OneDrive sample). Test with a real share; if Microsoft has
   closed it, say "download it in the browser" instead.
 - Measured cost per video on a real run (needs a TypeSafe key on the test machine).
-- Modal render tested live (needs a Modal login; doctor still says "installed, not logged in").
 - Export opened in DaVinci Resolve (free) to confirm FCPXML positions.
 
 ## Needs a decision from the maintainer

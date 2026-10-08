@@ -135,7 +135,7 @@ published prices, not measured on a bill.
 | Gemini key (reads a creator's look) | Free | Google AI Studio's free tier, no card. On the paid tier a 7-video teardown measured about $0.02. |
 | ElevenLabs key (keeps every "um") | Free for a few hours a month | Optional. Without it, Whisper transcribes on your computer for free. |
 | Render on your laptop | Free | Often the fastest for a short video. On the 46.8-second sample, `edit.py estimate` gave laptop 63 s, Modal 2.0 min and GitHub Actions 7.7 min; the laptop render took 42 s. Claude prints these numbers for your video before you pick. |
-| Render on Modal | About $0.02 for 60 s, $0.17 for 10 min (*estimate*) | The Starter plan includes $30 of free credit a month. Your first render measures the real speed. |
+| Render on Modal | $0.18 for the 3.4-minute sample take (measured on the bill). About $0.05 for 60 s and $0.48 for 10 min (*estimate*). | The Starter plan includes $30 of free credit a month. The sample take took 6.5 min on Modal and 6.8 min on a busy laptop. The first render also builds the render machine once (about 2 min). |
 | Render on GitHub Actions | Free | Counts against 2,000 free minutes a month on private repos. A 44-second vertical video took about 7 minutes. |
 | Render on AWS Lambda | A few cents to a few dollars (*estimate*) | Your own AWS account, card needed. Claude quotes each render first. |
 
