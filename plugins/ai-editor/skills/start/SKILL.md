@@ -34,7 +34,7 @@ videos, websites, music. Each item has a `kind`:
 
 | kind | do |
 |---|---|
-| `ask` | One question in the question box for all `ask` items together (at most four), the `options` labels in the order given, the first marked "(Recommended)". The answer becomes the kind. |
+| `ask` | One question box for all `ask` items together (at most four): each item's `question` word for word, its `options` labels in order, the first marked "(Recommended)". The answer becomes the kind. |
 | `creator` | creator-teardown quick mode on `handle` and `platform` (no platform: ask, TikTok first). With `urls`, write them to `picks.txt` and use `list <handle> --urls picks.txt`. Save it as the profile creator. |
 | `own` | `python3 "$L" fetch "<url>" edits/<name>` (`name` is in the item). It prints the file path; that is the video for step 1. |
 | `long` | the clips skill, with this link as its source. |

@@ -32,19 +32,6 @@ Sources:
 
 ## Next
 
-- Someone else's short video recommends editing it as your own. A public agency's TikTok (136 s) and
-  YouTube Short (39 s), pasted without "my", route to `ask` with **Edit it as my video** first, which
-  start makes "(Recommended)". start/SKILL.md:49 says "a creator's video is for the teardown, not to
-  re-edit". The item has no question text, so the model writes its own. Done: without `--own`,
-  "Copy this creator's style" is first; each `ask` item carries the question wording.
-
-- "Finish setup" after the one-command install finds nothing to finish. After `bootstrap`, `setup.py
-  todo` prints "Nothing saved for later." while three keys, the style questions and Modal are all
-  missing (doctor shows them as `--`). `setup.py later bogus` is accepted, exit 0, and saved.
-  setup/SKILL.md:22 says "fill the times from doctor once it has run", but doctor prints no times.
-  Done: `todo` lists every missing optional step (keys, style, modal, matte), `later` rejects unknown
-  steps with the list, doctor prints the step times the plan quotes (or the SKILL gives them).
-
 - A browser capture with no `find` becomes a sticker of the page's headline. plan.py printed "'Jev'
   images/capture-1-jev.png: browser text would read at 22 px x-height; cut to the evidence as a
   sticker, 39 px" and the stills show the site's own four-line headline, which the speaker never said,

@@ -19,7 +19,7 @@ sentence what the tool is for. Run the command once they say yes. Check after ev
 ## 0. Say the plan first
 
 Before running anything, tell the user in plain words what setup does and why, as this list
-(fill the times from doctor once it has run):
+(the times are typical; say them as given):
 
 1. **Tools** (2-10 min, free): the programs that cut and draw the video. Required.
 2. **Keys** (about 5 min, free or under a cent a video): three accounts that make every edit
@@ -32,7 +32,7 @@ Then ask in the question box: **Start with the tools (Recommended)** / **Only ad
 Every step can be skipped and finished later: on a skip, run `python3 "$U" later <step>`
 (`typesafe`, `gemini`, `elevenlabs`, `modal`, `style`, `matte`) and say "Saved. Say *finish setup*
 any time to add it." When the user says "finish setup" (or "add my <x> key"), run
-`python3 "$U" todo` and go straight to those steps only.
+`python3 "$U" todo` and go straight to the steps it lists (every optional step not done yet).
 
 Work through them with a header on every step, e.g. **Step 2 of 4, keys: TypeSafe (1 of 3)**. For
 each step say what it is, why it helps them, what it costs, and what skipping it means. One short

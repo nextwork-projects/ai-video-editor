@@ -88,14 +88,23 @@ def _slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "video"
 
 
+QUESTION = {frozenset(("long", "music")): "What should I do with this audio?",
+            frozenset(("creator", "long")): "What should I do with this playlist?",
+            frozenset(("long", "own")): "Make short clips from this video, or edit the whole thing?",
+            frozenset(("creator", "own")): "Copy this creator's style, or is this your own video to edit?",
+            frozenset(("creator", "own", "long")): "Copy this creator's style, or is this your own video to edit?"}
+
+
 def _ask(url, options, **kw):
-    """options: kinds, recommended first."""
+    """options: kinds, recommended first. The question box's wording rides with them."""
+    kw.setdefault("question", QUESTION.get(frozenset(options), "Is this your own video to edit?"))
     return _item("ask", url, options=[{"kind": k, "label": LABEL[k]} for k in options], **kw)
 
 
 def _feed(url, **kw):
     """A podcast feed before route reads it: an ask with no options yet (pick_episode fills them)."""
     return _item("ask", url, feed=url, options=[], name=_slug(urlparse(url).netloc), **kw,
+                 question="Which episode of this podcast?",
                  note="a podcast feed: route lists its newest episodes to pick from")
 
 
@@ -285,9 +294,8 @@ def decide(item, duration=None, own=False):
         return _ask(d["url"], ["long", "own"], **_rest(d)) if own else dict(d, kind="long", action=ACTION["long"])
     if own:
         return dict(d, kind="own", action=ACTION["own"])
-    opts = ["own"]
-    if d.get("platform") in TEARDOWN_PLATFORMS:
-        opts.append("creator")
+    # Not said to be theirs: a public creator's video is for the teardown first, editing it second.
+    opts = ["creator", "own"] if d.get("platform") in TEARDOWN_PLATFORMS else ["own"]
     if not d.get("short") and (duration is None or duration >= CLIPS_MIN_S):
         opts.append("long")
     return _ask(d["url"], opts, **_rest(d)) if len(opts) > 1 else dict(d, kind="own", action=ACTION["own"])
@@ -752,11 +760,18 @@ def demo():
     assert decide(yt, 1500)["kind"] == "long"                       # a 25 min video -> clips
     assert decide(yt, 1500, own=True)["options"][0]["kind"] == "long"  # own and long: clips first, then whole edit
     short = decide(yt, 200)
-    assert [o["kind"] for o in short["options"]] == ["own", "creator", "long"], short
-    assert [o["kind"] for o in decide(yt, 60)["options"]] == ["own", "creator"]  # too short to clip
+    assert [o["kind"] for o in short["options"]] == ["creator", "own", "long"], short
+    assert [o["kind"] for o in decide(yt, 60)["options"]] == ["creator", "own"]  # too short to clip
     assert decide(yt, 200, own=True)["kind"] == "own"
     tt = classify("https://www.tiktok.com/@a/video/1")
-    assert [o["kind"] for o in decide(tt)["options"]] == ["own", "creator"]
+    assert [o["kind"] for o in decide(tt, 136)["options"]] == ["creator", "own"]   # someone else's TikTok: style first
+    sh = classify("https://www.youtube.com/shorts/abcDEF12345")
+    assert [o["kind"] for o in decide(sh, 39)["options"]] == ["creator", "own"], decide(sh, 39)
+    assert [o["kind"] for o in decide(classify("https://vimeo.com/76979871"), 300)["options"]] == ["own", "long"]
+    for it in [decide(tt, 136), decide(yt, 1500, own=True), decide(yt, 200)] + [classify(u) for u in (
+            "https://www.youtube.com/playlist?list=PL123", "https://example.com/episode.mp3", "~/a.mp3",
+            "https://feeds.example.com/show/rss")]:
+        assert it["kind"] == "ask" and it["question"].endswith("?"), it   # every question box has its wording
     assert decide(classify("https://x.com/a/status/1"), 30)["kind"] == "own"  # no teardown for X, no clips under 3 min
     assert classify("https://www.tiktok.com/@a/video/1", own=True)["kind"] == "video"  # classify stays pure
     # several videos from one creator -> one teardown; questions, creators, own footage, product, music

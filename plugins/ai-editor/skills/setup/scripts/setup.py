@@ -22,6 +22,8 @@ What got installed is recorded in ~/.ai-video-editor/env.json. AI_EDITOR_HOME mo
   python3 setup.py modal      install Modal (cloud renders) in the venv, then say how to log in
   python3 setup.py modal-check   one tiny function on Modal: proves the login works
   python3 setup.py matte      download the person-matting model (15 MB) for cards behind the speaker
+  python3 setup.py later <step>   save an optional step for later (typesafe gemini elevenlabs style modal matte)
+  python3 setup.py todo       every optional step not done yet ("finish setup")
   python3 setup.py demo       self-check
 
 Exit codes: 0 ready or done, 1 something to fix, 2 usage.
@@ -38,7 +40,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
-from ai_editor import keys, models  # noqa: E402
+from ai_editor import keys, models, profile  # noqa: E402
 
 OS = platform.system()  # Darwin, Windows, Linux
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
@@ -369,8 +371,25 @@ def later_load():
         return []
 
 
+MATTE = "rvm_mobilenetv3_fp32.onnx"
+STEP_HELP = {**KEY_HELP, "style": "the style questions (2 min)", "modal": "cloud renders on Modal (3 min)",
+             "matte": "cards behind the speaker (15 MB download)"}
+STEPS = tuple(STEP_HELP)   # every optional step `later` and `todo` know
+
+
+def step_done():
+    """Optional step -> is it done? The same checks doctor's rows read."""
+    return {**{k: (lambda k=k: bool(keys.get(k)[0])) for k in KEY_HELP},
+            "style": lambda: not profile.missing(profile.STYLE_QUESTIONS),
+            "modal": lambda: modal_status() == "ready",
+            "matte": lambda: (models.DIR / MATTE).exists()}
+
+
 def later(name):
     """Remember a skipped step (a key name, "modal", "style", "matte")."""
+    if name not in STEPS:
+        print(f"Unknown step: {name}. Steps: {', '.join(STEPS)}", file=sys.stderr)
+        return 2
     items = [x for x in later_load() if x != name] + [name]
     HOME.mkdir(parents=True, exist_ok=True)
     LATER.write_text(json.dumps(items))
@@ -380,21 +399,16 @@ def later(name):
 
 def still_later():
     """Skipped steps that are still not done."""
-    done = {"modal": lambda: modal_status() == "ready"}
-    out = []
-    for x in later_load():
-        if x in KEY_HELP and keys.get(x)[0]:
-            continue
-        if x in done and done[x]():
-            continue
-        out.append(x)
-    return out
+    done = step_done()
+    return [x for x in later_load() if not (x in done and done[x]())]
 
 
-def todo():
-    items = still_later()
-    print("\n".join(f"later  {x:<11} {KEY_HELP.get(x, '')}" for x in items) or "Nothing saved for later.")
-    return 0
+def todo(done=None):
+    """Every optional step not done yet, saved for later or never asked (bootstrap skips them all)."""
+    done = done or step_done()
+    items = [x for x in STEPS if not done[x]()]
+    print("\n".join(f"todo   {x:<11} {STEP_HELP[x]}" for x in items) or "Nothing left to finish.")
+    return items
 
 
 def clip_kind(text):
@@ -665,7 +679,7 @@ def step_matte(force=False):
     """The Robust Video Matting model matte.py cuts the speaker out with, then a 10-frame test cut."""
     if not VPY.exists():
         sys.exit("Run the venv step first.")
-    rel = "rvm_mobilenetv3_fp32.onnx"
+    rel = MATTE
     fresh = not (models.DIR / rel).exists()
     script = PLUGIN / "skills" / "style-edit" / "scripts" / "matte.py"
     subprocess.run([str(VPY), str(script), "fetch"], check=True)
@@ -713,6 +727,12 @@ def demo():
         HOME, LATER = Path(d), Path(d) / "later.json"
         later("style"); later("style")
         assert later_load() == ["style"] and "style" in still_later()
+        assert later("bogus") == 2 and later_load() == ["style"]   # an unknown step is refused, not saved
+    # finish setup after a bare bootstrap: every optional step is listed, none saved for later
+    assert todo({x: (lambda: False) for x in STEPS}) == list(STEPS) == [
+        "typesafe", "gemini", "elevenlabs", "style", "modal", "matte"]
+    assert todo({x: (lambda x=x: x != "gemini") for x in STEPS}) == ["gemini"]
+    assert set(step_done()) == set(STEPS)
     HOME, LATER = keep
     # Saved logins: one row each, with its age and the logout offer; a folder with no profile is not one
     with tempfile.TemporaryDirectory() as d:

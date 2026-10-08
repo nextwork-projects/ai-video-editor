@@ -4,6 +4,17 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Someone else's short video recommended editing it as your own. A public TikTok or YouTube Short pasted
+  without `--own` now asks with **Copy this creator's style** first; **Edit it as my video** is second.
+  Every `ask` item from `links.py route` carries its `question`, which start/SKILL.md says word for word.
+  Test: `links.py demo` (a 136 s TikTok and a 39 s Short put `creator` first; every ask has a question).
+
+- "Finish setup" after the one-command install found nothing to finish. `setup.py todo` now lists every
+  optional step not done yet (the three keys, the style questions, Modal, the matte), from the same checks
+  doctor reads, whether or not it was saved for later. `setup.py later <step>` refuses an unknown step with
+  exit 2 and the list of steps. setup/SKILL.md no longer asks for times doctor does not print. Test:
+  `setup.py demo`.
+
 - Audio-only podcast clips held still: only the captions moved, and `check.py render` WARNed "nothing moves"
   for the whole clip. The renderer now draws the cover itself (plan `cover`, from `clip.json`): a slow push
   on the sharp cover to 1.12x and the blurred ground easing back from 1.06x and drifting down, both on one
