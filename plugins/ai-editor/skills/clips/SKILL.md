@@ -67,6 +67,8 @@ It uses the venv's yt-dlp (setup installs it there, not on the PATH), caps the d
 1080x1920 clip needs no 4K; a 20-minute talk at 4K is several GB) and prints the file path:
 `clips/<name>/source.mp4`. Exit 3: the site wants a login (YouTube's "confirm you're not a bot").
 Ask in the question box before re-running with `--cookies-from-browser chrome` (or their browser).
+A podcast (RSS feed or Apple Podcasts show link): `route` lists its newest episodes as `ask` options; ask
+which one in the question box (newest first), then `fetch "<option url>" clips/<option name> --direct`.
 Only download what the user has the right to reuse: their own video, or one
 they have permission for. Say so once if the link is someone else's.
 

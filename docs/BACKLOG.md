@@ -32,13 +32,9 @@ Sources:
 
 ## Next
 
-- An RSS feed link downloads the wrong thing. `route` sends a podcast feed (442 episodes) straight
-  to clips with no episode chosen; `fetch` then runs yt-dlp with `--no-playlist`, which does not stop
-  a feed: `yt-dlp --no-playlist --simulate` on it was still walking episodes after 5 minutes. The
-  item's name is the feed host and the start of its path, cut at 40 characters. clips/SKILL.md never mentions podcasts,
-  Apple Podcasts or RSS, though the README lists them. Done: a feed becomes an `ask` with its newest
-  3 episode titles as options, fetch downloads only the chosen enclosure, the name is the episode
-  title, clips/SKILL.md says what a podcast link does.
+- Audio-only podcasts stop at clips: a feed or Spotify episode downloads `source.mp3`, but `clips.py` looks only
+  for `source.mp4/mov/mkv/webm`. Done: an audio source is found and each clip renders with a visual
+  (audiogram or captions on a still), tested on a feed episode.
 
 - Someone else's short video recommends editing it as your own. A public agency's TikTok (136 s) and
   YouTube Short (39 s), pasted without "my", route to `ask` with **Edit it as my video** first, which

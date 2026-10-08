@@ -4,7 +4,7 @@
     python3 links.py route "<the user's message>" [--own]   classify every link, probe video
                                                             lengths with yt-dlp, print the plan
     python3 links.py classify <url>... [--own]              offline: kind, normalised url, action
-    python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4] [--max-height 2160]
+    python3 links.py fetch <url> <edit dir> [--cookies-from-browser chrome] [--max-gb 4] [--max-height 2160] [--direct]
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
@@ -16,14 +16,19 @@ unsupported (a sentence to say to the user).
 classify() and decide() are pure: no network. `route` runs yt-dlp --dump-json --skip-download
 on single videos to read their length, resolves a YouTube /channel/ link to its @handle (yt-dlp, no
 videos read) and a Spotify episode or show to the same episode's audio in the show's own RSS feed
-(Spotify's embed page for the names, the free iTunes Search API for the feed); `fetch` downloads. Neither uses cookies unless the user
+(Spotify's embed page for the names, the free iTunes Search API for the feed), and a podcast feed (RSS,
+Atom, or an Apple Podcasts show page via the iTunes lookup API) to an `ask` with its newest episodes as
+options; `fetch --direct <episode url>` downloads only the chosen file, no yt-dlp. Every yt-dlp call takes
+one item at most and has a hard timeout. Neither uses cookies unless the user
 said yes in the question box (--cookies-from-browser).
 
 fetch exit codes: 0 ok (prints the file path) - 1 error (a sentence for the user) - 3 the site
 wants a login: ask the cookie question, then re-run with --cookies-from-browser.
 """
 import base64
+import email.utils
 import json
+from datetime import datetime
 import xml.etree.ElementTree as ET
 import os
 import platform
@@ -40,6 +45,12 @@ LONG_S = 8 * 60          # a video at least this long goes to clips
 CLIPS_MIN_S = 3 * 60     # shorter than this, "make clips" is not offered
 VIDEO_EXT = (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mts", ".3gp")
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac", ".opus")
+EPISODES = 10            # newest episodes a feed lists; the question box offers the first 3
+FEED_CAP = 32 << 20      # a 442-episode feed with show notes is a few MB
+PROBE_S, FETCH_S = 60, 30 * 60   # yt-dlp hard timeouts: reading a length, a whole download
+SLOW = ("yt-dlp did not finish in {} minutes on that link. Paste one video's own page link (not a playlist, "
+        "channel or podcast feed), or download the file in the browser and give me its path.")
+LOOKUP = "https://itunes.apple.com/lookup?id="
 TEARDOWN_PLATFORMS = ("tiktok", "youtube", "instagram")  # what creator-teardown's fetch.py lists
 ORDER = ("ask", "creator", "own", "video", "long", "product", "music", "unsupported")
 ACTION = {
@@ -80,6 +91,12 @@ def _ask(url, options, **kw):
     return _item("ask", url, options=[{"kind": k, "label": LABEL[k]} for k in options], **kw)
 
 
+def _feed(url, **kw):
+    """A podcast feed before route reads it: an ask with no options yet (pick_episode fills them)."""
+    return _item("ask", url, feed=url, options=[], name=_slug(urlparse(url).netloc), **kw,
+                 note="a podcast feed: route lists its newest episodes to pick from")
+
+
 def classify(raw, own=False):
     """One pasted thing -> {kind, url, action, ...}. Pure. `own`: the user said it is their video."""
     s = raw.strip().strip("<>").rstrip(".,;")
@@ -110,20 +127,25 @@ def classify(raw, own=False):
             or (host == "open.spotify.com" and parts[:1] and parts[0] in ("track", "album", "playlist", "artist"))):
         return _item("music", s)
 
-    # podcasts -> clips
+    # podcasts -> clips; a feed or a show page -> pick an episode first
     if host == "open.spotify.com" and parts[:1] and parts[0] in ("episode", "show"):
         return _item("long", s, platform="spotify", name=_slug("spotify-" + parts[-1]),
                      note="Spotify keeps most episodes locked. If the download fails, paste the same "
                           "episode from Apple Podcasts, YouTube or the show's RSS feed.")
+    if host == "podcasts.apple.com" and "i" not in q:
+        sid = re.search(r"/id(\d+)", path)
+        return _feed(s, platform="apple-podcasts", show_id=sid and sid.group(1))
+    if low.endswith((".rss", "/rss", "/rss/", "/feed", "/feed/", ".xml")) or re.match(r"(rss|\w*feeds?)\.", host):
+        return _feed(s)
     if host == "podcasts.apple.com":
         return _item("long", s, platform="apple-podcasts", name=_slug("podcast-" + (q.get("i") or parts[-1:])[0]),
-                     note=None if "i" in q else "a show page: paste one episode's link")
+                     note=None)
     if (host in ("overcast.fm", "pca.st", "castbox.fm", "podcasts.google.com", "pocketcasts.com", "anchor.fm",
                  "podcasters.spotify.com", "podbean.com", "buzzsprout.com", "simplecast.com", "transistor.fm",
                  "rss.com", "podcastaddict.com")
             or any(host.endswith("." + h) for h in ("libsyn.com", "podbean.com", "buzzsprout.com", "simplecast.com",
                                                      "transistor.fm", "captivate.fm", "megaphone.fm"))
-            or low.endswith((".rss", "/rss", "/feed", "/feed/")) or "/podcast" in low):
+            or "/podcast" in low):
         return _item("long", s, name=_slug(host + "-" + (parts[-1] if parts else "")))
 
     # app stores and extension stores -> product
@@ -320,20 +342,25 @@ def ytdlp():
     return [shutil.which("yt-dlp")] if shutil.which("yt-dlp") else None
 
 
+ONE = ["--no-playlist", "--playlist-items", "1"]   # a playlist or feed link reads one item, never the whole list
+
+
 def probe(url, cookies=None):
-    """(duration seconds, uploader handle) via yt-dlp, or (None, None)."""
+    """(duration seconds, uploader handle, note) via yt-dlp; (None, None, None) when unknown, the note on a timeout."""
     if not ytdlp():
-        return None, None
-    cmd = ytdlp() + ["--dump-json", "--skip-download", "--no-warnings", "--no-playlist", url]
+        return None, None, None
+    cmd = ytdlp() + ["--dump-json", "--skip-download", "--no-warnings", *ONE, url]
     if cookies:
         cmd[-1:-1] = ["--cookies-from-browser", cookies]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=PROBE_S)
         d = json.loads(r.stdout.splitlines()[0])
-    except (subprocess.TimeoutExpired, IndexError, ValueError):
-        return None, None
+    except subprocess.TimeoutExpired:
+        return None, None, SLOW.format(PROBE_S // 60)
+    except (IndexError, ValueError):
+        return None, None, None
     h = (d.get("uploader_id") or d.get("channel_id") or "").lstrip("@").lower() or None
-    return d.get("duration"), h
+    return d.get("duration"), h, None
 
 
 def channel_handle(url):
@@ -358,10 +385,13 @@ def handle_of(d):
     return None
 
 
-def _get(url):
+def _get(url, timeout=30, cap=FEED_CAP):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 ai-video-editor"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = r.read(cap + 1)
+    if len(data) > cap:
+        raise ValueError(f"{url} is over {cap >> 20} MB")
+    return data
 
 
 def _norm(s):
@@ -384,14 +414,88 @@ def spotify_audio(url, get=_get):
         found = json.loads(get("https://itunes.apple.com/search?media=podcast&entity=podcast&limit=10&term="
                                + quote(show)))["results"]
         feed = next(r["feedUrl"] for r in found if r.get("feedUrl") and _norm(r.get("collectionName")) == _norm(show))
-        root = ET.fromstring(get(feed))
+        eps = episodes(get(feed), limit=None)[1]
     except (AttributeError, KeyError, TypeError, ValueError, StopIteration, ET.ParseError, OSError):
         return None
-    for item in root.iter("item"):
-        enc = item.find("enclosure")
-        if enc is not None and enc.get("url") and _norm(item.findtext("title")) == _norm(title):
-            return {"audio": enc.get("url"), "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show"}
+    for e in eps:
+        if _norm(e["title"]) == _norm(title):
+            return {"audio": e["url"], "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show"}
     return None
+
+
+def _when(text):
+    """An RSS (RFC 2822) or Atom (ISO 8601) date -> datetime, or None."""
+    for parse in (email.utils.parsedate_to_datetime, lambda t: datetime.fromisoformat(t.replace("Z", "+00:00"))):
+        try:
+            return parse((text or "").strip())
+        except (TypeError, ValueError, IndexError):
+            pass
+    return None
+
+
+def _secs(text):
+    """itunes:duration ("3723", "62:03", "1:02:03") -> seconds, or None."""
+    try:
+        return sum(int(float(p)) * 60 ** i for i, p in enumerate(reversed((text or "").strip().split(":")))) or None
+    except ValueError:
+        return None
+
+
+def episodes(data, limit=EPISODES):
+    """RSS or Atom bytes -> (show title, [{title, date, duration, url}] newest first, only items with audio). Pure."""
+    def tag(e):
+        return e.tag.rsplit("}", 1)[-1] if isinstance(e.tag, str) else ""
+    root = ET.fromstring(data)
+    show = next((c.text or "" for c in (root if root.find("channel") is None else root.find("channel")) if tag(c) == "title"), "").strip()
+    out = []
+    for el in root.iter():
+        if tag(el) not in ("item", "entry"):
+            continue
+        f, url = {}, None
+        for c in el:
+            t = tag(c)
+            if t == "enclosure" or (t == "link" and c.get("rel") == "enclosure"):
+                url = url or c.get("url") or c.get("href")
+            elif t not in f:
+                f[t] = (c.text or "").strip()
+        if not url:
+            continue
+        d = _when(f.get("pubDate") or f.get("published") or f.get("updated"))
+        out.append({"title": f.get("title") or "untitled", "date": d.date().isoformat() if d else None,
+                    "duration": _secs(f.get("duration")), "url": url, "_t": d.timestamp() if d else float("-inf")})
+    out.sort(key=lambda e: e.pop("_t"), reverse=True)    # stable: undated items keep the feed's order, last
+    return show, out[:limit]
+
+
+def _long(s):
+    return f"{s // 3600} h {s % 3600 // 60} min" if s >= 3600 else f"{s // 60} min" if s else ""
+
+
+def pick_episode(it, get=None):
+    """A feed (or an Apple show page, via the iTunes lookup API) -> an ask whose options are its newest
+    episodes, recommended newest first; `episodes` holds the newest 10. A podcast-host link that is not a
+    feed comes back unchanged. One capped, timed GET per URL, no yt-dlp."""
+    get = get or (lambda u: _get(u, timeout=15))
+    feed = it.get("feed") or it["url"]
+    try:
+        if it.get("show_id"):
+            feed = json.loads(get(LOOKUP + it["show_id"]))["results"][0]["feedUrl"]
+        show, eps = episodes(get(feed))
+    except (KeyError, IndexError, TypeError, ValueError, ET.ParseError, OSError):
+        show, eps = "", []
+    if not eps:
+        return dict(it, note="Could not read that podcast feed. Paste one episode's link, or its audio file's link.") \
+            if it.get("feed") else it
+    for e in eps:
+        e["name"] = _slug(e["title"])
+    opts = [{"kind": "long", "label": e["title"][:60], "url": e["url"], "name": e["name"],
+             "description": ", ".join(x for x in (e["date"], _long(e["duration"] or 0)) if x)} for e in eps[:3]]
+    out = dict(it, kind="ask", action=ACTION["ask"], url=feed, feed=feed, episodes=eps, options=opts,
+               question=f"Which episode of {show or 'this podcast'}?",
+               note=f"{len(eps)} newest episodes in `episodes`; fetch the picked one's url with --direct")
+    if feed != it["url"]:
+        out["source"] = it["url"]
+    return out
 
 
 def resolve(it):
@@ -402,6 +506,9 @@ def resolve(it):
         if h:
             it = dict(it, url=f"https://www.youtube.com/@{h}", handle=h, source=it["url"])
             it.pop("note", None)
+    if it.get("feed") or (it["kind"] == "long" and not it.get("platform")
+                          and not urlparse(it["url"]).path.lower().endswith(VIDEO_EXT + AUDIO_EXT)):
+        it = pick_episode(it)
     if it.get("platform") == "spotify":
         a = spotify_audio(it["url"])
         if a:
@@ -417,7 +524,9 @@ def route(text, own=False):
     for it in items:
         it = resolve(it)
         if it["kind"] == "video":
-            dur, h = (None, None) if it.get("short") and own else probe(it["url"])
+            dur, h, slow = (None, None, None) if it.get("short") and own else probe(it["url"])
+            if slow:
+                it["note"] = slow
             if h and not it.get("handle") and it.get("platform") in TEARDOWN_PLATFORMS:
                 it["handle"] = h
             it = decide(it, dur, own)
@@ -436,9 +545,15 @@ def video_format(max_height=2160):
     return f"bv*[vcodec^=avc1][height<={h}]+ba[ext=m4a]/b[ext=mp4][height<={h}]/bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
-def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160):
-    """Download one own-footage link into edit_dir. Returns (code, message)."""
+def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160, direct=False):
+    """Download one own-footage link into edit_dir. Returns (code, message). `direct`: a file URL (a podcast
+    episode's enclosure), downloaded as it is, no yt-dlp."""
+    if direct:
+        return http_get(url, Path(edit_dir), max_gb)
     it = classify(url, own=True)
+    if it.get("feed"):
+        return 1, ("That is a podcast feed, not one episode. Run links.py route on it, pick an episode, "
+                   "then fetch that episode's url with --direct.")
     if it["kind"] == "video":
         it = decide(it, None, own=True)
     if it.get("platform") == "spotify":
@@ -456,11 +571,14 @@ def fetch(url, edit_dir, cookies=None, max_gb=4.0, max_height=2160):
         if not y:
             return 1, "yt-dlp is not installed. Run the setup skill, then try again."
         cmd = y + ["-f", video_format(max_height), "--merge-output-format", "mp4",
-                   "--no-playlist", "--no-warnings", "--max-filesize", f"{int(max_gb * 1024)}M",
+                   *ONE, "--no-warnings", "--max-filesize", f"{int(max_gb * 1024)}M",
                    "-o", str(edit / "source.%(ext)s"), "--print", "after_move:filepath", it["url"]]
         if cookies:
             cmd[-1:-1] = ["--cookies-from-browser", cookies]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=FETCH_S)
+        except subprocess.TimeoutExpired:
+            return 1, SLOW.format(FETCH_S // 60)
         out = [ln for ln in r.stdout.splitlines() if ln.strip()]
         if r.returncode == 0 and out and Path(out[-1]).is_file():
             return 0, out[-1]
@@ -565,7 +683,7 @@ CASES = [  # (pasted, own, kind, expected normalised url or None)
     ("C:\\Users\\me\\Videos\\take.mp4", False, "own", None),
     ("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", False, "long", None),
     ("https://podcasts.apple.com/us/podcast/some-show/id123456789?i=1000600000000", False, "long", None),
-    ("https://feeds.example.com/show/rss", False, "long", None),
+    ("https://feeds.example.com/show/rss", False, "ask", None),
     ("https://somepodcast.libsyn.com/episode-12", False, "long", None),
     ("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", False, "music", None),
     ("https://soundcloud.com/artist/track", False, "music", None),
@@ -676,6 +794,64 @@ def demo():
         assert it["kind"] == "long" and it["url"] == "https://cdn.example.com/12.mp3" and "RSS" in it["note"], it
     finally:
         g["spotify_audio"] = saved
+    # a podcast feed is never clips straight away: pick an episode, newest first, then download only it
+    rss = b"""<?xml version="1.0"?><rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+        <title>Some Show</title>""" + b"".join(
+        f"""<item><title>Ep {n}: Talk number {n}</title><pubDate>{d:02d} Sep 2026 08:00:00 +0000</pubDate>
+            <itunes:duration>{'1:02:03' if n == 13 else 3000 + n}</itunes:duration>
+            <enclosure url="https://cdn.example.com/{n}.mp3?x=1" type="audio/mpeg"/></item>""".encode()
+        for n, d in ((12, 1), (13, 8), *((k, 1) for k in range(1, 12)))) + b"</channel></rss>"
+    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom Show</title>
+        <entry><title>Old</title><published>2026-01-01T00:00:00Z</published>
+          <link rel="enclosure" href="https://cdn.example.com/old.m4a"/></entry>
+        <entry><title>New</title><published>2026-02-01T00:00:00Z</published>
+          <link rel="alternate" href="https://example.com/new"/><link rel="enclosure" href="https://cdn.example.com/new.m4a"/></entry>
+        <entry><title>No audio</title><published>2026-03-01T00:00:00Z</published></entry></feed>"""
+    show, eps = episodes(rss, limit=None)
+    assert show == "Some Show" and len(eps) == 13 and len(episodes(rss)[1]) == EPISODES and eps[0]["title"] == "Ep 13: Talk number 13", eps[:2]
+    assert eps[0]["date"] == "2026-09-08" and eps[0]["duration"] == 3723 and eps[0]["url"] == "https://cdn.example.com/13.mp3?x=1"
+    assert episodes(atom)[1] and [e["title"] for e in episodes(atom)[1]] == ["New", "Old"], episodes(atom)
+    assert episodes(atom)[1][0]["url"] == "https://cdn.example.com/new.m4a"
+    for raw in ("https://feeds.example.com/show/rss", "https://feeds.megaphone.fm/ABC123", "https://anchor.fm/s/abc/podcast/rss",
+                "https://example.com/show.xml", "https://podcasts.apple.com/us/podcast/some-show/id123456789"):
+        it = classify(raw)
+        assert it["kind"] == "ask" and it.get("feed") and not it["options"], (raw, it)   # never "long" with no episode
+    assert classify("https://podcasts.apple.com/us/podcast/some-show/id123456789")["show_id"] == "123456789"
+    web = {"https://feeds.example.com/show/rss": rss,
+           "https://itunes.apple.com/lookup?id=123456789": json.dumps({"results": [{"feedUrl": "https://feeds.example.com/show/rss"}]}).encode()}
+    for raw in ("https://feeds.example.com/show/rss", "https://podcasts.apple.com/us/podcast/some-show/id123456789"):
+        it = pick_episode(classify(raw), get=lambda u, **k: web[u])
+        assert it["kind"] == "ask" and it["url"] == "https://feeds.example.com/show/rss" and len(it["episodes"]) == EPISODES, it
+        o = it["options"]
+        assert len(o) == 3 and o[0]["kind"] == "long" and o[0]["url"] == "https://cdn.example.com/13.mp3?x=1", o
+        assert o[0]["name"] == "ep-13-talk-number-13" and "2026-09-08" in o[0]["description"] and "1 h 2 min" in o[0]["description"], o[0]
+        assert "Some Show" in it["question"], it
+    dead = pick_episode(classify("https://feeds.example.com/show/rss"), get=offline)
+    assert dead["kind"] == "ask" and not dead["options"] and "episode" in dead["note"], dead
+    assert pick_episode(classify("https://somepodcast.libsyn.com/episode-12"), get=lambda u, **k: b"<html>")["kind"] == "long"
+    big = []
+    try:
+        _get("data:application/octet-stream;base64," + base64.b64encode(b"x" * 100).decode(), cap=10)
+    except ValueError as e:
+        big.append(str(e))
+    assert big and "over" in big[0], big   # the size cap holds
+    code, msg = fetch("https://feeds.example.com/show/rss", "/nonexistent-dir-never-made")
+    assert code == 1 and "episode" in msg, msg     # a feed never reaches yt-dlp
+    # yt-dlp on a link that can be a playlist: one item at most, a hard timeout, a plain sentence on timeout
+    cmds = []
+    def slow(cmd, **kw):
+        cmds.append((cmd, kw))
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+    saved = g["ytdlp"], subprocess.run
+    try:
+        g["ytdlp"], subprocess.run = (lambda: ["yt-dlp"]), slow
+        assert probe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")[:2] == (None, None)
+        code, msg = fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "/nonexistent-dir-never-made")
+    finally:
+        g["ytdlp"], subprocess.run = saved
+    assert code == 1 and "paste" in msg.lower() and "minutes" in msg, msg
+    for cmd, kw in cmds:
+        assert kw.get("timeout") and "--no-playlist" in cmd and cmd[cmd.index("--playlist-items") + 1] == "1", cmd
     print(f"demo ok ({len(CASES)} URL shapes)")
 
 
@@ -704,7 +880,7 @@ def main():
         cookies = a[a.index("--cookies-from-browser") + 1] if "--cookies-from-browser" in a else None
         max_gb = float(a[a.index("--max-gb") + 1]) if "--max-gb" in a else 4.0
         height = int(a[a.index("--max-height") + 1]) if "--max-height" in a else 2160
-        code, msg = fetch(a[1], a[2], cookies, max_gb, height)
+        code, msg = fetch(a[1], a[2], cookies, max_gb, height, "--direct" in a)
         print(msg, file=sys.stdout if code == 0 else sys.stderr)
         return code
     print(__doc__, file=sys.stderr)

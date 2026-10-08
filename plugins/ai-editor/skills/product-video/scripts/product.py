@@ -1090,7 +1090,7 @@ def music_cmd(cookies=None, y=None):
         y = links.ytdlp()
     if not y:
         sys.exit("ERROR: yt-dlp is not installed. Run the setup skill, then try again.")
-    return [*y, "--no-playlist", *(["--cookies-from-browser", cookies] if cookies else [])]
+    return [*y, "--no-playlist", "--playlist-items", "1", *(["--cookies-from-browser", cookies] if cookies else [])]
 
 
 def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=None):
@@ -1101,7 +1101,10 @@ def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=No
     d = Path(d)
     (d / "audio").mkdir(exist_ok=True)
     base = music_cmd(cookies)
-    r = subprocess.run(base + ["-j", url], capture_output=True, text=True)
+    try:
+        r = subprocess.run(base + ["-j", url], capture_output=True, text=True, timeout=links.PROBE_S)
+    except subprocess.TimeoutExpired:
+        sys.exit("ERROR: " + links.SLOW.format(links.PROBE_S // 60))
     meta = json.loads(r.stdout or "{}")
     if not meta:
         if not cookies and links.LOGIN.search(r.stderr):
@@ -1109,7 +1112,11 @@ def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=No
                      "--cookies-from-browser <browser>, or offer the generated score.")
         sys.exit("ERROR: yt-dlp could not read that link: " + (r.stderr.strip().splitlines() or ["no output"])[-1][:300])
     raw = d / "audio" / "track-src"
-    subprocess.run(base + ["-f", "bestaudio", "-x", "--audio-format", "wav", "-o", f"{raw}.%(ext)s", url], check=True, capture_output=True)
+    try:
+        subprocess.run(base + ["-f", "bestaudio", "-x", "--audio-format", "wav", "-o", f"{raw}.%(ext)s", url], check=True,
+                       capture_output=True, timeout=links.FETCH_S)
+    except subprocess.TimeoutExpired:
+        sys.exit("ERROR: " + links.SLOW.format(links.FETCH_S // 60))
     src = next(d.glob("audio/track-src.wav"))
     out = d / "audio" / "track.wav"
     cut = (["-ss", str(start)] if start else []) + (["-to", str(end)] if end else [])
@@ -1153,7 +1160,7 @@ def cmd_tts(d, text, voice):
 def demo():
     # music: the pinned yt-dlp, and no browser cookies unless the user said yes (--cookies-from-browser <browser>)
     y = ["/venv/bin/python", "-m", "yt_dlp"]
-    assert music_cmd(y=y) == y + ["--no-playlist"], music_cmd(y=y)
+    assert music_cmd(y=y) == y + ["--no-playlist", "--playlist-items", "1"], music_cmd(y=y)
     assert music_cmd("firefox", y=y)[-2:] == ["--cookies-from-browser", "firefox"]
     site = {"domain": "example.com", "viewport": [1440, 900], "title": "Example", "description": "",
             "tiles": [{"src": "images/tile-0.jpg", "y": 0, "size": [2880, 1800]}, {"src": "images/tile-1.jpg", "y": 900, "size": [2880, 1800]}],

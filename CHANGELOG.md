@@ -4,6 +4,16 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A podcast feed link (RSS or Atom, 442 episodes) went straight to clips with no episode picked, and
+  yt-dlp `--no-playlist` was still walking the feed after 5 minutes. `links.py route` now reads the feed
+  itself (stdlib, 15 s timeout, 32 MB cap; an Apple Podcasts show page through the iTunes lookup API)
+  and returns an `ask` with the newest 10 episodes (title, date, length, audio url), the newest 3 as
+  options, newest first. `fetch --direct` downloads only the picked file, no yt-dlp; a feed passed to
+  `fetch` says to pick an episode. Every yt-dlp call on a link that can be a playlist (`probe`, `fetch`,
+  product-video's music step) adds `--playlist-items 1` and a hard timeout (60 s to read, 30 min to
+  download) that ends in a sentence saying what to paste instead. clips/SKILL.md says what a podcast
+  link does. Measured on one public feed: episode list in 0.65 s, download started 1.7 s later.
+
 - `check.py render` FAILed a behind card the cutout already covers ("drawn over the face ... up to 41%
   of the head", fix: face.py, plan again, which loops). It looked the matte up by its 4-a-second
   sample number instead of the plan's frame, so no matte was found, and ffmpeg's fps filter handed
