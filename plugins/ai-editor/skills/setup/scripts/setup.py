@@ -338,7 +338,8 @@ def saved_logins(home=None):
     root = Path(home or HOME) / "browser"
     if not root.is_dir():
         return []
-    return [(d.name, int((time.time() - (d / "Default").stat().st_mtime) // 86400), d)
+    # max(0, ...): a folder written a moment ago can carry an mtime just ahead of time.time() (Windows)
+    return [(d.name, max(0, int((time.time() - (d / "Default").stat().st_mtime) // 86400)), d)
             for d in sorted(root.iterdir()) if (d / "Default").is_dir()]
 
 
