@@ -272,21 +272,29 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None, quiet=()):
 
 
 ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start to when it has settled
+PUNCH_S = 0.16           # StyleEdit.tsx PUNCH_S: how long a punch zoom takes to travel
 
 
 def clear_entrances(zooms, cards):
-    """A zoom change never lands while a card is entering: it moves to just before the card starts (a zoom that
-    gets shorter than 0.5 s, or runs into the one before, is dropped). Two moves at once compete for the eye,
-    and the render check cannot time a card's landing while the footage under it jumps."""
+    """A zoom change never lands while a card is entering: it moves to finish just before the card starts, or,
+    for a full-frame scene, to its middle, hidden under it (the footage comes back at the new zoom, like a cut).
+    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap);
+    a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
+    cannot time a card's landing while the footage under it jumps."""
     for c in cards:
-        a, b = c["start"] - ENTER_S[0], c["start"] + ENTER_S[1]
+        a, b = c["start"] - ENTER_S[0] - PUNCH_S, c["start"] + ENTER_S[1]
+        to = round((c["start"] + c["end"]) / 2, 3) if c.get("layout") == "scene" else round(max(0.0, a), 3)
         for z in zooms:
             for k in ("start", "end"):
                 if a < z[k] < b:
-                    z[k] = round(max(0.0, a), 3)
+                    z[k] = to
     out = []
-    for z in zooms:
-        if z["end"] - z["start"] >= 0.5 and (not out or z["start"] >= out[-1]["end"]):
+    for z in sorted(zooms, key=lambda z: z["start"]):
+        if z["end"] - z["start"] < 0.5:
+            continue
+        if out and z["start"] < out[-1]["end"] + PUNCH_S:
+            out[-1]["end"] = max(out[-1]["end"], z["end"])
+        else:
             out.append(z)
     return out
 
@@ -776,14 +784,16 @@ def sticker_xh(c, aspect):
 
 
 XH_PER_LINE = 0.42     # a DOM line box is about 1.2 em tall and a Latin x-height about 0.5 em
+CAPTION_LEADING = 1.14  # em, Captions.tsx lineHeight: a sticker cut from a page never sets its lines tighter
+LINE_BOX_EM = 1.2
 # ponytail: a crop cut to the evidence may show the capture up to 2 frame px per PNG px (a 2x capture's body text
 # needs about 1.8 to read); soft but legible. Upgrade: re-shoot the crop at a higher deviceScaleFactor instead.
 MAX_UP = 2.0
 
 
-def evidence_lines(c):
+def evidence_lines(c, said=False):
     """The text lines (image px) a capture is shown for: those under its marks or highlight, else its largest
-    type (the headline). Inside a sticker's crop only."""
+    type (the headline; [] with said=True: only words the speaker says count). Inside a sticker's crop only."""
     lines = [ln[:4] for ln in c.get("lines") or []]
     if c.get("format") == "sticker":
         x, y, w, h = sticker_crop(c)
@@ -795,8 +805,10 @@ def evidence_lines(c):
     rects += [[a * iw, b * ih, cw * iw, ch * ih] for a, b, cw, ch in (c.get("highlight") or {}).get("rects") or []]
     hit = [ln for ln in lines if any(r[0] - 4 <= ln[0] + ln[2] / 2 <= r[0] + r[2] + 4 and r[1] - 4 <= ln[1] + ln[3] / 2 <= r[1] + r[3] + 4
                                      for r in rects)]
+    if hit or said:
+        return hit
     top = max(ln[3] for ln in lines)
-    return hit or [ln for ln in lines if ln[3] >= 0.85 * top]
+    return [ln for ln in lines if ln[3] >= 0.85 * top]
 
 
 def capture_scale(c, aspect):
@@ -842,18 +854,37 @@ def small_lines(c, aspect):
             and ln[1] + ln[3] <= y + h + 1 and XH_PER_LINE * ln[3] * k < READ_XH]
 
 
+def tight(ln, lines):
+    """Whether a text line (image px) has a neighbour above or below it closer than the captions' leading."""
+    return any(o[:4] != ln[:4] and o[0] < ln[0] + ln[2] and ln[0] < o[0] + o[2]
+               and 0 < abs(o[1] - ln[1]) < CAPTION_LEADING / LINE_BOX_EM * max(o[3], ln[3]) for o in lines)
+
+
 def readable_captures(cards, aspect):
     """On vertical a capture whose evidence would render under READ_XH becomes a sticker cropped to that
     evidence: the crop takes the band's shape around the evidence's first lines (as many as still read) at the
-    largest size that holds them (at most MAX_UP frame px per picture px), every line whole. One that still reads small is left for check.py to FAIL."""
+    largest size that holds them (at most MAX_UP frame px per picture px), every line whole. The evidence is the
+    words the speaker says, marked on the page ("find" / "highlight"): with none marked, or marked words set
+    tighter than the captions, the card is dropped (never a sticker of the page's own headline, never lines that
+    touch). One that still reads small is left for check.py to FAIL."""
     if aspect != "9:16":
         return cards
     W, H = SIZES[aspect]
+    keep = []
     for c in cards:
+        keep.append(c)
         if c.get("layout") == "scene" or not c.get("src") or c.get("format") in ("sticker", "plain") or not c.get("lines"):
             continue
         xh = capture_xh(c, aspect)
         if xh is None or xh >= READ_XH:
+            continue
+        ev = sorted(evidence_lines(c, said=True), key=lambda ln: (ln[1], ln[0]))
+        if not ev:
+            keep.pop()
+            print(f"warning: '{c['trigger_word']}' {c['src']}: dropped. Its text would read at {xh:.0f} px x-height "
+                  f"(under {READ_XH}) and no words the speaker says are marked on the page to cut it to. To keep it, "
+                  "give the capture beat \"format\": \"sticker\" and a mark whose \"find\" is a phrase said there, re-run capture.mjs and plan.py",
+                  file=sys.stderr)
             continue
         w, h = c["box"][2] / 100 * W, c["box"][3] / 100 * H
         e = max(8, min(w, h) / 100 * 1.6)
@@ -867,8 +898,16 @@ def readable_captures(cards, aspect):
             f = min(MAX_UP, aw / (gx1 - gx0 + 2 * pad), ah / (gy1 - gy0 + 2 * pad))
             return f, (gx0, gy0, gx1, gy1), XH_PER_LINE * sorted(ln[3] for ln in group)[len(group) // 2] * f * unit
 
+        # a headline set tighter than the captions has its letters touch once it stands alone on a card, and a
+        # crop of the picture cannot open its lines up: only a sticker beat re-sets the sentence (capture.mjs)
+        if tight(ev[0], c["lines"]):
+            keep.pop()
+            print(f"warning: '{c['trigger_word']}' {c['src']}: dropped. Its text would read at {xh:.0f} px x-height "
+                  f"(under {READ_XH}) and the marked words are set tighter than the captions ({CAPTION_LEADING} line height), "
+                  "so a crop would show their lines touching. To keep it, give the beat \"format\": \"sticker\" (capture.mjs "
+                  "re-sets the sentence with open lines), re-run capture.mjs and plan.py", file=sys.stderr)
+            continue
         # the evidence from its first line on, as many lines as still read at READ_XH
-        ev = sorted(evidence_lines(c), key=lambda ln: (ln[1], ln[0]))
         group = ev[:1]
         for ln in ev[1:]:
             if fit(group + [ln])[2] < READ_XH:
@@ -892,11 +931,11 @@ def readable_captures(cards, aspect):
             new["props"]["crop"] = [x, round(top), w, round(bot - top)]
         got = capture_xh(new, aspect)
         if got and got > xh:
-            print(f"'{c['trigger_word']}' {c['src']}: {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height; "
-                  f"cut to the evidence as a sticker, {got:.0f} px", file=sys.stderr)
+            print(f"'{c['trigger_word']}' {c['src']}: its {c.get('format') or 'shot'} text would read at {xh:.0f} px x-height, "
+                  f"so plan.py cut it to the marked words ({len(group)} line(s)) as a sticker: {got:.0f} px", file=sys.stderr)
             c.clear()
             c.update(new)
-    return cards
+    return keep
 
 
 def heat(gl, bx):
@@ -1972,6 +2011,15 @@ def demo():
     moves = sorted([x["start"] for x in z] + [x["end"] for x in z if x["end"] < t])
     assert len(z) >= t / 10 and max(b - a for a, b in zip([0.0] + moves, moves + [t])) <= 5.0 + 1e-6, (t, moves)
     assert place_zooms({}, words, t, []) == []
+    # the sample's punch at 28.05 s, 0.15 s before a flow scene at 28.2 s, snapped: a zoom change in a scene's
+    # entrance goes under the scene (hidden); before a box card it finishes before the card starts; two zooms
+    # closer than a punch's travel join (the out move would be cut short)
+    zp = lambda a, b: {"start": a, "end": b, "scale": 1.18, "kind": "punch", "ease_s": 0}
+    sc = clear_entrances([zp(24.0, 28.5), zp(31.0, 34.0)], [{"start": 28.2, "end": 36.0, "layout": "scene"}])
+    assert [(z["start"], z["end"]) for z in sc] == [(24.0, 34.0)], sc
+    bx = clear_entrances([zp(24.0, 28.5)], [{"start": 28.2, "end": 30.0, "layout": "box"}])
+    assert bx[0]["end"] + PUNCH_S <= 28.2 - ENTER_S[0] + 1e-6, bx
+    assert len(clear_entrances([zp(1.0, 3.0), zp(3.1, 5.0)], [])) == 1
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
         assert audio_cover(td, words) is None
         (Path(td) / "cover.png").write_bytes(b"")

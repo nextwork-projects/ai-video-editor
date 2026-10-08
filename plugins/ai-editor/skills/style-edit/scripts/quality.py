@@ -156,21 +156,28 @@ def spikes(d, skip=()):
 
 
 def jitter(series):
-    """Turns in a position series taken at speed on both sides: [(index, min(in, out) / peak)]."""
+    """Turns in a position series taken at speed on both sides: [(index, min(in, out) / peak)]. Each side must
+    move for 2+ frames: an edge that steps out for one frame and back is the ink threshold flickering on a
+    fading or thin-edged card (a logo's rays), not the card turning back."""
     import numpy as np
     d = np.diff(np.asarray(series, float))
     peak = float(np.abs(d).max()) if len(d) else 0.0
     if peak < REV_MIN_PX:
         return []
-    out, last = [], None          # last = (sign, speed) of the last non-zero step
+    runs = []                     # [sign, steps, speed of its first step, speed of its last step, index of its first]
     for i, v in enumerate(d):
         if v == 0:
             continue
-        if last and np.sign(v) != last[0]:
-            r = min(last[1], abs(v)) / peak
-            if r >= REV_RATIO and min(last[1], abs(v)) >= 1:
-                out.append((i, round(r, 2)))
-        last = (np.sign(v), abs(v))
+        if runs and np.sign(v) == runs[-1][0]:
+            runs[-1][1] += 1
+            runs[-1][3] = abs(v)
+        else:
+            runs.append([np.sign(v), 1, abs(v), abs(v), i])
+    out = []
+    for a, b in zip(runs, runs[1:]):
+        r = min(a[3], b[2]) / peak
+        if a[1] >= 2 and b[1] >= 2 and r >= REV_RATIO and min(a[3], b[2]) >= 1:
+            out.append((b[4], round(r, 2)))
     return out
 
 
@@ -579,11 +586,13 @@ def zoom_steps(frames):
     return out
 
 
-def zoom_verdict(steps):
-    """None (smooth, or too small to judge), "snap" or "jerk" for one zoom move's per-frame log-scale steps."""
+def zoom_verdict(steps, planned=0.0):
+    """None (smooth, or too small to judge), "snap" or "jerk" for one zoom move's per-frame log-scale steps.
+    planned: the move's log-scale; a frame jumping most of it while the move nets nothing (out and straight
+    back in) is a snap too."""
     tot = sum(steps)
     if abs(tot) < ZOOM_MIN_LOG:
-        return None
+        return "snap" if planned >= ZOOM_MIN_LOG and steps and max(map(abs, steps)) > SNAP_SHARE * planned else None
     v = [x if tot > 0 else -x for x in steps]       # speed along the move
     peak = max(v)
     if peak > SNAP_SHARE * abs(tot):
@@ -597,21 +606,26 @@ def zoom_verdict(steps):
 
 
 def zoom_moves(video, plan, w=270, h=480):
-    """[(t, kind, steps)] for every zoom move on the render: in at start, back out at end."""
+    """[(t, kind, steps, planned log-scale)] for every zoom move on the render: in at start, back out at end.
+    A move under a full-frame scene is hidden (not judged); one just before a scene is read up to its start."""
     import numpy as np
     fps = plan["fps"]
+    scenes = [(c["start"], c["end"]) for c in plan.get("cards") or [] if c.get("layout") == "scene"]
     out = []
     for z in plan["zooms"]:
         e = max(0.8, z.get("ease_s") or 0) if z.get("kind") == "push" and z.get("ease_s") else 0.16
         for t in (z["start"], z["end"] - (e if z.get("kind") == "push" and z.get("ease_s") else 0)):
-            a, d = max(0.0, t - 0.1), e + 0.25
+            if any(a <= t < b for a, b in scenes):
+                continue
+            a = max(0.0, t - 0.1)
+            d = min([e + 0.25] + [s0 - a for s0, _ in scenes if s0 > t])
             raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", str(video), "-vf",
                                   f"fps={fps},scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
             fr = np.frombuffer(raw, np.uint8)[: len(raw) // (w * h) * w * h].reshape(-1, h, w)
             o = (z.get("origin") or [50, 30])[1] / 100
             band = fr[:, int(max(0, o) * h):int(min(1, o + 0.3) * h)]     # the head down from its top (the origin): not cards, not captions
             if len(band) >= 3:
-                out.append((round(t, 2), z.get("kind", "punch"), zoom_steps(list(band))))
+                out.append((round(t, 2), z.get("kind", "punch"), zoom_steps(list(band)), math.log(z.get("scale") or 1)))
     return out
 
 
@@ -790,7 +804,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         meas["cover_push"] = {"planned": round(want, 4), "measured": round(got, 4)}
         if want >= ZOOM_MIN_LOG / 3 and got < want / 2:
             out.append(F("WARN", 0.0, f"the cover's push did not render: {got:.3f} of {want:.3f} log-scale",
-                         "render again with the current StyleEdit.tsx (CoverView); check plan.json cover.src exists"))
+                         "check plan.json cover.src names a file in the edit folder, then render again"))
     pace = (style or {}).get("pace") or {}
     static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
     runs, k0 = [], None
@@ -808,13 +822,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     mins = dur / 60
     landed = []
     meas["zoom_moves"] = []
-    for t, kind, st in zoom_moves(video, plan):
-        v = zoom_verdict(st)
+    for t, kind, st, planned in zoom_moves(video, plan):
+        v = zoom_verdict(st, planned)
         meas["zoom_moves"].append({"t": t, "kind": kind, "verdict": v,
                                    "peak_share": round(max(map(abs, st)) / max(1e-6, abs(sum(st))), 2) if st else None})
         if v:
             out.append(F("WARN", t, f"the {kind} zoom at {t:.2f} s {'snaps in one frame' if v == 'snap' else 'surges or reverses mid-move'}",
-                         "render with the current StyleEdit.tsx (eased punches, pushes of 0.8 s or more); a zoom on a cut hides in the cut"))
+                         "set \"kind\": \"push\" under \"zoom\" in style.json (an eased move of 0.8 s or more), then plan and render again"))
     meas["rhythm"] = {"cuts_per_min": round((len(hard) + len(jump)) / mins, 1),
                       "moves_per_min": round(len(moves) / mins, 1),
                       "zooms_per_min": round(len(plan["zooms"]) / mins, 1)}
@@ -889,7 +903,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             r["jitter"] = max(w for _, w in worst)
             out.append(F("WARN", c["start"], f"{name}'s outline turns back at speed {len(worst)} time(s) "
                          f"(worst {r['jitter']:.0%} of its peak speed both sides of the turn)",
-                         "jitter: ease into turns (spring damping up, or one axis at a time)"))
+                         "give the beat \"entrance\": \"fade\" in visuals.json, then plan and render again"))
 
     if style:
         for nm, got, want in (("cuts", meas["rhythm"]["cuts_per_min"], (pace.get("cuts_per_10s") or 0) * 6),
@@ -1062,6 +1076,11 @@ def demo():
     assert zoom_verdict(zoom_steps([at(1.2 ** out2(min(1, i / 5))) for i in range(9)])) is None
     assert zoom_verdict(zoom_steps([at(1.2 ** ((1 - np.cos(np.pi * i / 24)) / 2)) for i in range(25)])) is None
     assert zoom_verdict([0.01, 0.03, 0.005, 0.03, 0.01]) == "jerk" and zoom_verdict([0.01] * 2) is None
+    # two punches touching: 1.2x drops to 1x in one frame and eases straight back, netting nothing: a snap
+    back = zoom_steps([at(1.2)] * 3 + [at(1.2 ** out2(min(1, i / 5))) for i in range(6)])
+    assert zoom_verdict(back) is None and zoom_verdict(back, math.log(1.2)) == "snap"
+    # every WARN's fix is something the model can do: never "render with the current renderer"
+    assert "current StyleEdit" not in Path(__file__).read_text().replace('"current StyleEdit" not in', "")
     # an audio clip's cover: a 12% push over 22 s moves all but its first and last second; a punch fills a gap
     cv = {"box": [20.4, 16.7, 59.3, 33.3], "push": 1.12, "pulses": []}
     mv = cover_moving(cv, 22.0, 1080, 30, 660)
@@ -1084,6 +1103,10 @@ def demo():
     assert jitter([0, 5, 10, 15, 20, 15, 10, 5])
     assert not jitter(list(30 * np.sin(np.linspace(0, np.pi, 40))))
     assert not jitter([0, 1, 0, 1, 0])                           # 1 px flicker: under the visible floor
+    # the sample's 'Claude' logo fading in: its top edge flickers 5 px for one frame as thin rays cross the ink
+    # threshold (WARN "turns back at speed 4 time(s)"); a spring's wobble over several frames still counts
+    assert not jitter([36, 35, 29, 29, 34, 29, 29, 29, 28, 28, 28])
+    assert jitter([0, 6, 12, 18, 22, 18, 14, 10, 12, 14, 16])
     # landing: pop from nothing at f0=30, lands half-way on frame 32
     area = [0, 0, 0, 0, 200, 600, 900, 1000] + [1000] * 20
     land, v = landing(area, 30, 30)

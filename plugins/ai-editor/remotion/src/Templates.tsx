@@ -108,8 +108,8 @@ const Tile: React.FC<{ src?: string; s: number; look: Look; letter?: string; cls
   );
 
 // =====================================================================================================
-// logo_sting: the real logo lands (scale 1.15 -> 1, expo.out), a ring expands off it, one frame of flash,
-// then a light sweep crosses the logo inside its own silhouette (logo-sting). Name rises under it.
+// logo_sting: the real logo lands (scale 1.15 -> 1, expo.out), then a light sweep crosses the logo inside its
+// own silhouette (logo-sting). Name rises under it. No ring: it popped in on one frame and grew then vanished.
 // props: src (the real logo file), label?
 const LogoSting: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const u = u_(w, h);
@@ -120,8 +120,6 @@ const LogoSting: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
     camera(tl, q, root, m, dur, u, p.ambient);
     const IMPACT = 0.55 * m.k;
     tl.fromTo(q(".ls-logo")[0], { scale: 1.15, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: IMPACT, ease: "expo.out" }, 0.05);
-    tl.fromTo(q(".ls-ring")[0], { scale: 0.34, opacity: 0.0 }, { scale: 0.34, opacity: 0.9, duration: 0.01 }, 0.05 + IMPACT * 0.6);
-    tl.to(q(".ls-ring")[0], { scale: 2.2, opacity: 0, duration: 0.6 * m.k, ease: "power3.out" }, 0.06 + IMPACT * 0.6);
     tl.fromTo(q(".ls-sweep")[0], { xPercent: -160 }, { xPercent: 160, duration: 0.9 * m.k, ease: "power2.inOut" }, 0.05 + IMPACT);
     if (lab) tl.fromTo(q(".ls-label")[0], { yPercent: 110 }, { yPercent: 0, duration: 0.5 * m.k, ease: m.text }, 0.05 + IMPACT * 0.8);
     tl.fromTo(q(".ls-logo")[0], { y: 0 }, { y: -u * 0.8, duration: Math.max(0.6, dur - 1.2), ease: "sine.inOut", immediateRender: false }, 0.05 + IMPACT);
@@ -132,7 +130,6 @@ const LogoSting: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   return (
     <div ref={ref} style={center}>
       <div style={{ position: "relative", width: L, height: L, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="ls-ring" style={{ position: "absolute", width: L, height: L, borderRadius: "50%", border: `${Math.max(3, L * 0.02)}px solid ${look.accent}`, opacity: 0 }} />
         <div className="ls-logo" style={{ position: "relative", width: L * 0.8, height: L * 0.8 }}>
           {p.src ? <Img src={src_(p.src)!} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : null}
           <div style={{ ...fill, ...mask, overflow: "hidden" }}>

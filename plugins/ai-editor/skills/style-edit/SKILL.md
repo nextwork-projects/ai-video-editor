@@ -99,7 +99,7 @@ Pacing, one rule: a card where a sentence names something real (a product, site,
 figure on the page that published it), never two at once; otherwise the speaker carries it. No stretch
 without a card over `card_gap_s` (10 s, or twice a copied creator's measured gap); where a longer one names
 nothing, never make a visual up: plan.py adds zoom changes (`references/plan.md` "Pacing"). Vertical
-captures must read on a phone (`check.py plan` FAILs text under 28 px x-height, and a hook capture with no `find`).
+captures must read on a phone: give each a `find` (plan.py drops a small one with none).
 
 ## 4. Plan
 

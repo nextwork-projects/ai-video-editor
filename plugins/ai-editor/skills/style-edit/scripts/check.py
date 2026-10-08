@@ -747,11 +747,18 @@ def demo():
     assert sum("x-height" in f["what"] for f in check_plan(small, face) if f["level"] == "FAIL") == 2, check_plan(small, face)
     hook = [f for f in check_plan(small, face) if "on the hook" in f["what"]]
     assert len(hook) == 1 and "'jev'" in hook[0]["what"], hook          # cap1 is up at 0.5 s with no find; cap2 lands at 3.0 s
+    # with no said words marked (no "find"), plan.py drops both: never a sticker of the page's own headline
+    assert pl.readable_captures(json.loads(json.dumps(small["cards"])), "9:16") == []
+    # marked: jev's marked headline is set tight (150 px apart, 212 px boxes) so it drops too (a crop cannot open
+    # its lines up); claude's marked line has open leading and becomes a sticker of it
+    small["cards"][0]["marks"] = [{"kind": "highlight", "find": "System One", "rect": [310, 763, 1360, 212]}]
+    small["cards"][1]["marks"] = [{"kind": "highlight", "find": "Claude", "rect": [846, 749, 356, 42]}]
     small["cards"] = pl.readable_captures(small["cards"], "9:16")
-    # the jev page's kicker (58 px lines over 212 px headline lines) is left out of the sticker, not shrunk into it
+    assert [c["trigger_word"] for c in small["cards"]] == ["claude"], small["cards"]
+    # a kicker under READ_XH beside the evidence is left out of the sticker, not shrunk into it
     tiny = [json.loads(json.dumps(small["cards"][0]))]
-    tiny[0]["props"]["crop"] = [196, 600, 1578, 600]
-    assert any("under 28 px x-height beside" in f["what"] for f in check_plan({**band, "cards": tiny}, face))
+    tiny[0]["props"]["crop"] = [600, 700, 800, 400]
+    assert any("under 28 px x-height beside" in f["what"] for f in check_plan({**band, "cards": tiny}, face)), check_plan({**band, "cards": tiny}, face)
     assert not pl.small_lines(small["cards"][0], "9:16"), (small["cards"][0]["props"], pl.small_lines(small["cards"][0], "9:16"))
     withfind = {**band, "cards": [{**cap1, "marks": [{"kind": "highlight", "find": "System One", "rect": [310, 763, 900, 212]}]}]}
     assert not any("on the hook" in f["what"] for f in check_plan(withfind, face))
@@ -759,7 +766,7 @@ def demo():
     planned = pl.scene_parts([{**cap1, "marks": [{"kind": "highlight", "find": "System One", "at_word": "jev"}]}],
                              [{"text": "jev", "start": 0.6, "end": 0.9}], None)
     assert not any("on the hook" in f["what"] for f in check_plan({**band, "cards": planned}, face))
-    assert [c["format"] for c in small["cards"]] == ["sticker", "sticker"] and "url" not in small["cards"][0]["props"], small["cards"]
+    assert small["cards"][0]["format"] == "sticker" and "url" not in small["cards"][0]["props"], small["cards"]
     assert all(pl.capture_xh(c, "9:16") >= READ_XH for c in small["cards"]), [pl.capture_xh(c, "9:16") for c in small["cards"]]
     assert not [f for f in check_plan(small, face) if "x-height" in f["what"] or "cuts" in f["what"]], check_plan(small, face)
     # pacing: the sample's 11.5 s with no card (10.6-22.1 s). Named there ("Jev"): WARN. Nothing named but the

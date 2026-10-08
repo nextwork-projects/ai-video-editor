@@ -32,21 +32,6 @@ Sources:
 
 ## Next
 
-- A browser capture with no `find` becomes a sticker of the page's headline. plan.py printed "'Jev'
-  images/capture-1-jev.png: browser text would read at 22 px x-height; cut to the evidence as a
-  sticker, 39 px" and the stills show the site's own four-line headline, which the speaker never said,
-  with lines set so tight their letters touch (stills 4-6). shapes.md bans the headline only on the
-  hook. The message does not say whether plan changed it or the model should. Done: an automatic
-  sticker needs a said phrase on the page, else the card drops with a warning naming why; sticker
-  leading matches the caption's; the message says what plan did.
-
-- A one-frame zoom snap on a fresh install. `check.py render`: "WARN 28.05s the punch zoom at 28.05
-  s snaps in one frame -> render with the current StyleEdit.tsx". The renderer is the current one, so
-  the fix is meaningless; frames at 28.0 and 28.1 s show the jump, next to the flow scene that
-  starts at 28.2 s. Also "WARN 8.14s 'Claude' logo's outline turns back at speed 4 time(s)" on the
-  default style. Done: the sample's default render has no zoom or jitter WARN, and every WARN's
-  fix is an action the model can take.
-
 - No named things are found when the names question is left blank. The sample take names Claude,
   Jev, Haiku and Opus; `route.py beats` gave `"names": []` on all 13 sentences because it only
   marks the profile's `names`, and that question is free text with no default. A beginner on the

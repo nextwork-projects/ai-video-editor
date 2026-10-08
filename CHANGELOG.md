@@ -4,6 +4,25 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A vertical capture too small to read became a sticker of the page's own headline, which the speaker never
+  said, with its tight lines touching. plan.py now cuts a capture to a sticker only around words marked on
+  the page (`find` or `highlight`). With none marked, or marked words set tighter than the captions' line
+  height (1.14), it drops the card and says why and what to add (a sticker beat with a `find`, which
+  capture.mjs re-sets with open lines). The message for a cut says plan.py did it. Test: `check.py demo`
+  (the sample's two unmarked captures drop; the marked headline set 150 px apart on 212 px lines drops; an
+  open line becomes a sticker).
+
+- The default render WARNed a one-frame zoom snap and a jittering logo, with fixes the model could not act
+  on ("render with the current StyleEdit.tsx"). plan.py moves a zoom change out of a card's entrance so the
+  punch finishes before the card starts, or, for a full-frame scene, to the scene's middle where it is
+  hidden; two zooms closer than a punch's 0.16 s travel join into one. `quality.py` skips zoom moves under a
+  scene, reads one just before a scene only up to its start, and now catches a zoom that drops out and
+  straight back in one frame. Its jitter check needs 2+ frames of movement each side of a turn, so a thin
+  logo edge flickering through a fade no longer counts. The logo sting lost its ring, which popped in on one
+  frame. Zoom, jitter and cover WARNs now name a style.json, visuals.json or plan.json change. The sample's
+  default render: 0 FAIL, only the loudness WARN. Tests: `plan.py demo` (the 28.05 s punch before a scene),
+  `quality.py demo` (the out-and-back snap; the logo's one-frame flicker).
+
 - Someone else's short video recommended editing it as your own. A public TikTok or YouTube Short pasted
   without `--own` now asks with **Copy this creator's style** first; **Edit it as my video** is second.
   Every `ask` item from `links.py route` carries its `question`, which start/SKILL.md says word for word.
