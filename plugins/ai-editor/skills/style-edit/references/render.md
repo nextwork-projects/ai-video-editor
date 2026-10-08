@@ -10,8 +10,9 @@ the first time, then from the last full laptop render of 10 s or more (`~/.ai-vi
 Modal: upload + container start + the work over the containers times a straggle factor + the tail
 (the last download and the join), each measured on the last Modal render
 (`~/.ai-video-editor/modal.json`); before the first one, the sample take's (`edit.py`
-`MODAL_MEASURED`, where each is defined), said as a guess in the printed line. The upload is counted
-in full, though footage Modal already holds is skipped.
+`MODAL_MEASURED`, where each is defined), said as a guess in the printed line. The upload counts only
+footage Modal does not hold yet: `modal_render.py held` asks Modal by each file's hash and sends nothing
+(about 1 s).
 
 ## Laptop
 
@@ -59,7 +60,8 @@ Needs the setup skill's step 5b. `edit.py` bundles the renderer with the media i
    command the GitHub workflow runs, on a copy of the code unpacked once per container. Once the
    queue is empty, a piece still running at twice the median piece time gets a second copy on
    another container and the first to finish counts (one piece once took 368 s where the other 53
-   took 16-61 s).
+   took 16-61 s). To test it, `AI_EDITOR_MODAL_SLOW_PIECE=0:600` holds piece 0's first copy for 600 s
+   in its container. On the 45 s sample cut that render took 197 s against 189 s with no piece held.
 4. Each piece downloads as soon as it is done, and the pieces join on the laptop with the GitHub
    workflow's join (`edit.py JOIN`): video copied, audio cut to each piece's frames and encoded to
    AAC once.

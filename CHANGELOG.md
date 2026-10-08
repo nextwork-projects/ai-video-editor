@@ -4,6 +4,16 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
+  containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
+  default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s
+  with nothing held; $0.032 on the bill against $0.037. `check.py render` 0 FAIL. The render's saved
+  start-up read 124 s, because the second copy's container boots late on purpose. Start-up now counts
+  only first copies. Test: `modal_render.py demo`.
+- The Modal estimate counted the whole footage upload when Modal already held it (a re-render uploads
+  in 3-4 s). It now asks Modal by each file's hash and counts only what is missing, without sending
+  anything (about 1 s; every byte when Modal is not set up or does not answer). Test: `edit.py demo`.
+
 ## ai-editor 2.1.0, creator-teardown 2.4.0 (2026-10-08)
 
 - Setup times are now measured, not guessed. Six clean GitHub runs of the e2e job (2026-10-08) took
