@@ -24,10 +24,13 @@ On the frame each card has settled (the same moment as its still):
 On each zoom move (frames round its start and end, the face band, ORB + a similarity fit frame to frame):
   zoom snap   one frame carries most of the change (an instant step, not a move)
   zoom jerk   the zoom's speed reverses or surges again mid-move (a smooth move rises and falls once)
+An audio clip's cover (plan "cover"): moving where its planned push carries its edge COVER_MIN_PX_S or more,
+and through each sentence's punch; its push measured on the render from the first frame to the last.
 On the audio: integrated loudness and true peak (ffmpeg ebur128), and every sound cue's level
 against the voice (render minus cut, sample-aligned). On the files: a render older than its inputs.
 """
 import json
+import math
 import re
 import subprocess
 import sys
@@ -66,6 +69,8 @@ ZOOM_MIN_LOG = 0.03    # a zoom changing log-scale less than this (3%) is too sm
 SNAP_SHARE = 0.6       # one frame carrying this share of a zoom's change is a snap. A 0.16 s power2.out punch
                        # puts 39% in its first frame at 30 fps; an instant punch puts 100%
 JERK_SHARE = 0.3       # a second speed peak (or a reversal) over this share of the first: the move surges
+COVER_MIN_PX_S = 0.5   # an audio clip's cover: its edge travelling this many output px a second is moving
+                       # (about one px every two seconds; slower reads as a still picture)
 DARK_V, DARK_SHARE = 0.2, 0.45          # near-black panel: value under 0.2, low colour, 45%+ of the card
 NEON_S, NEON_V, NEON_SHARE = 0.4, 0.75, 0.003   # bright saturated pixels, 0.3%+ of the card
 NEON_HUES = (90, 330)  # degrees: green-cyan-blue-violet-magenta, the glow hues; not print reds/yellows
@@ -610,6 +615,41 @@ def zoom_moves(video, plan, w=270, h=480):
     return out
 
 
+def sine_in_out(p):
+    return (1 - math.cos(math.pi * min(1.0, max(0.0, p)))) / 2
+
+
+def cover_moving(cover, dur, width, fps, nfr):
+    """Frames where an audio clip's cover is moving (StyleEdit.tsx CoverView): its log-space push on one
+    sine.inOut over the clip, and each punch (motion.ts punchAt, 0.55 s)."""
+    import numpy as np
+    half = cover["box"][2] / 100 * width / 2
+    t = np.arange(nfr) / fps
+    rate = math.log(cover["push"]) * math.pi / (2 * dur) * np.sin(np.pi * t / dur)   # d(log scale)/dt
+    out = rate * half >= COVER_MIN_PX_S
+    for a in cover.get("pulses") or []:
+        out[(t >= a) & (t < a + 0.55)] = True
+    return out
+
+
+def cover_push(video, cover, dur, width, height):
+    """(planned, measured) log-scale of the cover from the start to the last frame no punch is moving."""
+    import numpy as np
+    b = dur - 0.1
+    while any(a <= b < a + 0.55 for a in cover.get("pulses") or []):
+        b -= 0.1
+    x, y, w, h = (v / 100 * s for v, s in zip(cover["box"], (width, height, width, height)))
+    k = cover["push"] * cover.get("pulse", 1)
+    x0, y0 = max(0, int(x - w * (k - 1) / 2)), max(0, int(y - h * (k - 1) / 2))
+    x1, y1 = min(width, int(x + w * (1 + (k - 1) / 2))), min(height, int(y + h * (1 + (k - 1) / 2)))
+    grab = []
+    for t in (0.0, b):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", "-vf",
+                              f"crop={x1 - x0}:{y1 - y0}:{x0}:{y0},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+        grab.append(np.frombuffer(raw, np.uint8)[:(x1 - x0) * (y1 - y0)].reshape(y1 - y0, x1 - x0))
+    return math.log(cover["push"]) * sine_in_out(b / dur), zoom_steps(grab)[0]
+
+
 def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     """All checks above on one render. Returns (findings, measured)."""
     import cv2
@@ -744,6 +784,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if z.get("ease_s"):
             for a in (z["start"], z["end"] - z["ease_s"]):
                 moving[int(a * fps):int((a + z["ease_s"]) * fps)] = True
+    if plan.get("cover"):
+        moving |= cover_moving(plan["cover"], dur, plan["width"], fps, nfr)
+        want, got = cover_push(video, plan["cover"], dur, plan["width"], plan["height"])
+        meas["cover_push"] = {"planned": round(want, 4), "measured": round(got, 4)}
+        if want >= ZOOM_MIN_LOG / 3 and got < want / 2:
+            out.append(F("WARN", 0.0, f"the cover's push did not render: {got:.3f} of {want:.3f} log-scale",
+                         "render again with the current StyleEdit.tsx (CoverView); check plan.json cover.src exists"))
     pace = (style or {}).get("pace") or {}
     static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
     runs, k0 = [], None
@@ -1015,6 +1062,12 @@ def demo():
     assert zoom_verdict(zoom_steps([at(1.2 ** out2(min(1, i / 5))) for i in range(9)])) is None
     assert zoom_verdict(zoom_steps([at(1.2 ** ((1 - np.cos(np.pi * i / 24)) / 2)) for i in range(25)])) is None
     assert zoom_verdict([0.01, 0.03, 0.005, 0.03, 0.01]) == "jerk" and zoom_verdict([0.01] * 2) is None
+    # an audio clip's cover: a 12% push over 22 s moves all but its first and last second; a punch fills a gap
+    cv = {"box": [20.4, 16.7, 59.3, 33.3], "push": 1.12, "pulses": []}
+    mv = cover_moving(cv, 22.0, 1080, 30, 660)
+    assert mv[45:615].all() and not mv[0] and not mv[-1], (mv.argmax(), len(mv) - mv[::-1].argmax())
+    assert cover_moving({**cv, "pulses": [0.0]}, 22.0, 1080, 30, 660)[:16].all()
+    assert not cover_moving({**cv, "push": 1.0}, 22.0, 1080, 30, 660).any()
     # freeze: render flat for 4 frames while footage moves
     dr, db = [1.0] * 10, [1.0] * 10
     dr[3:7] = [0.01] * 4

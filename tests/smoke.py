@@ -123,15 +123,19 @@ def contrast(work):
 
 def podcast(work):
     """An audio-only podcast clip: clips.py trim puts the audio over the podcast's cover, then the real
-    renderer draws the speaker's words on it and check.py render passes."""
+    renderer draws the speaker's words on it, the cover moving all the way through (14 s, past the 6 s a
+    frame may hold still), and check.py render passes with no "nothing moves" WARN."""
     pod = work / "clips" / "pod"
     pod.mkdir(parents=True)
-    run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=180:d=5", pod / "source.mp3", cwd=work)
+    run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=180:d=16", pod / "source.mp3", cwd=work)
     run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=800x800", "-frames:v", "1", pod / "cover.png", cwd=work)
-    words = [{"text": t, "start": round(0.4 + i * 0.4, 2), "end": round(0.7 + i * 0.4, 2), "type": "word"}
-             for i, t in enumerate("this is the part nobody tells you about.".split())]
+    said = ("this is the part nobody tells you about. most people quit in the first week. "
+            "the ones who stay do one small thing every day. and that is the whole secret.").split()
+    words = [{"text": t, "start": round(0.4 + i * 0.5, 2), "end": round(0.8 + i * 0.5, 2), "type": "word"}
+             for i, t in enumerate(said)]
     (pod / "words.raw.json").write_text(json.dumps(words))
-    (pod / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.4, "end": 3.5, "hook": "this is the part"}]))
+    (pod / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.4, "end": words[-1]["end"],
+                                                      "hook": "this is the part"}]))
     run(PY, SK / "clips/scripts/clips.py", "trim", pod, "c0", "--edits", work / "edits", cwd=work)
     ed = work / "edits" / "pod-clip1"
     if not json.loads((ed / "clip.json").read_text()).get("audio_only"):
@@ -144,6 +148,10 @@ def podcast(work):
     run(PY, SK / "style-edit/scripts/plan.py", work / "pod.json", ed / "captions.json", "--no-sfx", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
     run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on any FAIL
+    still = [f["what"] for f in json.loads((ed / "check.json").read_text())["render"]["findings"]
+             if "nothing moves" in f["what"] or "push did not render" in f["what"]]
+    if still:
+        sys.exit(f"SMOKE FAIL: the podcast clip holds still: {still}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,17 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Audio-only podcast clips held still: only the captions moved, and `check.py render` WARNed "nothing moves"
+  for the whole clip. The renderer now draws the cover itself (plan `cover`, from `clip.json`): a slow push
+  on the sharp cover to 1.12x and the blurred ground easing back from 1.06x and drifting down, both on one
+  `sine.inOut` over the clip in log space, plus a 1.02x `punch` on each sentence start (motion.ts
+  `punchAt`). No zooms on those clips. The cover is 640 px at y 320 so the push stays inside the 9:16 safe
+  frame. `quality.py` counts the cover as moving where its edge travels 0.5 px/s or more, and measures the
+  push on the render (WARN when under half the plan). Tests: `tests/smoke.py` renders a 16 s audio clip and
+  fails on a "nothing moves" WARN (it did before this change); `plan.py`, `quality.py`, `clips.py` demos.
+  Live on a public feed episode, a 25 s clip: render 35 s, check render 0 FAIL 0 WARN, push planned 0.113,
+  measured 0.113 log-scale.
+
 - An audio-only podcast stopped at clips: a feed or Spotify episode downloads `source.mp3`, and
   `clips.py` looked only for `source.mp4/mov/mkv/webm`. One `source()` lookup now finds video or audio
   (mp3, m4a, aac, wav, ogg, flac, opus) for candidates, page and trim; `link` keeps an audio file's

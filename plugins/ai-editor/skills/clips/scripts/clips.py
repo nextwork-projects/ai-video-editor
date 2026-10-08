@@ -35,7 +35,8 @@ link        <clips_dir>/source.mp4: a hard link on the same drive (no admin need
 trim        For each chosen id, edits/<name>-clip<N>/source.mp4 (frame-accurate re-encode) and
             words.raw.json re-timed to it, so the cut skill starts at retakes.py with no second
             transcription. An audio source's clip is the audio over the podcast's cover (cover.<ext> from
-            links.py, else the file's embedded art, else black), 1080x1920; clip.json says audio_only.
+            links.py, else the file's embedded art, else black), 1080x1920; clip.json says audio_only and
+            names the edit's copy of the cover and its box, which plan.py hands the renderer to move.
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (features-only ranking)
 """
@@ -61,7 +62,9 @@ from ai_editor.links import AUDIO_EXT  # noqa: E402
 
 SOURCES = [f"source{e}" for e in (".mp4", ".mov", ".mkv", ".webm", ".m4v") + AUDIO_EXT]
 COVERS = ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp")
-GROUND_W, GROUND_H, COVER_PX, COVER_Y = 1080, 1920, 720, 200   # an audio clip: the cover above the captions
+# An audio clip: the cover above the captions. 640 px at y 320 keeps it inside plan.py's 9:16 SAFE frame while
+# the renderer pushes it to COVER_PUSH (style-edit plan.py) with a punch on top.
+GROUND_W, GROUND_H, COVER_PX, COVER_Y = 1080, 1920, 640, 320
 
 
 def source(d):
@@ -509,7 +512,14 @@ def trim(d, ids, name=None, edits="edits"):
         (e / "words.raw.json").write_text(json.dumps(words, indent=1))
         meta = {"from": str(d.resolve()), "id": cid, "start": a, "end": b, "hook": c["hook"]}
         if audio:   # no picture: the podcast's cover is the ground, the speaker's words the only text
-            meta |= {"audio_only": True, "cover": str(cover.resolve()) if cover else None, "captions": True}
+            for old in e.glob("cover.*"):
+                old.unlink()
+            if cover:   # the edit's own copy, so the renderer can draw and move it (plan.py "cover")
+                shutil.copy2(cover, e / f"cover{cover.suffix.lower()}")
+            box = [round(100 * v / s, 3) for v, s in (((GROUND_W - COVER_PX) / 2, GROUND_W), (COVER_Y, GROUND_H),
+                                                      (COVER_PX, GROUND_W), (COVER_PX, GROUND_H))]
+            meta |= {"audio_only": True, "cover": f"cover{cover.suffix.lower()}" if cover else None,
+                     "cover_box": box, "captions": True}
         (e / "clip.json").write_text(json.dumps(meta, indent=1))
         if audio:
             subprocess.run(ground_cmd(src, a, b, cover, e / "source.mp4"), check=True)
@@ -748,7 +758,7 @@ def demo():
             e = trim(d, ["c0"], edits=Path(td) / "edits")[0]
             meta = json.loads((e / "clip.json").read_text())
             assert meta["audio_only"] and meta["captions"] is True, meta
-            assert (meta["cover"] or "").endswith("cover.png") == has_cover, meta
+            assert (meta["cover"] == "cover.png") == has_cover == (e / "cover.png").exists(), meta
             got = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height", "-of",
                                   "json", str(e / "source.mp4")], capture_output=True, text=True, check=True).stdout
             kinds = {x["codec_type"]: x for x in json.loads(got)["streams"]}

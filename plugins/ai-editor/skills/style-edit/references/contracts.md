@@ -287,6 +287,12 @@ opens while cards are up (runs of cards closer than 1.2 s share one opening) and
 whole frame otherwise. `captions.style.y_pct` is the split position (just under the seam);
 `caption_full_y` is where captions sit while the speaker has the whole frame.
 
+`cover` (optional, an audio-only clip whose `clip.json` names a cover, from clips.py trim): `{"src", "box"
+[x, y, w, h] % of the frame, "push", "ground_push", "pulse", "pulses" [s]}`. The renderer draws the cover in
+`box` over a blurred copy dimmed to 30%; on one `sine.inOut` over the clip, in log space, the cover grows to
+`push` and the ground eases back from `ground_push` and drifts down; each sentence start in `pulses` is a
+`punch` of `pulse` (motion.ts `punchAt`). The plan then has no zooms.
+
 `pans` (optional, from the creator's `camera.pan_per_min`): `[{"start", "end", "from", "to"}]`, the footage
 drifting sideways from `from` to `to` % of the width on `sine.inOut` (scaled up just enough to hide its edge).
 A zoom may carry `ease` (the creator's fitted `zoom.ease`, pushes only) and `origin` `[x, y]` % of the frame

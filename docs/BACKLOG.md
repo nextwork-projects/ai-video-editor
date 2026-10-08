@@ -32,9 +32,6 @@ Sources:
 
 ## Next
 
-- Audio-only podcast clips hold still: only the captions move for 22 s (`check.py render` WARN). Done: a
-  slow push on the cover and word-timed motion in the house easing, with the WARN gone on a feed episode.
-
 - Someone else's short video recommends editing it as your own. A public agency's TikTok (136 s) and
   YouTube Short (39 s), pasted without "my", route to `ask` with **Edit it as my video** first, which
   start makes "(Recommended)". start/SKILL.md:49 says "a creator's video is for the teardown, not to

@@ -256,7 +256,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     dur = plan["durationInFrames"] / plan["fps"]
     marks = sorted([0.0, dur] + [z[k] for z in plan["zooms"] for k in ("start", "end")] + list(cuts)
                    + [c[k] for c in cards for k in ("start", "end")])
-    for a, b in zip(marks, marks[1:]):
+    for a, b in zip(marks, marks[1:]) if not plan.get("cover") else ():   # an audio clip's cover moves throughout
         if b - a > static_s and not any(c["start"] <= a and c["end"] >= b for c in cards):
             out.append(finding("WARN", a, f"static for {b - a:.1f} s ({a:.1f}-{b:.1f} s): no card, zoom or cut",
                                "add a visual beat or a zoom in that stretch"))
@@ -270,7 +270,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         said = [f"'{n}' at {t:.1f} s" for t, n in named if a <= t < b]
         pts = [a] + [x for x in moves if a < x < b] + [b]
         still = max(y - x for x, y in zip(pts, pts[1:]))
-        if said or still > QUIET_HOLD_S + 0.01:
+        if said or (still > QUIET_HOLD_S + 0.01 and not plan.get("cover")):
             out.append(finding("WARN", a, f"no card for {b - a:.1f} s ({a:.1f}-{b:.1f} s; the rule is {gap_s:.0f} s)"
                                + (f": {', '.join(said)} is named there" if said else f" and the frame holds still for {still:.1f} s"),
                                "show the named thing (a capture, post or logo in visuals.json)" if said else

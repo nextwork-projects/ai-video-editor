@@ -30,6 +30,7 @@ import math
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080)}
@@ -185,6 +186,26 @@ def zoom_times(words, on, cuts):
             out.append(max(phrase, key=lambda x: x["end"] - x["start"])["start"])
             phrase = []
     return out
+
+
+# An audio-only clip (clips.py trim): the renderer draws the show's cover and moves it, so the frame never holds still.
+COVER_PUSH, COVER_GROUND, COVER_PULSE = 1.12, 1.06, 1.02   # cover's end scale, ground's start scale, punch on a sentence
+
+
+def audio_cover(edit_dir, words):
+    """plan "cover" for an audio-only clip with artwork (clip.json from clips.py trim), else None. Pulses: sentence
+    starts, never in the opening half second and at least a second apart."""
+    cj = edit_dir and Path(edit_dir) / "clip.json"
+    meta = json.loads(cj.read_text()) if cj and cj.exists() else {}
+    if not (meta.get("audio_only") and meta.get("cover") and meta.get("cover_box")
+            and (Path(edit_dir) / meta["cover"]).exists()):
+        return None
+    pulses = []
+    for t in zoom_times(words, "sentence_start", ()):
+        if t >= 0.5 and (not pulses or t - pulses[-1] >= 1.0):
+            pulses.append(round(t, 3))
+    return {"src": meta["cover"], "box": meta["cover_box"], "push": COVER_PUSH, "ground_push": COVER_GROUND,
+            "pulse": COVER_PULSE, "pulses": pulses}
 
 
 def card_gap_s(style):
@@ -1454,7 +1475,10 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
     gap = card_gap_s(style)
     quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
-    zooms = place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet)
+    cover = audio_cover(edit_dir, words)
+    if cover:   # the cover's own push replaces the zooms: two moves at once compete for the eye
+        quiet = []
+    zooms = [] if cover else place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet)
     for z in zooms if face else []:
         # grow from the top of the head, centred on it: the face holds its place and the hair never rises
         # into a card placed above the head (a zoom about the face's middle pushed the hair up into it)
@@ -1509,7 +1533,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             ox, oy = z.get("origin") or [50, 30]
             k = z["scale"]
             c["anim"]["props"]["head"] = [round(ox + (hd[0] - ox) * k, 1), round(oy + (hd[1] - oy) * k, 1), round(hd[2] * k, 1), round(hd[3] * k, 1)]
-    extra = {}
+    extra = {"cover": cover} if cover and not split_now else {}
     pans = place_pans((style.get("camera") or {}) if took(style, "pace") else {}, duration)
     if pans and not split_now:
         extra["pans"] = pans
@@ -1948,6 +1972,13 @@ def demo():
     moves = sorted([x["start"] for x in z] + [x["end"] for x in z if x["end"] < t])
     assert len(z) >= t / 10 and max(b - a for a, b in zip([0.0] + moves, moves + [t])) <= 5.0 + 1e-6, (t, moves)
     assert place_zooms({}, words, t, []) == []
+    with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
+        assert audio_cover(td, words) is None
+        (Path(td) / "cover.png").write_bytes(b"")
+        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}))
+        cv = audio_cover(td, words)
+        assert cv["src"] == "cover.png" and cv["push"] > 1 and cv["pulses"] and cv["pulses"][0] >= 0.5, cv
+        assert all(b - a >= 1 for a, b in zip(cv["pulses"], cv["pulses"][1:])), cv["pulses"]
     # a creator's sparse zooms (no max_hold_s) leave 12 s still; inside a stretch with no card (quiet) the frame
     # changes at least every QUIET_HOLD_S, and outside it her rhythm is untouched
     sparse = {"per_min": 2, "kind": "punch", "on": "sentence_start"}

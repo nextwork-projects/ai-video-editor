@@ -130,7 +130,8 @@ python3 "$K" trim clips/<name> c12 c40 c7          # -> edits/<name>-clip1, -cli
 Each edit folder gets `source.mp4` (frame-accurate, padded without catching the next word) and
 `words.raw.json` re-timed to it. An audio-only source (`source.mp3`) has no picture: trim makes each
 clip's `source.mp4` its audio over the podcast's own cover (the cover blurred and dimmed to fill 1080x1920,
-the sharp cover above the captions; no artwork: black), and `clip.json` says `audio_only`. For those,
+the sharp cover above the captions; no artwork: black), and `clip.json` says `audio_only`. With a cover, the
+render moves it: a slow push on the cover, the ground drifting against it, a small punch on each sentence start. For those,
 don't ask a layout: overlay, reframe no, no cutout, captions on (`profile.py style` keeps them on). Say once
 that each clip is the audio over the show's cover with the speaker's words as captions. Before the clips run, ask the music question once for all of them
 (style-edit `references/plan.md` "Music"; skip it when the profile says `sound.music: false`).
