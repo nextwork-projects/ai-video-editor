@@ -4,6 +4,11 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A caption correction into several words ("use." heard, the cut says "are using.") was one token,
+  which plan.py's word cleaning glued into "areusing" on stills and the render, and `check.py render`
+  flagged as a LOOK. `retakes.py caption_words` and `retakes.py fix` on captions.json now write one
+  token per word, the original word's time shared by letter count. Clip edits run the same captions
+  step. Test: `test_retakes.py` (one heard word corrected into two gives two non-overlapping tokens).
 - A scene cut in hard (`cut`) started SCENE_LEAD_S (0.3 s x k) before its word, a lead sized for a
   transition that grows, so the picture changed up to 0.4 s early. It now starts where a box card
   does, CARD_LEAD_S before its word; match, iris and the other growing transitions keep the lead.

@@ -32,13 +32,6 @@ Sources:
 
 ## Next
 
-- Captions glue a corrected phrase into one word. On the sample take `retakes.py captions` changed
-  "use." to "are using." as a single token, and the stills sheet (still 6) and the render at 6.2 s
-  both show **"areusing"**. `check.py render` then flags the same correction as a LOOK ("caption
-  shows 'are using.', the cut's transcript heard 'use.'"), so the step contradicts the check. Done:
-  a multi-word correction becomes one word per caption token with split timings; the sample renders
-  "are using"; check.py does not LOOK at a correction captions made itself.
-
 - `check.py render` FAILs a behind card the cutout already covers: "4.50s 'Jev' ... card is drawn
   over the face at 2 sample(s), up to 8% of the head -> run face.py, plan again". matte.py said
   "face 100% solid" and the frame at 4.5 s shows the hair over the card. The fix it names (face.py,
