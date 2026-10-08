@@ -97,12 +97,21 @@ async function bench(publicDir, planPath) {
   const n = Math.min(composition.durationInFrames, composition.fps * 2);
   const from = Math.max(0, Math.floor(composition.durationInFrames / 2 - n / 2));
   const out = path.join(HERE, "out", "bench.mp4");
-  const t0 = Date.now();
+  // Chrome's start-up, the first page loads and the encode at the end are paid once a render, not per
+  // frame: the speed is read from the quarter mark to the last frame rendered, and the rest of the
+  // bench's time is start_s. A 2 s bench timed whole read a fresh laptop as twice as slow as its 45 s render.
+  const t0 = Date.now(), q = Math.floor(n / 4);
+  let a = 0, b = 0;
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out,
-    frameRange: [from, from + n - 1], concurrency: concurrency(), timeoutInMilliseconds: TIMEOUT_MS });
+    frameRange: [from, from + n - 1], concurrency: concurrency(), timeoutInMilliseconds: TIMEOUT_MS,
+    onProgress: ({ renderedFrames }) => {
+      if (renderedFrames >= q && !a) a = Date.now();
+      if (renderedFrames >= n && !b) b = Date.now();
+    } });
   const s = (Date.now() - t0) / 1000;
-  console.log(JSON.stringify({ bundle_s: bundleS, bench_frames: n, bench_s: s,
-    s_per_frame: s / n, frames: composition.durationInFrames }));
+  const spf = a && b > a ? (b - a) / 1000 / (n - q) : s / n;
+  console.log(JSON.stringify({ bundle_s: bundleS, bench_frames: n, bench_s: s, s_per_frame: spf,
+    start_s: Math.max(0, s - spf * n), frames: composition.durationInFrames }));
 }
 
 async function local(publicDir, planPath, out) {

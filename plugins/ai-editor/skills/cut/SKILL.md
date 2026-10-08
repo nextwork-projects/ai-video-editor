@@ -139,8 +139,8 @@ $PY "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 
 Re-transcribes cut.mp4 and diffs it against the words the cut meant to keep.
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
-- **SURVIVED**: a repeat or stumble there is real: map its cut time to source time with
-  `decisions.json` and quote the raw tokens in a new span. Clean speech there is a mishearing.
+- **SURVIVED**: each line prints its cut and source time and the span to add. A real repeat or
+  stumble: add that span to `spans.json`. Clean speech there is a mishearing.
 - **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
 
 One fix cycle, then show the user whatever is left.

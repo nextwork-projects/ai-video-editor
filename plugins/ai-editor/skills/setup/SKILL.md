@@ -173,9 +173,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" missing --style
 
 Ask those ids in the question box, at most four per call, using the wording, options and `set`
 commands in `${CLAUDE_PLUGIN_ROOT}/skills/start/references/intake.md` (the rows that are not
-per video). Two calls usually cover it: first platform, creators, what to take from each, and the
-specific videos they love (links); then brand, own photos folder, what to avoid, captions, sound
-and "Let graphics sit behind you?". Every question has a recommended first option.
+per video), in its three style calls: what to copy (platform, creators, what to take, liked videos),
+what makes it yours (brand, own photos, avoid, captions), then sound and "Let graphics sit behind
+you?". Every question has a recommended first option.
 
 On **Yes** to graphics behind you, download the matting model now (15 MB, once), so the first edit
 does not stop for it:

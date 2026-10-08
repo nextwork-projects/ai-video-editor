@@ -63,7 +63,7 @@ def fetch(rel, check=True):
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    print(f"downloading {rel} ({url})", flush=True)
+    print(f"downloading {rel}", flush=True)
     urllib.request.urlretrieve(url, part)
     got = sha256(part)
     if got != want:
@@ -113,6 +113,19 @@ def demo():
             (DIR / "faster-whisper-tiny" / f).write_text("x")
         assert whisper_dir("tiny") == DIR / "faster-whisper-tiny"
         assert sha256(DIR / "faster-whisper-tiny" / "config.json") == hashlib.sha256(b"x").hexdigest()
+        # a download says which file in plain words, never the pinned URL with its commit hash
+        import contextlib
+        import io
+        PINS["t.bin"] = ("https://example.com/abc123def/t.bin", hashlib.sha256(b"x").hexdigest())
+        real, out = urllib.request.urlretrieve, io.StringIO()
+        try:
+            urllib.request.urlretrieve = lambda u, dest: Path(dest).write_bytes(b"x")
+            with contextlib.redirect_stdout(out):
+                fetch("t.bin")
+        finally:
+            urllib.request.urlretrieve = real
+            PINS.pop("t.bin")
+        assert out.getvalue() == "downloading t.bin\n", out.getvalue()
     DIR = keep
     print("demo ok")
 

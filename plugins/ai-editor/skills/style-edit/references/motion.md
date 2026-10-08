@@ -136,8 +136,9 @@ A scene card in plan.json:
   head checks for this shape. Any other box is used as given.
 - `focus`: `[x, y]` % of the frame where `match` and `iris` open from and close to. plan.py passes the
   head centre from face.json at the card's start, so the cut grows out of the speaker's face.
-- Timing: plan.py starts a scene `SCENE_LEAD_S` (0.3 s) x the personality's duration multiplier
-  before its word, so the match or iris is half done on the word.
+- Timing: plan.py starts a scene `CARD_LEAD_S` (0.1 s) plus `SCENE_LEAD_S` (0.3 s) x the
+  personality's duration multiplier before its word, so the match or iris is half done on the word. A
+  hard-cut scene (`transition_in` `cut`) is whole on its first frame: it starts `CARD_LEAD_S` before its word.
 - Captions over a scene draw in the scene's own ink and accent, with no stroke or shadow (white on
   paper would vanish). When every word being said is already in the scene's type, the captions hide:
   the scene is the caption.

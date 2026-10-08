@@ -195,7 +195,7 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 - `anim`: `type` an overlay format (visuals.md), `logo` (`src`, `label`), or a template in motion.md.
   Type cards (`counter`, `steps`, `versus`, `keyword`, `slam`, `title`, charts) were removed; plan.py
   skips them with a warning. plan.py reads these straight from visuals.json.
-  The diagram, `flow` (Diagrams.tsx; an overlay box by default, a full-frame scene with `"layout": "scene"`):
+  The diagram, `flow` (Diagrams.tsx; a full-frame scene on vertical, an overlay box on wide; a beat's `"layout"` overrides, visuals.md "Where each card sits"):
   `nodes` (1-6 Parts, a chain; 4+ wrap to two rows), optional `split` (2-4 branch Parts off the last
   node), `tasks` (`[{"text", "word", "heavy"?}]`: chips that pop left of the source on their word),
   `accent` (`#hex`: ring, hot wire and chosen name; the destination's brand colour), `tag` (`{"text", "word"}`).
@@ -263,8 +263,9 @@ A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. 
   the speaker"), with `key` `[x, y, w, h]` %: the region plan.py kept clear of the head. The plan then
   carries `"cutouts": [{"src": "cutout/1080x1920-d794f9af", "from": 1, "to": 130}]` (matte.py: a folder of
   RGBA PNGs named by frame of the cut, 000001.png is frame 1; frames `from`-`to` inclusive), and check.py plan FAILs a behind card no cutout covers.
-- A scene starts SCENE_LEAD_S x k earlier than its word (k: punchy 0.7, snappy 0.8, smooth 1.0, calm 1.35);
-  quality.py counts it landed when its transition is half done.
+- A scene starts CARD_LEAD_S + SCENE_LEAD_S x k before its word (k: punchy 0.7, snappy 0.8, smooth 1.0, calm
+  1.35); quality.py counts it landed when its transition is half done. A hard-cut scene (`transition_in` `cut`)
+  starts CARD_LEAD_S before its word, like a box card.
 - In the props the renderer reads (`anim.props`, or an image card's own `props`), plan.py writes for every box card:
   `word_at`: seconds from the card's start to its own word (motion.ts `landAt` lands the entrance there).
   From the creator's style.json, only when the blend took the part (visuals.md "From the teardown"):

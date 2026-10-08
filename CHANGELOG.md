@@ -4,6 +4,50 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A beginner who left the names question blank got no logos or captures: `route.py beats` marked only the
+  profile's `names`. It now also marks any word written with a capital inside a sentence and says which ones
+  are not in the profile. The sample take's beats list Jev, Claude, Haiku, Opus and Fable. Test: `route.py demo`.
+
+- Output a new user could not read. face.py and `check.py render` no longer print OpenCV's "Targets are not
+  supported by the new graph engine" WARN (its log is set to errors where the detector is made).
+  `check.py render` no longer prints seven ffmpeg "Broken pipe" lines after its summary (a frame reader that
+  stops early stops ffmpeg first). The flow scene tweened a veil it never draws on a scene's ground: 15 "GSAP
+  target undefined not found" lines on the sample's stills, now 0. Setup keeps npm's "added 369 packages" and
+  "Has browser at ..." back unless the step fails, and a model download names the file, not its pinned URL.
+  `transcribe.py` prints one line for its re-heard words, `profile.py style` says "the default style (smooth
+  zooms about every 6 s, 3-word captions)", and the sound kit prints one line, "4-5 dB under your voice".
+  Tests: `face.py demo`, `check.py demo`, `setup.py demo`, `models.py`, `test_media.py`, `sfx.py demo` (now in
+  demos.sh), smoke.py (stills fail on any GSAP target warning).
+
+- `verify_cut.py` SURVIVED lines gave no time, so a doubled "and, and" went on into captions. Each line now
+  prints its cut time, its source time and the spans.json entry to add (`after` set). Test: `verify_cut.py
+  demo` (in demos.sh).
+
+- Intake wording disagreed with itself. One id list everywhere: `audience` and `names` per video (the
+  audience answer also saves `goal`), the style questions in three calls that start, setup step 8 and
+  intake.md share. With no creator the caption option reads "clean, 3 words at a time". `profile.py set`
+  given a bare `key value` among `key=value` pairs names the argument that is wrong. Test: `profile.py demo`.
+
+- Render estimates. The laptop benchmark times Chrome's start-up apart from the frames (it was folded into
+  the per-frame speed); on the 44.9 s sample cut the estimate was within 25% of the render in 3 of 4 tries.
+  The GitHub Actions and Lambda lines say "Not set up yet" the way Modal's does. README and cloud.md carry
+  one set of numbers, each named by what was rendered: the 44.9 s cut on Modal 2.7 min on 3 machines, about
+  $0.03; the uncut 3.4-minute take $0.18-0.19 on the bill; $0.06 for 60 s and $0.54 for 10 min (estimates).
+  Test: `edit.py demo`.
+
+- Stale docs. motion.md and contracts.md: a hard-cut scene starts `CARD_LEAD_S` before its word.
+  teardown-page.md: slow-drifting footage goes to `drift_dets`, with what it misses. plan.md: how the matte
+  `--modal` cost is worked out. render-watcher covers Modal. contracts.md: `flow` is a full-frame scene on
+  vertical and a box on wide, as plan.py does it.
+
+- Link routing. A Drive link carries its share how-to only for a failed download, and its edit folder is
+  named after the file. Podcast analytics redirects (podtrac, chartable, podsights, op3 and others) are
+  stripped to the host's own file. An Instagram reel yt-dlp cannot open comes back with a note saying so.
+  Test: `links.py demo`.
+
+- style-edit shapes.md opens with a whole two-beat visuals.json, so the file's shape (one JSON array of
+  beats) is shown before the per-pick table.
+
 - A vertical capture too small to read became a sticker of the page's own headline, which the speaker never
   said, with its tight lines touching. plan.py now cuts a capture to a sticker only around words marked on
   the page (`find` or `highlight`). With none marked, or marked words set tighter than the captions' line

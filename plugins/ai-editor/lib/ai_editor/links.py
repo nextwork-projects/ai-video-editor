@@ -41,7 +41,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
 LONG_S = 8 * 60          # a video at least this long goes to clips
 CLIPS_MIN_S = 3 * 60     # shorter than this, "make clips" is not offered
@@ -176,8 +176,8 @@ def classify(raw, own=False):
             fid = parts[parts.index("d") + 1]
         if fid:
             return _item("own", f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t",
-                         source=s, name=_slug("drive-" + fid[:10]),
-                         note="In Drive, Share > General access > 'Anyone with the link', then paste the link again.")
+                         source=s, name=_slug("drive-" + fid[:10]),   # route swaps in the file's own name
+                         if_fails="In Drive, Share > General access > 'Anyone with the link', then paste the link again.")
         return _item("unsupported", s, note="That Google link is not a file. Share the video itself and paste that link.")
 
     # Dropbox
@@ -368,7 +368,8 @@ def probe(url, cookies=None):
     except subprocess.TimeoutExpired:
         return None, None, SLOW.format(PROBE_S // 60)
     except (IndexError, ValueError):
-        return None, None, None
+        err = (r.stderr.strip().splitlines() or ["no answer"])[-1]
+        return None, None, f"yt-dlp could not open this video to read its length: {err[:200]}"
     h = (d.get("uploader_id") or d.get("channel_id") or "").lstrip("@").lower() or None
     return d.get("duration"), h, None
 
@@ -404,6 +405,36 @@ def _get(url, timeout=30, cap=FEED_CAP):
     return data
 
 
+# Podcast analytics prefixes: each wraps the host's own file URL (with or without its https://), so stripping
+# them downloads the host's file instead of a redirect chain.
+TRACKERS = re.compile(r"^https?://(?:dts\.podtrac\.com/redirect\.\w+|(?:www\.)?podtrac\.com/pts/redirect\.\w+|"
+                      r"chrt\.fm/track/[^/]+|chtbl\.com/track/[^/]+|pdst\.fm/e|op3\.dev/e(?:,[^/]*)?|pfx\.vpixl\.com/[^/]+|"
+                      r"arttrk\.com/p/[^/]+|mgln\.ai/e/[^/]+|prfx\.byspotify\.com/e|verifi\.podscribe\.com/rss/p|"
+                      r"claritaspod\.com/measure|tracking\.swap\.fm/track/[^/]+)/", re.I)
+
+
+def untrack(url):
+    """An episode's enclosure with every analytics redirect prefix removed. Pure."""
+    while True:
+        m = TRACKERS.match(url)
+        if not m:
+            return url
+        rest = url[m.end():]
+        url = rest if re.match(r"https?://", rest, re.I) else "https://" + rest
+
+
+def file_name(url, timeout=15):
+    """The file name a download link serves (Content-Disposition), or None. One ranged GET, no body read."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 ai-video-editor", "Range": "bytes=0-0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            cd = r.headers.get("Content-Disposition", "")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)|filename=\"?([^\";]+)", cd, re.I)
+    return unquote(m.group(1) or m.group(2)).strip() if m else None
+
+
 def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
@@ -429,7 +460,7 @@ def spotify_audio(url, get=_get):
         return None
     for e in eps:
         if _norm(e["title"]) == _norm(title):
-            return {"audio": e["url"], "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show",
+            return {"audio": untrack(e["url"]), "feed": feed, "title": title, "show": show, "latest": parts[-2] == "show",
                     "image": e["image"]}
     return None
 
@@ -484,7 +515,7 @@ def episodes(data, limit=EPISODES):
             continue
         d = _when(f.get("pubDate") or f.get("published") or f.get("updated"))
         out.append({"title": f.get("title") or "untitled", "date": d.date().isoformat() if d else None,
-                    "duration": _secs(f.get("duration")), "url": url, "image": image(el) or cover, "_t": d.timestamp() if d else float("-inf")})
+                    "duration": _secs(f.get("duration")), "url": untrack(url), "image": image(el) or cover, "_t": d.timestamp() if d else float("-inf")})
     out.sort(key=lambda e: e.pop("_t"), reverse=True)    # stable: undated items keep the feed's order, last
     return show, out[:limit]
 
@@ -532,6 +563,10 @@ def resolve(it):
     if it.get("feed") or (it["kind"] == "long" and not it.get("platform")
                           and not urlparse(it["url"]).path.lower().endswith(VIDEO_EXT + AUDIO_EXT)):
         it = pick_episode(it)
+    if it["kind"] == "own" and urlparse(it["url"]).netloc == "drive.usercontent.google.com":
+        n = file_name(it["url"])     # the edit folder after the file, not after Drive's id
+        if n:
+            it = dict(it, name=_slug(Path(n).stem))
     if it.get("platform") == "spotify":
         a = spotify_audio(it["url"])
         if a:
@@ -637,7 +672,7 @@ def _fetch(url, edit_dir, cookies, max_gb, max_height, direct, found):
             return 3, ("The site wants a login for this video (private, age-gated, or a bot check). "
                        "I can read your browser's login for this one download, if you agree. " + err[0][:200])
         return 1, f"The download failed: {err[0][:300]}"
-    return http_get(it["url"], edit, max_gb, it.get("note"))
+    return http_get(it["url"], edit, max_gb, it.get("if_fails") or it.get("note"))
 
 
 def http_get(url, edit, max_gb, note=None):
@@ -755,6 +790,23 @@ def demo():
         if url:
             assert it["url"] == url, (raw, it["url"], url)
     assert len(CASES) >= 40, len(CASES)
+    # a Drive link: the share how-to is said only when the download fails; the folder is named after the file
+    dr = classify("https://drive.google.com/file/d/1l5rk28jrAbCdEf/view?usp=sharing")
+    assert "note" not in dr and "Anyone with the link" in dr["if_fails"], dr
+    saved_fn = globals()["file_name"]
+    try:
+        globals()["file_name"] = lambda u: "My Take 3.MOV"
+        assert resolve(dr)["name"] == "my-take-3", resolve(dr)
+        globals()["file_name"] = lambda u: None
+        assert resolve(dr)["name"] == "drive-1l5rk28jra"
+    finally:
+        globals()["file_name"] = saved_fn
+    # podcast analytics redirects stripped down to the host's own file
+    for raw in ("https://dts.podtrac.com/redirect.mp3/chrt.fm/track/AB12/traffic.megaphone.fm/XYZ123.mp3?updated=1",
+                "https://op3.dev/e/https://traffic.megaphone.fm/XYZ123.mp3?updated=1",
+                "https://pdst.fm/e/chtbl.com/track/9/traffic.megaphone.fm/XYZ123.mp3?updated=1"):
+        assert untrack(raw) == "https://traffic.megaphone.fm/XYZ123.mp3?updated=1", (raw, untrack(raw))
+    assert untrack("https://cdn.example.com/12.mp3") == "https://cdn.example.com/12.mp3"
     # length and ownership decide a single video
     yt = classify("https://youtu.be/dQw4w9WgXcQ")
     assert decide(yt, 1500)["kind"] == "long"                       # a 25 min video -> clips
@@ -910,6 +962,17 @@ def demo():
     finally:
         g["ytdlp"], subprocess.run = saved
     assert code == 1 and "paste" in msg.lower() and "minutes" in msg, msg
+    # a probe yt-dlp cannot open (an Instagram reel it is refused) says why, so the ask carries a note
+    saved = g["ytdlp"], subprocess.run
+    try:
+        g["ytdlp"] = lambda: ["yt-dlp"]
+        subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "ERROR: [Instagram] x: Requested content is not available")
+        dur, _, note = probe("https://www.instagram.com/reel/C1a2B3c4D5e/")
+        assert dur is None and "Requested content is not available" in note, note
+        it = route("https://www.instagram.com/reel/C1a2B3c4D5e/")[0]
+        assert it["kind"] == "ask" and "could not open" in it["note"], it
+    finally:
+        g["ytdlp"], subprocess.run = saved
     for cmd, kw in cmds:
         assert kw.get("timeout") and "--no-playlist" in cmd and cmd[cmd.index("--playlist-items") + 1] == "1", cmd
     print(f"demo ok ({len(CASES)} URL shapes)")

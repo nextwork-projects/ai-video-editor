@@ -31,6 +31,16 @@ def run(*cmd, cwd):
         sys.exit(f"SMOKE FAIL: exit {r.returncode} from {cmd[1] if len(cmd) > 1 else cmd[0]}")
 
 
+def run_out(*cmd, cwd):
+    """run, with the output kept (and printed) so a step can be checked for noise a user should never see."""
+    print("$", " ".join(map(str, cmd)), flush=True)
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True)
+    print(r.stdout + r.stderr, end="", flush=True)
+    if r.returncode:
+        sys.exit(f"SMOKE FAIL: exit {r.returncode} from {cmd[1] if len(cmd) > 1 else cmd[0]}")
+    return r.stdout + r.stderr
+
+
 def main():
     work = Path(tempfile.mkdtemp(prefix="ave-smoke-"))
     try:
@@ -72,7 +82,9 @@ def steps(work):
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", cwd=work)
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json",
         "--layout", "split", "--out", edit / "plan-split.json", cwd=work)
-    run(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    out = run_out(PY, SK / "style-edit/scripts/edit.py", "stills", edit, cwd=work)
+    if "GSAP target" in out:     # a tween on an element the card did not draw (the flow scene's veil)
+        sys.exit("SMOKE FAIL: the stills printed GSAP 'target not found' warnings")
     # graphics behind the speaker: the capture card goes behind, the speaker is cut out under it
     run(PY, SK / "style-edit/scripts/plan.py", work / "style.json", edit / "captions.json", "--layout", "overlay",
         "--behind", "on", "--out", edit / "plan-behind.json", cwd=work)

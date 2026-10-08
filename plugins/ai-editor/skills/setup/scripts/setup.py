@@ -558,6 +558,15 @@ def sync_tree(src, dst):
             shutil.copy2(f, to)
 
 
+def quiet(cmd, cwd, what):
+    """A tool's own chatter ("added 369 packages in 3s", "Has browser at /private/...") kept back; shown
+    only when the step fails, then a one-line reason."""
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True)
+    if r.returncode:
+        print((r.stdout + r.stderr).strip()[-3000:])
+        sys.exit(f"ERROR: {what} failed (exit {r.returncode}); its output is above.")
+
+
 def step_remotion(force=False):
     npm = shutil.which("npm")
     if not npm:
@@ -568,11 +577,11 @@ def step_remotion(force=False):
     if force or drift(env_load(), {}, remotion_installed() or "missing")["renderer"]:
         # npm ci: exactly package-lock.json, never a re-resolve. --ignore-scripts: the one install
         # script (esbuild's) only re-checks a binary npm already placed; newer npm warns about it.
-        subprocess.run([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"],
-                       cwd=REMOTION_HOME, check=True)
+        quiet([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], REMOTION_HOME,
+              "installing the renderer's packages (npm ci)")
         done = "installed"
     if not list((REMOTION_HOME / "node_modules" / ".remotion").glob("chrome-headless-shell/*")):
-        subprocess.run([shutil.which("npx"), "remotion", "browser", "ensure"], cwd=REMOTION_HOME, check=True)
+        quiet([shutil.which("npx"), "remotion", "browser", "ensure"], REMOTION_HOME, "downloading the render browser")
         done = "installed"
     env_save(node_lock=file_sha(NPM_LOCK), node=version(["node", "--version"]),
              npm=version([npm, "--version"]))
@@ -692,6 +701,18 @@ def step_matte(force=False):
 
 
 def demo():
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):     # a tool's chatter is kept back on success...
+        quiet([sys.executable, "-c", "print('added 369 packages in 3s')"], ".", "x")
+    assert out.getvalue() == "", out.getvalue()
+    with contextlib.redirect_stdout(out):     # ...and shown, with a plain reason, on failure
+        try:
+            quiet([sys.executable, "-c", "import sys; print('npm ERR! code E404'); sys.exit(1)"], ".", "npm ci")
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            assert "npm ci failed" in str(e.code) and "E404" in out.getvalue(), (e.code, out.getvalue())
     miss = key_line("gemini", "x", "no look pass", None)
     assert "add my gemini key" in miss and "clipboard" in miss and "terminal" not in miss, miss
     assert key_line("gemini", "looks", "x", "the GEMINI_API_KEY variable").startswith("ok "), "found key row"

@@ -146,7 +146,8 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
     const { tl, L } = wordTl(timeline, p, land, m);
     camera(tl, q, root, m, dur, u, p.ambient);
     const el = (c: string) => q(c)[0];
-    tl.fromTo(el(".dg-veil"), { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.5, ease: "sine.out" }, Math.max(0, land - 0.3));
+    const veil = el(".dg-veil");   // none on a scene's own ground: no tween, so GSAP warns of no missing target
+    if (veil) tl.fromTo(veil, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.5, ease: "sine.out" }, Math.max(0, land - 0.3));
     // the chain: the first node spins up on its word, the others pop as their packet lands
     chain.forEach((x, i) => {
       const at = i === 0 || x.at === undefined || k ? L(x.at === undefined ? chainAt[i] : x, -0.15) : L(x, -0.22);
@@ -219,7 +220,7 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
     if (p.tag?.text) tl.fromTo(el(".dg-tag"), { scale: 0, rotate: -8 }, { scale: 1, rotate: 0, duration: 0.5, ease: m.pop }, L(p.tag, 0));
     if (p.exit) fitOut(tl, el(".dg-all"), dur, p.exit, U);   // the creator's measured exit
     else exitUp(tl, el(".dg-all"), m, dur, U * 4.6);
-    if (dur > m.out * 2) tl.to(el(".dg-veil"), { autoAlpha: 0, duration: 0.35, ease: "power1.in" }, dur - 0.35);
+    if (veil && dur > m.out * 2) tl.to(veil, { autoAlpha: 0, duration: 0.35, ease: "power1.in" }, dur - 0.35);
   }, [JSON.stringify([chain, branches, tasks, p.tag, p.accent]), w, h, dur, m.name, JSON.stringify([p.enter, p.exit, p.ambient, p.word_at])]);
 
   const shadow = `0 ${1.2 * U}px ${3 * U}px -${0.8 * U}px rgba(0,0,0,0.55), 0 ${0.15 * U}px ${0.4 * U}px rgba(0,0,0,0.25)`;

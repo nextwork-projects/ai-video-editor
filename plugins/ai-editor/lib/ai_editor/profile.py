@@ -382,6 +382,10 @@ def demo():
         r = subprocess.run([sys.executable, __file__, "set", "audience", "builders"], capture_output=True,
                            text=True, env=env)
         assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text())["audience"] == "builders"
+        # the two forms mixed: the message names the argument that is not key=value
+        r = subprocess.run([sys.executable, __file__, "set", "goal", "follow", "platform=youtube"], capture_output=True,
+                           text=True, env=env)
+        assert r.returncode == 1 and "'goal' is not key=value" in r.stderr, r.stderr
     print("profile ok")
 
 
@@ -396,14 +400,16 @@ def main():
         print("\n".join(missing(group)) or "(all answered)")
     elif len(a) >= 2 and a[0] == "set":
         pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
-        if any(len(p) != 2 or not p[0] for p in pairs):
-            sys.exit("usage: profile.py set key=value [key=value ...]  (or: set key value)")
+        bad = [x for x, p in zip(a[1:], pairs) if len(p) != 2 or not p[0]]
+        if bad:
+            sys.exit(f"profile.py set: {bad[0]!r} is not key=value. Write every answer as key=value "
+                     "(the `set key value` form takes one answer alone)")
         prof = set_pairs(json.loads(path().read_text()) if path().exists() else {}, pairs)
         print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
         print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else
-                                              "no creator: the default style (DEFAULT_STYLE)"))
+                                              "no creator: the default style (smooth zooms about every 6 s, 3-word captions)"))
     else:
         print(__doc__)
         sys.exit(2)

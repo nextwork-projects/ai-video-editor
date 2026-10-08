@@ -134,10 +134,10 @@ published prices, not measured on a bill.
 | TypeSafe key (decides the cut) | Under 1 cent a video | $0.042 per million tokens; a 3-minute video is about 5,000 tokens. Finding clips in a 12-13 minute video measured $0.013-0.016. |
 | Gemini key (reads a creator's look) | Free | Google AI Studio's free tier, no card. On the paid tier a 7-video teardown measured about $0.02. |
 | ElevenLabs key (keeps every "um") | Free for a few hours a month | Optional. Without it, Whisper transcribes on your computer for free. |
-| Render on your laptop | Free | Often the fastest for a short video. On the 46.8-second sample, `edit.py estimate` gave laptop 63 s, Modal 2.0 min and GitHub Actions 7.7 min; the laptop render took 42 s. Claude prints these numbers for your video before you pick. |
-| Render on Modal | $0.18-0.19 for the 3.4-minute sample take (measured on the bill). About $0.06 for 60 s and $0.54 for 10 min (*estimate*). | The Starter plan includes $30 of free credit a month. The sample take took 3.1 min on Modal (4.3 min when the laptop was overloaded during the join) and 6.8 min on a busy laptop. The first render also builds the render machine once (about 2 min). |
-| Render on GitHub Actions | Free | Counts against 2,000 free minutes a month on private repos. A 44-second vertical video took about 7 minutes. |
-| Render on AWS Lambda | A few cents to a few dollars (*estimate*) | Your own AWS account, card needed. Claude quotes each render first. |
+| Render on your laptop | Free | Often the fastest for a short video. The styled 44.9-second cut of the sample take (1,346 frames) rendered in 35-84 s on a laptop also running other work; `edit.py estimate` was within 25% of the render in 3 of 4 tries. Claude prints the numbers for your video before you pick. |
+| Render on Modal | $0.03 for the 44.9-second sample cut (2.7 min on 3 machines, at Modal's rates). $0.18-0.19 for the whole 3.4-minute sample take rendered uncut (6,167 frames, measured on the bill). About $0.06 for 60 s and $0.54 for 10 min (*estimate*). | The Starter plan includes $30 of free credit a month. The uncut 3.4-minute take took 3.1 min on Modal (4.3 min when the laptop was overloaded during the join) and 6.8 min on a busy laptop. The first render also builds the render machine once (about 2 min). |
+| Render on GitHub Actions | Free | Counts against 2,000 free minutes a month on private repos. The 44-second sample cut took about 7 minutes. |
+| Render on AWS Lambda | A few cents to a few dollars (*estimate*) | Your own AWS account, card needed. Not measured yet. Claude quotes each render first. |
 
 ### Cloud renders
 

@@ -2,6 +2,7 @@
 """Re-transcribe cut.mp4 and diff it against the words the cut meant to keep.
 
     python verify_cut.py <edit_dir> [--engine auto|whisper|scribe]
+    python verify_cut.py demo        self-check (offline)
 
 Run it with the venv python (it calls transcribe.py). Use the same engine as the
 raw transcript, or the diff fills with spelling noise.
@@ -9,7 +10,8 @@ raw transcript, or the diff fills with spelling noise.
   MISSING   a kept word is not in the render: a boundary landed too tight.
             Fix: raise --pad, or narrow the span that ate it, rebuild, re-render.
   SURVIVED  a removed word is still audible, including a fragment ("open" left
-            from a sliced "opening"): a boundary landed too loose.
+            from a sliced "opening"): a boundary landed too loose. Each line gives
+            its time in the cut, its time in the source and the span to add.
 
 Fillers ("um", "uh") that come and go between two passes are transcriber
 variance and are listed separately, not as errors. So is a kept word the second pass
@@ -32,7 +34,28 @@ from textnorm import load_words, pair_by_time, timed_words, transcript_words  # 
 FILLERS = {"um", "uh", "umm", "uhh", "hmm", "mm", "ah", "er", "erm"}
 
 
+def to_source(t, spans):
+    """A time on the cut -> the same moment in the source (decisions.json spans are the kept parts)."""
+    off = 0.0
+    for s in spans:
+        n = s["end"] - s["start"]
+        if t <= off + n:
+            return round(s["start"] + max(0.0, t - off), 2)
+        off += n
+    return round(spans[-1]["end"], 2) if spans else round(t, 2)
+
+
+def span_to_add(raw, a, b):
+    """The spans.json entry for the source words heard between a and b (source seconds), or None."""
+    ws = [w for w in raw if a - 0.1 <= (w["start"] + w["end"]) / 2 <= b + 0.1]
+    if not ws:
+        return None
+    return {"text": " ".join(w["text"].strip() for w in ws), "kind": "retake", "after": round(max(0.0, ws[0]["start"] - 0.05), 2)}
+
+
 def main():
+    if sys.argv[1:] == ["demo"]:
+        return demo()
     ap = argparse.ArgumentParser()
     ap.add_argument("edit_dir")
     ap.add_argument("--engine", default="auto")
@@ -53,10 +76,10 @@ def main():
         sys.exit(1)
     act = timed_words(load_words(ft))
     actual = [t for t, _, _ in act]
-    return report(d, expected, actual, removed, *pair_by_time(exp, act))
+    return report(d, expected, actual, removed, *pair_by_time(exp, act), act=act, spans=spans, raw=raw)
 
 
-def report(d, expected, actual, removed, same, differ, gone, new):
+def report(d, expected, actual, removed, same, differ, gone, new, act=None, spans=None, raw=None):
     missing = [(i, expected[i]) for i in gone]
     extra = [actual[j] for j in new]
     runs = []
@@ -90,6 +113,13 @@ def report(d, expected, actual, removed, same, differ, gone, new):
             if any(fragment(t) for t in actual[j1:j2] if t not in FILLERS):
                 print(f"  ... {' '.join(actual[max(0, j1 - 4):j1])} [{' '.join(actual[j1:j2])}] "
                       f"{' '.join(actual[j2:j2 + 4])} ...")
+                if act and spans:
+                    a, b = act[j1][1], act[j2 - 1][2]
+                    sa, sb = to_source(a, spans), to_source(b, spans)
+                    print(f"    cut {a:.2f}-{b:.2f}s = source {sa:.2f}-{sb:.2f}s")
+                    add = span_to_add(raw or [], sa, sb)
+                    if add:
+                        print(f"    span to add, if it is a real repeat: {json.dumps(add)}")
     if heard:
         print(f"\nHEARD DIFFERENTLY ({sum(heard.values())}), the same time in the cut spelled another way by the second "
               "pass (a misheard name, not a cut error; captions take the cut's spelling):")
@@ -108,6 +138,27 @@ def report(d, expected, actual, removed, same, differ, gone, new):
             print(f"  {c['start']:7.2f}s [{c['kind']}] {c['evidence'][:60]!r}")
     print("\nOK: the render matches the intended cut." if not (missing or survived) else "")
     return 1 if (missing or survived) else 0
+
+
+def demo():
+    import contextlib
+    import io
+    spans = [{"start": 0.0, "end": 2.0}, {"start": 5.0, "end": 8.0}]
+    assert to_source(1.0, spans) == 1.0 and to_source(2.5, spans) == 5.5 and to_source(9, spans) == 8.0
+    raw = [{"text": t, "start": s, "end": s + 0.3, "type": "word"} for t, s in
+           (("less", 0.8), ("than", 1.2), ("cents", 1.6), ("and", 4.6), ("and", 5.05), ("to", 5.4))]
+    act = [("less", 0.8, 1.1), ("than", 1.2, 1.5), ("cents", 1.6, 1.9), ("and", 2.0, 2.2), ("and", 2.05, 2.35),
+           ("to", 2.4, 2.7)]
+    expected = ["less", "than", "cents", "and", "to"]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = report(Path("."), expected, [t for t, _, _ in act], {"and"}, [0, 1, 2, 3, 5], [], [], [4],
+                    act=act, spans=spans, raw=raw)
+    txt = out.getvalue()
+    assert rc == 1 and "SURVIVED (1)" in txt, txt
+    assert "cut 2.05-2.35s = source 5.05-5.35s" in txt, txt
+    assert '"text": "and", "kind": "retake", "after": 5.0' in txt, txt
+    print("verify_cut ok")
 
 
 if __name__ == "__main__":

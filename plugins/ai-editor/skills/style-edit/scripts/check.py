@@ -414,12 +414,17 @@ def stream(video, vf, w, h, fps=FPS):
     p = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-filter_complex", f"[0:v]{vf},fps={fps},scale={w}:{h}",
                           "-f", "rawvideo", "-pix_fmt", "bgr24", "-"], stdout=subprocess.PIPE)
     n = w * h * 3
-    while True:
-        buf = p.stdout.read(n)
-        if len(buf) < n:
-            break
-        yield np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-    p.wait()
+    try:
+        while True:
+            buf = p.stdout.read(n)
+            if len(buf) < n:
+                break
+            yield np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+    finally:   # a reader that stops early (the shorter of two videos): stop ffmpeg before its pipe breaks,
+        if p.poll() is None:   # or it prints seven "Broken pipe" lines after the check's summary
+            p.kill()
+        p.stdout.close()
+        p.wait()
 
 
 def cutout_alpha(edit, plan, t):
@@ -494,7 +499,7 @@ def check_render(edit, plan, video):
             sw = facemod.SCAN_W
             sh = round(sw * H / W)
             if det is None:
-                det = cv2.FaceDetectorYN.create(facemod.model(), "", (sw, sh), 0.6)
+                det = facemod.detector(sw, sh)
             _, faces = det.detect(cv2.resize(src, (sw, sh)))
             for f in faces if faces is not None else []:
                 b = facemod.head_box(f[:4].tolist(), sw, sh)
@@ -605,6 +610,15 @@ def style_note(path, style):
 
 
 def demo():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:   # a frame reader closed early leaves no ffmpeg noise behind
+        v = Path(d) / "v.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=3", "-pix_fmt", "yuv420p",
+                        str(v)], check=True)
+        r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import check; "
+                            "g = check.stream(sys.argv[2], 'null', 64, 64); next(g); g.close()", str(Path(__file__).parent),
+                            str(v)], capture_output=True, text=True)
+        assert r.returncode == 0 and "Broken pipe" not in r.stderr and not r.stderr.strip(), r.stderr
     assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
     assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}

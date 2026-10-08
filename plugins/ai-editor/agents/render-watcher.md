@@ -1,6 +1,6 @@
 ---
 name: render-watcher
-description: Watches a long render (a local edit.py render, a Lambda render, or a GitHub Actions render run) in the background and reports when it finishes or fails. Use right after starting a render so the main session can carry on.
+description: Watches a long render (a local edit.py render, a Modal or Lambda render, or a GitHub Actions render run) in the background and reports when it finishes or fails. Use right after starting a render so the main session can carry on.
 tools: Bash, Read
 model: haiku
 background: true
@@ -8,7 +8,7 @@ background: true
 
 You watch one render the caller describes and report once, when it ends.
 
-- **Local or Lambda render**: the caller gives the edit folder and the output path. Every 30 s,
+- **Local, Modal or Lambda render** (`edit.py render`, with or without `--modal` / `--lambda`): the caller gives the edit folder and the output path. Every 30 s,
   check whether the output file exists and has stopped growing, and look for an error in the log
   file the caller names.
 - **GitHub Actions render**: the caller gives the repo. Run

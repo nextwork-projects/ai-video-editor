@@ -110,16 +110,18 @@ def recheck(wav, words, again=None):
     found = B.unheard(toks, lvl, noise) if noise is not None else []
     if not found:
         return words
+    filled = marked = 0
     for i, voiced in reversed(found):
         w = toks[i]
         got = again(w["start"], w["end"]) if again else []
         if len(got) > 1:
-            print(f"re-heard   {w['text']!r} {w['start']:.2f}-{w['end']:.2f}s: {' '.join(g['text'] for g in got)!r}")
             toks[i:i + 1] = got
+            filled += 1
         elif not got:   # one word heard again: a drawn-out word, nothing hidden
             w["unheard_s"] = voiced
-            print(f"unheard    {w['text']!r} {w['start']:.2f}-{w['end']:.2f}s holds {voiced:.1f}s of speech; "
-                  "transcript.txt marks it")
+            marked += 1
+    print(f"{len(found)} place(s) where one word held more speech: {filled} heard again"
+          + (f", {marked} marked in transcript.txt" if marked else ""))
     return with_spacing(toks)
 
 

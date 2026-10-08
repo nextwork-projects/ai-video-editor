@@ -170,9 +170,15 @@ def laptop_speed(plan_path, pub):
         return json.loads(LAPTOP_JSON.read_text())
     except (OSError, ValueError):
         b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
-        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "source": "benchmark"}
+        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "start_s": b.get("start_s", 0), "source": "benchmark"}
         LAPTOP_JSON.write_text(json.dumps(m))
         return m
+
+
+def laptop_s(lap, frames):
+    """A laptop render's seconds: bundling, Chrome's start-up once (a benchmark times it apart; a full
+    render's speed already holds it), then every frame."""
+    return lap["bundle_s"] + lap.get("start_s", 0) + lap["s_per_frame"] * frames
 
 
 def save_json(path, data):
@@ -261,6 +267,22 @@ def modal_ready():
     return has_pkg and has_token
 
 
+def gh_ready():
+    """gh installed and logged in (`gh auth status` reads the saved login)."""
+    return bool(shutil.which("gh")) and subprocess.run(["gh", "auth", "status"], capture_output=True).returncode == 0
+
+
+def aws_ready(env=None, home=None):
+    """AWS keys in the environment or saved by `setup.py awskey`, or a profile in ~/.aws (no network call)."""
+    env = aws_env() if env is None else env
+    return (any(env.get(k) for k in ("AWS_ACCESS_KEY_ID", "REMOTION_AWS_ACCESS_KEY_ID", "AWS_PROFILE"))
+            or (Path(home or Path.home()) / ".aws" / "credentials").exists())
+
+
+def not_set_up(ready, step):
+    return "" if ready else f" Not set up yet: the setup skill's {step} runs first."
+
+
 def render_modal(edit, plan_path, pub, out):
     bundle_dir = edit / ".modal-bundle"
     node("bundle", pub, bundle_dir)
@@ -327,17 +349,18 @@ def estimate(plan_path, pub):
     frames = plan["durationInFrames"]
     media = sum(f.stat().st_size for f in pub.rglob("*") if f.is_file())
     lap = laptop_speed(plan_path, pub)
-    print(f"Laptop: about {minutes(lap['bundle_s'] + lap['s_per_frame'] * frames)} ({frames} frames, speed from "
+    print(f"Laptop: about {minutes(laptop_s(lap, frames))} ({frames} frames, speed from "
           f"the last {'benchmark' if lap['source'] == 'benchmark' else lap['source']}). Free.")
     wall, usd, n, measured = modal_estimate(frames, media)
     print(f"Modal: about {minutes(wall)} on {n} machine{'s' * (n > 1)}, about ${usd:.2f} "
           f"({'speed measured on the last Modal render' if measured else 'a guess until the first Modal render'}; "
           f"the Starter plan includes $30 of free credit a month)." +
-          ("" if modal_ready() else " Not set up yet: the setup skill's Modal step runs first."))
+          not_set_up(modal_ready(), "Modal step"))
     lam = json.loads(node("lambda-estimate", plan_path).stdout.strip().splitlines()[-1])
-    print("Other: " + github_estimate(frames, plan["fps"], media))
+    print("Other: " + github_estimate(frames, plan["fps"], media) + not_set_up(gh_ready(), "GitHub CLI section"))
     print(f"Other: Lambda: about {lam['wall_s']} s on {lam['lambdas']} Lambdas in {lam['region']}, "
-          f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost.")
+          f"about ${lam['usd']:.3f}. A guess until a real render is measured; the render prints the real cost."
+          + not_set_up(aws_ready(), "Lambda section"))
 
 
 # The render in parallel: `plan` splits the frames (chunk_ranges, pasted in below), one `render` job per
@@ -643,6 +666,16 @@ def contact_sheet(edit, plan_name):
 
 
 def demo():
+    import tempfile
+    # the laptop estimate: Chrome's start-up once, then every frame; every cloud line says when it is not set up
+    assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0, "start_s": 2.0}, 1000) == 55.0
+    assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0}, 1000) == 53.0
+    with tempfile.TemporaryDirectory() as d:
+        assert not aws_ready({}, d) and aws_ready({"AWS_PROFILE": "x"}, d)
+        (Path(d) / ".aws").mkdir()
+        (Path(d) / ".aws" / "credentials").write_text("")
+        assert aws_ready({}, d)
+    assert not_set_up(True, "x") == "" and "Lambda section" in not_set_up(False, "Lambda section")
     plan = {"fps": 30, "durationInFrames": 900,
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
             "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}, {"start": 25, "end": 26}]}

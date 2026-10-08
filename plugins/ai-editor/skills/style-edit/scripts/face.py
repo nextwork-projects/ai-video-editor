@@ -31,6 +31,14 @@ def model():
     return str(models.fetch(MODEL.name, check=False))
 
 
+def detector(w, h):
+    """YuNet for w x h frames, with OpenCV's own log at errors only: its "Targets are not supported by the
+    new graph engine" WARN on every run means nothing to a user."""
+    import cv2
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    return cv2.FaceDetectorYN.create(model(), "", (w, h), 0.6)
+
+
 def head_box(face, w, h):
     """YuNet face [x, y, fw, fh] in px -> head box in percent, clamped to the frame."""
     x, y, fw, fh = face
@@ -60,12 +68,11 @@ def frames(video):
 
 
 def scan(video):
-    import cv2
     det, heads = None, []
     for t, im in frames(video):
         h, w = im.shape[:2]
         if det is None:
-            det = cv2.FaceDetectorYN.create(model(), "", (w, h), 0.6)
+            det = detector(w, h)
         _, faces = det.detect(im)
         box = None
         if faces is not None and len(faces):
@@ -79,6 +86,14 @@ def demo():
     b = head_box([100, 200, 100, 100], 400, 800)
     assert b == [20.0, 20.6, 35.0, 18.8], b
     assert head_box([0, 0, 100, 100], 400, 800)[:2] == [0.0, 0.0]
+    try:
+        import cv2  # noqa: F401  (the venv has it; a bare python skips this part)
+    except ImportError:
+        cv2 = None
+    if cv2 is not None and MODEL.exists():   # the detector prints no OpenCV log lines
+        r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import face; "
+                            "face.detector(64, 64)", str(Path(__file__).parent)], capture_output=True, text=True)
+        assert r.returncode == 0 and "WARN" not in r.stderr, r.stderr
     print("demo ok")
 
 

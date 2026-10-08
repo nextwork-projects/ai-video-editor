@@ -32,63 +32,12 @@ Sources:
 
 ## Next
 
-- No named things are found when the names question is left blank. The sample take names Claude,
-  Jev, Haiku and Opus; `route.py beats` gave `"names": []` on all 13 sentences because it only
-  marks the profile's `names`, and that question is free text with no default. A beginner on the
-  sample take gets no logos or captures unless the model invents them. Done: route.py also marks
-  product names it can resolve to a logo or domain, or the sample take comes with its names; the
-  sample's beats list the four.
-
-- Output a new user cannot read. face.py and `check.py render` print OpenCV's "[ WARN:0@0.140] global
-  net_impl_backend.cpp:345 setPreferableTarget Targets are not supported by the new graph engine";
-  `edit.py stills` prints 15 and the render 35 "GSAP target undefined not found" lines; bootstrap
-  prints raw download URLs with commit hashes, npm's "added 369 packages in 3s" and "Has browser at
-  /private/..."; `transcribe.py` prints "re-heard 'one' 132.34-133.70s" lines; `profile.py style`
-  prints "the default style (DEFAULT_STYLE)"; plan prints "cues sit 5-4 dB under it". Done: library
-  noise filtered, one plain line per step, the GSAP warnings fixed at their source.
-
-- `verify_cut.py` SURVIVED gives no time: "... less than five cents [and] and to break down ...".
-  cut/SKILL.md step 5 tells the model to map the cut time to source time with decisions.json, but no
-  time is printed, and the doubled "and, and" went on into captions and the render. Done: each
-  SURVIVED line prints its cut time and source time and the span to add.
-
-- Intake wording disagrees with itself. start/SKILL.md:70 says "`goal` and `names` belong to this
-  video"; profile.py `VIDEO_QUESTIONS` is `audience`, `names`; intake.md has a `set goal` example
-  but no `goal` question. intake.md puts the style ids `platform` and `creators` under "Call 1: the
-  video", and setup step 8 groups the same questions differently. With no creator, the recommended
-  caption answer is "like the creator". `profile.py set` given one `key value` pair followed by
-  `key=value` pairs prints only the usage line, not which argument was wrong. Done: one id list and
-  one grouping across start, setup, intake.md and profile.py; caption default reads right with no
-  creator; set names the bad argument.
-
-- Render estimates and README numbers are out of date. `edit.py estimate` said laptop 75 s ("speed
-  from the last benchmark" on a fresh home); the render took 45 s. README "What it costs" quotes
-  "the 46.8-second sample, laptop 63 s, Modal 2.0 min"; today's cut is 43.9 s and Modal is quoted
-  at 3.5 min. README says Modal is about $0.06 for 60 s and $0.54 for 10 min; setup/references/
-  cloud.md says $0.05 and $0.48. Both call the cost "the 3.4-minute sample take" though style-edit
-  renders the 44 s cut. The Lambda and GitHub lines do not say "not set up yet" the way Modal does.
-  Done: one set of measured numbers, named by what was rendered, in README and cloud.md; the laptop
-  estimate within 25% on the sample.
-
-- Stale after today's changes. style-edit/references/motion.md:139 and contracts.md:266 say every
-  scene starts `SCENE_LEAD_S` before its word; a hard-cut scene now starts `CARD_LEAD_S` before it.
-  creator-teardown references/teardown-page.md:46 says slow-drifting footage "gives no detections";
-  `drift_dets` now finds some (see the teardown item above). style-edit/references/plan.md:77 calls
-  matte `--modal` cost "not yet measured". agents/render-watcher.md covers local, Lambda and GitHub
-  renders, not Modal. contracts.md says a `flow` is "an overlay box by default", but plan made the
-  sample's flow a 9.3 s full-frame white scene (28.2-37.5 s) with the speaker gone. Done: each line
-  matches the code; flow's default is decided and written once.
-
-- Smaller link-routing gaps. A working Drive share still carries "In Drive, Share > General access >
-  'Anyone with the link', then paste the link again", which start says to read out. Drive names are
-  unreadable ("drive-1l-5rk28jr"). A Spotify episode resolves to a podcast-analytics redirect URL
-  rather than the host's file. An Instagram reel whose probe fails comes back as an `ask` with no
-  duration and no note. Done: the Drive note only after a failed fetch; names from the file or
-  episode title; the redirect stripped where the feed allows; a failed probe says so.
-
-- style-edit shapes.md never shows that visuals.json is a JSON array of beats; only contracts.md has
-  it, and SKILL.md says "never read it to run the skill". Done: shapes.md opens with a two-beat
-  example of the whole file.
+- Laptop render estimate on a fresh home's first benchmark. The benchmark now times Chrome's start-up
+  apart; 3 of 4 back-to-back estimate/render pairs on the 44.9 s sample cut were within 25%, the fourth 57%
+  under (load average 20-37 from other work on the test machine). The cold first benchmark the item was
+  about (75 s quoted, 45 s rendered) was not reproduced: caches were warm. Done: on an idle machine and a
+  new AI_EDITOR_HOME with an empty renderer cache, the first estimate within 25% of the render. The Modal
+  $0.03 for the sample cut is Modal's rates times container time, not yet checked on the bill.
 
 - Teardown graphics miss most titles on slow-drift videos. Measured on two public ones (a
   colourised-stills documentary, 16 titles; generated stills, 4 titles): recall 0.00 and 0.25,
