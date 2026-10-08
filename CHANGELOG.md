@@ -4,6 +4,20 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The code kind guess called white one- and two-line titles over photos "photo" or "UI recording".
+  `text_fill` is now the share of the box all its OCR lines cover (it was the biggest line), and one
+  to three lines covering half the box or more is a text card before the moving test (the picture
+  between the letters can move). On the hand-labelled titles of two public slow-drift videos: 6/16
+  -> 16/16 and 2/4 -> 4/4 text card (the documentary with look.py's caption marks cleared; with
+  them, 2/16 both ways, see Next). Test: `graphics.py demo` (a two-line title over a moving photo).
+- `laid_on` dropped titles that arrive and leave on cuts. A drift track is now also kept when it
+  starts or ends on a cut (from visual.json or a frame-wide jump) with one to three OCR lines
+  inside, or when a hard cut inside its run changes the picture between its letters but not the
+  letters. Test: `graphics.py demo` (generated stills, a title held across a cut with no OCR, a
+  title from one cut to the next with OCR). Measured: documentary precision / recall 0.00 / 0.00
+  before and after; generated stills 0.00 / 0.00 -> 0.05 / 0.25 (the title that lands on a cut is
+  found). What still misses them is in Next.
+
 - Modal renders took 5.2 min on the 3.4-minute sample take where the estimate said 2.9 min. Measured
   causes: the upload sent the bundle as ~3,700 small files, one request each (44 s, 40 s even when
   nothing had changed); one container in each render ran its piece 2-10x slower than the rest (213 s

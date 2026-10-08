@@ -483,11 +483,10 @@ def to_text(tr, look):
     return {**tr, "boxes": [box] * len(tr["boxes"])}
 
 
-def grow_drift(tr, F):
-    """grow_track for a graphic found over drifting footage. drift_dets needs it held for +-1 s, so
-    its run starts and ends a second inside the truth, and the box's whole picture drifts, so
-    grow_track's test stops early. Compared instead: only the pixels on the graphic's own still
-    edges (its lettering), which match wherever it is up."""
+def lettering(tr, F):
+    """The track's lettering: the hard edges in its box at the middle sample that also hold at both
+    ends of the run (a mask over the box), and per sample whether the box shows them. None when
+    there are too few."""
     import cv2
     H, W = F.shape[1:3]
     k = len(tr["idx"]) // 2
@@ -499,8 +498,20 @@ def grow_drift(tr, F):
     for j in (tr["idx"][0], tr["idx"][-1]):
         m &= np.abs(G[j] - G[r]).mean(-1) < 8
     if m.sum() < 10:
+        return None
+    return [float(np.abs(G[i] - G[r]).mean(-1)[m].mean()) < 20 for i in range(len(F))], m
+
+
+def grow_drift(tr, F):
+    """grow_track for a graphic found over drifting footage. drift_dets needs it held for +-1 s, so
+    its run starts and ends a second inside the truth, and the box's whole picture drifts, so
+    grow_track's test stops early. Compared instead: only the pixels on the graphic's own still
+    edges (its lettering), which match wherever it is up."""
+    lt = lettering(tr, F)
+    if lt is None:
         return tr
-    same = [float(np.abs(G[i] - G[r]).mean(-1)[m].mean()) < 20 for i in range(len(F))]
+    same = lt[0]
+    box = tr["boxes"][len(tr["idx"]) // 2]
     a, b = tr["idx"][0], tr["idx"][-1]
     while a > 0 and same[a - 1]:
         a -= 1
@@ -753,11 +764,12 @@ def colour_count(img):
 
 def guess_kind(g, look):
     """Code's guess at the kind. gemini.py kinds replaces it."""
+    # one to three OCR lines filling most of the box: a word mark or a title, over a plain ground or a
+    # photo (the picture showing between the letters can move), not an icon or a screen
+    if 1 <= g["text_lines"] <= 3 and (g.get("text_fill") or 0) >= 0.5:
+        return "text card"
     if g["moving"] >= 6:
         return "UI recording" if g["text_lines"] >= 2 else "b-roll"
-    # one OCR line filling most of the box: a word mark or a one-line text card, not an icon
-    if g["text_lines"] >= 1 and (g.get("text_fill") or 0) >= 0.5:
-        return "text card"
     # an app or brand icon: small, near-square on screen, a few flat colours, a name at most, and no
     # line of text running out of it (then it is a piece of a wider card)
     if (g.get("colours") or 99) <= 8 and 0.75 <= (g.get("aspect") or 0) <= 1.33 and g.get("area_pct", 100) <= 8 \
@@ -785,17 +797,17 @@ def text_lines_in(box, t0, t1, look):
 
 
 def text_fill(box, t0, t1, look):
-    """Share of the box the biggest OCR line inside it covers while it is up (median per sample):
-    a word mark fills most of its box, an app icon's name under it a strip."""
+    """Share of the box its OCR lines cover while it is up (median per sample): a word mark or a title
+    fills most of its box, an app icon's name under it a strip, a sign in a photo a corner."""
     if not look:
         return 0.0
     x, y, w, h = box
     fills = []
     for s in look.get("samples") or []:
         if t0 <= s["t"] <= t1:
-            fills.append(max([b[2] * b[3] / max(1e-6, w * h) for tx, b, cap in s["lines"] if not cap
+            fills.append(sum([b[2] * b[3] / max(1e-6, w * h) for tx, b, cap in s["lines"] if not cap
                               and x - 0.02 <= b[0] + b[2] / 2 <= x + w + 0.02
-                              and y - 0.02 <= b[1] + b[3] / 2 <= y + h + 0.02] or [0.0]))
+                              and y - 0.02 <= b[1] + b[3] / 2 <= y + h + 0.02]))
     return round(min(1.0, statistics.median(fills)), 2) if fills else 0.0
 
 
@@ -900,20 +912,43 @@ def measure_video(path, look=None, visual=None, band=None, crop_dir=None):
     def laid_on(tr):
         """A graphic found over drifting footage arrives or leaves while the picture stays: its box
         changes across the entrance (or exit) and most of the frame does not. A still patch of the
-        picture (the fixed point of a slow push) only comes and goes with its shot.
-        ponytail: a graphic that both arrives and leaves on a cut is dropped too."""
+        picture (the fixed point of a slow push) only comes and goes with its shot, so a title that
+        arrives and leaves on cuts is kept on other evidence: its lettering holds across a cut inside
+        its run while the picture under it changes, or it starts or ends on a cut with OCR text in it."""
         box, a, b = tr["boxes"][len(tr["boxes"]) // 2], tr["idx"][0], tr["idx"][-1]
         x0, y0 = int(box[0] * W), int(box[1] * H)
         x1, y1 = int((box[0] + box[2]) * W) + 1, int((box[1] + box[3]) * H) + 1
+
+        def change(p, q):
+            """Mean change inside the box and outside it between samples p and q."""
+            d = np.abs(F[p].astype(np.float32) - F[q]).mean(-1)
+            inside = float(d[y0:y1, x0:x1].mean())
+            d[y0:y1, x0:x1] = np.nan
+            return inside, float(np.nanmean(d))
+        on_cut = False
         for p, q in ((a - 2, a + 1), (b + 2, b - 1)):
             if 0 <= p < n and 0 <= q < n:
-                d = np.abs(F[p].astype(np.float32) - F[q]).mean(-1)
-                inside = float(d[y0:y1, x0:x1].mean())
-                d[y0:y1, x0:x1] = np.nan
-                if inside >= 14 and inside >= 2 * float(np.nanmean(d)):   # a cut or a dissolve changes both
+                inside, outside = change(p, q)
+                if inside >= 14 and inside >= 2 * outside:   # a cut or a dissolve changes both
+                    return True
+                on_cut |= outside >= 25 or any(min(p, q) < c <= max(p, q) for c in cut_idx)
+        if on_cut and 1 <= text_lines_in(box, a / SFPS, (b + 1) / SFPS, look) <= 3:   # a title, not a page or a sign
+            return True
+        # A hard cut inside the run (the frame jumps between two samples and holds still either side)
+        # that changes the picture between the letters but not the letters (plain ground or a still
+        # patch of the picture changes neither; moving footage changes both).
+        lt = lettering(tr, F)
+        if lt is None:
+            return False
+        m = lt[1]
+        for j in range(a + 2, b - 1):
+            if change(j - 1, j)[1] >= 25 and change(j - 2, j - 1)[1] < 6 and change(j, j + 1)[1] < 6:
+                d = np.abs(F[j - 1, y0:y1, x0:x1].astype(np.float32) - F[j, y0:y1, x0:x1]).mean(-1)
+                if (~m).sum() and float(d[~m].mean()) >= 14 and float(d[m].mean()) < 0.4 * float(d[~m].mean()):
                     return True
         return False
 
+    cut_idx = [round(c * SFPS) for c in cuts]
     if overlay:
         # Grown over the samples where the footage stood still, then kept when it is a laid-on graphic:
         # text in it or a hard rectangular edge, and not up for most of the video (a watermark, a frame).
@@ -1364,6 +1399,74 @@ def demo_drift():
         assert 0.8 <= g["t_in"] <= 1.4 and 3.6 <= g["t_out"] <= 4.4, g
 
 
+def cut_titles_clip(mp4, W=640, H=360, FPS=30):
+    """A 16 s generated-stills fixture, no speaker: four stills, each slowly pushed in, hard cuts at
+    4, 8 and 11 s. Hand-labelled truth: a lower-right title up from the start to the 8 s cut, its lettering
+    unchanged across the 4 s cut (no OCR given for it); a second title that arrives on the 8 s cut and
+    leaves on the 11 s cut, at the left (OCR reads it)."""
+    import cv2
+    from PIL import Image, ImageDraw, ImageFont
+
+    def still(seed):
+        r = np.random.default_rng(seed)
+        big = np.asarray(Image.fromarray((r.random((H // 24, W // 24, 3)) * 150 + 50).astype(np.uint8))
+                         .resize((W, H), Image.BICUBIC)).copy()
+        for _ in range(5):
+            x, y = int(r.integers(0, W - 120)), int(r.integers(0, H - 120))
+            cv2.rectangle(big, (x, y), (x + int(r.integers(30, 110)), y + int(r.integers(30, 110))),
+                          tuple(int(v) for v in r.integers(0, 255, 3)), -1)
+        return big
+    stills = [still(s) for s in (31, 32, 33, 34)]
+    font = ImageFont.load_default(size=30)
+
+    def lettering(text, w, h):
+        """White letters with a dark edge and no ground: the picture shows between them."""
+        im = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(im).text((4, 6), text, fill=255, font=font, stroke_width=2, stroke_fill=128)
+        a = np.asarray(im, np.float32)
+        return (a > 0)[..., None], np.where(a[..., None] > 200, 255.0, 20.0)
+    titles = [(*lettering("1865. city point", 300, 44), 320, 290, 0.0, 8.0),
+              (*lettering("rome, 5:00 am", 260, 44), 40, 200, 8.0, 11.0)]
+    rng = np.random.default_rng(9)
+    frames = []
+    for i in range(16 * FPS):
+        t = i / FPS
+        k = 0 if t < 4 else 1 if t < 8 else 2 if t < 11 else 3
+        u = (t - (0, 4, 8, 11)[k]) / 4
+        s = 1.0 + 0.12 * u
+        M = np.float32([[s, 0, -(s - 1) * W / 2], [0, s, 0]])
+        img = cv2.warpAffine(stills[k], M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT).astype(np.float32)
+        for m, c, x, y, t0, t1 in titles:
+            if t0 <= t < t1:
+                h, w = m.shape[:2]
+                img[y:y + h, x:x + w] = np.where(m, c, img[y:y + h, x:x + w])
+        frames.append(np.clip(img + rng.normal(0, 2, img.shape), 0, 255).astype(np.uint8))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+                    "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "18", str(mp4)],
+                   input=b"".join(f.tobytes() for f in frames), check=True)
+    ink = [(np.nonzero(m[..., 0].any(0))[0], np.nonzero(m[..., 0].any(1))[0]) for m, *_ in titles]   # the letters' own box
+    truth = [(t0, t1, [(x + xs[0]) / W, (y + ys[0]) / H, (xs[-1] - xs[0] + 1) / W, (ys[-1] - ys[0] + 1) / H])
+             for (m, c, x, y, t0, t1), (xs, ys) in zip(titles, ink)]
+    # OCR (look.json's shape, 3 a second) reads the lower title only
+    look = {"samples": [{"t": k / 3, "face": None,
+                         "lines": [["rome, 5:00 am", [44 / W, 208 / H, 200 / W, 30 / H], False]] if 8.0 <= k / 3 < 11.0 else []}
+                        for k in range(48)]}
+    return truth, look
+
+
+def demo_cut_titles():
+    """Titles that arrive or leave on a cut: kept when their lettering holds across a cut, or when
+    they start or end on one with OCR text inside. The fixed point of each push is not kept."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mp4 = Path(tmp) / "c.mp4"
+        truth, look = cut_titles_clip(mp4)
+        r = measure_video(mp4, look, {"cuts": [4.0, 8.0, 11.0], "zooms": []}, None, None)
+        p, rc = precision_recall(r["graphics"], truth)
+        print(f"  titles on cuts ({r.get('mode')} mode): precision {p:.2f}, recall {rc:.2f}, "
+              + "; ".join(f"{g['t_in']}-{g['t_out']} {[round(v, 2) for v in g['box']]} {g['kind']}" for g in r["graphics"]))
+        assert p == 1.0 and rc == 1.0, (p, rc, r["graphics"])
+
+
 def demo_kinds():
     """An app icon with its name under it is a logo, not a text card; a text card stays one."""
     from PIL import Image, ImageDraw, ImageFont
@@ -1397,6 +1500,19 @@ def demo_kinds():
     # the icon with its name under it: the name is a strip of its box, still a logo
     look = {"samples": [{"t": 2.0, "lines": [["Notes", [0.41, 0.455, 0.1, 0.012], False]]}]}
     assert text_fill(mark, 1.8, 2.8, look) < 0.5
+    # a white two-line title over a drifting photo (measured case): the box is its two OCR lines, the
+    # longer one under half of it; the photo shows between the letters, so it is neither flat nor still
+    title = [0.11, 0.81, 0.80, 0.17]
+    look = {"samples": [{"t": 42.0, "lines": [["1864. Union Army soldier at", [0.11, 0.82, 0.80, 0.07], False],
+                                              ["outside of Atlanta", [0.37, 0.90, 0.27, 0.07], False]]}]}
+    fill = text_fill(title, 41.7, 43.4, look)
+    assert fill >= 0.5, fill
+    over = {**g, "flat": False, "text_lines": 2, "colours": 40, "aspect": 8.3, "area_pct": 13.6, "text_fill": fill}
+    assert guess_kind({**over, "moving": 7.5}, None) == "text card"      # was "UI recording"
+    assert guess_kind({**over, "moving": 2.0}, None) == "text card"      # was "photo"
+    # still their own kinds: a screen recording with many lines, a photo with a small sign in it
+    assert guess_kind({**over, "moving": 9, "text_lines": 6, "text_fill": 0.3}, None) == "UI recording"
+    assert guess_kind({**over, "text_lines": 1, "text_fill": 0.08}, None) == "photo"
 
 
 def demo():
@@ -1476,6 +1592,7 @@ def demo():
     demo_kinds()
     demo_moving()
     demo_drift()
+    demo_cut_titles()
     # style-edit's split layout when the graphics own the top panel and the speaker sits below it
     top = {"zones_pct": {"top": 82, "middle": 10, "bottom": 0, "full": 8}, "median_box": [8, 9, 84, 33], "covers_face_pct": 0}
     assert split_layout(top, {"y_pct": 71}, True) == {"mode": "split", "seam": 44, "source": "graphics.py"}

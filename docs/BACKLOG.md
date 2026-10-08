@@ -21,10 +21,14 @@ Sources:
 
 ## Next
 
-- The code kind guess calls white one- and two-line titles over photos "photo" (6 of 8 on the
-  re-scored documentary) or "UI recording". Drift detection was tuned on that one video; a second
-  slow-drift video (generated stills, titles that arrive and leave on cuts, which `laid_on` drops)
-  is untested.
+- Teardown graphics miss most titles on slow-drift videos. Measured on two public ones (a
+  colourised-stills documentary, 16 titles; generated stills, 4 titles): recall 0.00 and 0.25,
+  precision 0.00 and 0.05, with 19-22 false finds each. Causes, largest first: look.py marks the
+  documentary's titles as captions (no transcript, titles 1.3-1.7 s), so the caption band hides
+  them; `drift_dets` needs lettering held still for +-1 s, longer than those titles; thin
+  lettering with no ground over a busy picture (3 of 4 generated-stills titles) never forms a
+  still-edge box; tracks from the moving-footage test pick up photo borders on a black ground
+  while the photo colourises (most of the false finds).
 
 - Teardowns made before `"transitions": []` was written leave the key out for a creator who only cuts,
   so their scenes still get match / iris; re-run visual.py on them. A `cut` scene still starts
