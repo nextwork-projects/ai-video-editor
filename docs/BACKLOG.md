@@ -48,10 +48,6 @@ Sources:
   still-edge box; tracks from the moving-footage test pick up photo borders on a black ground
   while the photo colourises (most of the false finds).
 
-- Modal: the hedge (a second copy of a piece still running at 2x the median) ran live only on a
-  stand-in function; no sample-take render has hit a slow container since it shipped. The estimate
-  counts the whole upload even when Modal already holds the footage (a re-render uploads in 3-4 s).
-
 Carried over (still untested live):
 - Links: OneDrive personal share links go through the `api.onedrive.com/v1.0/shares` download
   path, untested live (no public OneDrive sample). Test with a real share; if Microsoft has

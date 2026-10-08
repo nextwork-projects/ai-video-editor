@@ -246,13 +246,27 @@ def modal_speed():
 
 def modal_estimate(frames, media_bytes, m=None):
     """(wall s, usd, containers, measured?): upload + start + the render on n containers, slowed by the
-    straggle factor + the tail. The upload is counted in full; footage Modal already holds is skipped by
-    hash and goes up in about a second."""
+    straggle factor + the tail. media_bytes is what goes up: modal_upload_bytes leaves out footage Modal
+    already holds."""
     m, measured = (m, True) if m else modal_speed()
     work = frames * m["s_per_frame"]
     n, _ = modal_plan(frames, m["s_per_frame"])
     wall = media_bytes / m["up_bytes_s"] + m["start_s"] + work / n * m["straggle"] + m["tail_s"]
     return wall, modal_cost(work, n), n, measured
+
+
+def modal_upload_bytes(pub, media, run=subprocess.run, ready=None):
+    """Footage bytes a Modal render will upload. Modal skips a file it already holds by its hash (a
+    re-render's upload takes 3-4 s); modal_render.py held asks by hash and sends nothing. Modal not set
+    up, or no answer in 30 s: all of it."""
+    if not (ready or modal_ready)():
+        return media
+    try:
+        r = run([venv_python(), str(Path(__file__).parent / "modal_render.py"), "held", str(pub)],
+                capture_output=True, text=True, timeout=30)
+        return json.loads(r.stdout.strip().splitlines()[-1])["to_upload"]
+    except Exception:
+        return media
 
 
 def venv_python():
@@ -351,7 +365,7 @@ def estimate(plan_path, pub):
     lap = laptop_speed(plan_path, pub)
     print(f"Laptop: about {minutes(laptop_s(lap, frames))} ({frames} frames, speed from "
           f"the last {'benchmark' if lap['source'] == 'benchmark' else lap['source']}). Free.")
-    wall, usd, n, measured = modal_estimate(frames, media)
+    wall, usd, n, measured = modal_estimate(frames, modal_upload_bytes(pub, media))
     print(f"Modal: about {minutes(wall)} on {n} machine{'s' * (n > 1)}, about ${usd:.2f} "
           f"({'speed measured on the last Modal render' if measured else 'a guess until the first Modal render'}; "
           f"the Starter plan includes $30 of free credit a month)." +
@@ -767,6 +781,12 @@ def demo():
     m = {"s_per_frame": 0.3, "start_s": 10, "straggle": 1.5, "tail_s": 20, "up_bytes_s": 4e6}
     wall, usd, n, _ = modal_estimate(6000, 140e6, m)
     assert n == 15 and abs(wall - (35 + 10 + 1800 / 15 * 1.5 + 20)) < 1e-6 and abs(usd - modal_cost(1800, 15)) < 1e-9, (wall, n)
+    # footage Modal already holds (asked by hash, nothing sent) is not counted as upload time
+    said = lambda out: lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out)
+    assert modal_upload_bytes("pub", 140e6, run=said('{"to_upload": 0}\n'), ready=lambda: True) == 0
+    assert modal_upload_bytes("pub", 140e6, run=said('{"to_upload": 5}\n'), ready=lambda: True) == 5
+    assert modal_upload_bytes("pub", 140e6, run=said(""), ready=lambda: True) == 140e6, "no answer: all of it"
+    assert modal_upload_bytes("pub", 140e6, run=None, ready=lambda: False) == 140e6, "Modal not set up"
     print("demo ok")
 
 
