@@ -70,13 +70,15 @@ clear of the head. Overlay layout only. Then cut the speaker out where those car
 $VPY "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 ```
 
-It writes `edits/<name>/cutout/<range>/` (RGBA PNGs, about 0.5 MB a frame) and the plan's
-`cutouts`, then prints, per card, how much of its key region the speaker covers and that the face
+It writes `edits/<name>/cutout/<size>-<key>/` (RGBA PNGs named by their frame of the cut, about
+0.5 MB a frame; the key changes with cut.mp4) and the plan's `cutouts`, then prints, per card, how much of its key region the speaker covers and that the face
 is solid. On a `WARNING`, shrink or move that card. Laptop CPU: about 0.2-0.5 s a frame (free).
 `--modal` runs each range on its own Modal CPU container (8 cores; about $0.00003 a frame at
-Modal's rates, about $0.06 per minute of behind-card time, not yet measured). Say the time or cost
-before running it. `check.py plan` FAILs a behind card with no cutout. Re-run matte.py after every
-plan.py run; ranges already cut are reused.
+Modal's rates, about $0.06 per minute of behind-card time, not yet measured). `--estimate` prints
+the frames to cut, the time and the cost, and stops: say them before running it. A frame already
+cut is never cut again, and plan.py keeps every cutout whose frames are all there, so a re-plan that
+moves nothing needs no matte run and one that moves a card cuts only the frames it adds. `check.py
+plan` FAILs a behind card with no cutout and prints the matte.py command to run.
 
 ## Sound cues
 

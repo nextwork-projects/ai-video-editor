@@ -682,7 +682,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             # edge differs a little from the raw camera), so his pixels read as footage here
             k = any(cards[i].get("layer") == "behind" for i in up) and \
                 next((x for x in plan.get("cutouts") or [] if x["from"] <= n <= x["to"]), None)
-            png = k and edit / k["src"] / f"{n - k['from']:06d}.png"
+            png = k and edit / k["src"] / f"{n:06d}.png"
             if png and png.exists():
                 al = cv2.resize(cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3], (W, H), interpolation=cv2.INTER_AREA)
                 person = cv2.dilate((cv2.warpAffine(al, zm, (W, H)) > 0).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)

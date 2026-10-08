@@ -2064,6 +2064,12 @@ def main():
               "under the voice; sfx.py music lays one at that level (the style-edit Sound step)", file=sys.stderr)
     from preview import apply_overrides   # edits/<name>/overrides.json, written by the preview page
     plan = apply_overrides(plan, edit_dir, out.name)
+    import matte   # a re-plan keeps the speaker's cutout wherever matte.py already cut every frame it needs
+    if matte.behind_ranges(plan):
+        plan["cutouts"] = matte.kept(plan, edit_dir)
+        if len(plan["cutouts"]) < len(matte.behind_ranges(plan)):
+            print(f"behind cards: run matte.py {edit_dir}" + (f" --plan {out.name}" if out.name != "plan.json" else "")
+                  + " (it cuts only the frames not cut yet)", file=sys.stderr)
     out.write_text(json.dumps(plan, indent=1))
     from ai_tells import check_plan as ai_tells, for_brand   # the AI-made look (references/ai-tells.md)
     for f in for_brand(ai_tells(plan, visuals), prof.get("brand")):

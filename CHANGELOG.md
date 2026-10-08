@@ -4,6 +4,23 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- `check.py render` FAILed a behind card the cutout already covers ("drawn over the face ... up to 41%
+  of the head", fix: face.py, plan again, which loops). It looked the matte up by its 4-a-second
+  sample number instead of the plan's frame, so no matte was found, and ffmpeg's fps filter handed
+  it the render 0.1 s off the footage it compared with (mid zoom-out at 3.5 s). It now samples exact
+  frames and reads the matte the render drew at that frame; a behind card counts as on the face only
+  where it shows on the speaker's solid matte. A behind card with no matte there says to run matte.py.
+  On the sample take: 3 face FAILs -> none. Test: `check.py demo`.
+- A re-plan dropped the cutouts, and matte.py re-cut a whole range when a card moved (195 frames,
+  49.5 s, for 30 new ones). Matte frames are now named by their frame of the cut, in one folder per
+  cut and output size, and only frames not cut yet are cut; plan.py keeps every cutout whose frames
+  are all there. On the sample take, a re-plan with the same ranges needs no matte run, and one that
+  moves a card cuts 30 frames in 10 s; the cutout folder is 179 MB, was 278 MB. matte.py `--estimate`
+  prints the frames, time and cost and stops. style-edit step 4 runs matte after music's re-plan and
+  says to run it after any later plan. `check.py plan` and plan.py print the real edit path (was a
+  literal `edits/<name>`). Plans made before this need plan.py and matte.py again before a render.
+  Tests: `matte.py demo`, `check.py demo`.
+
 - A caption correction into several words ("use." heard, the cut says "are using.") was one token,
   which plan.py's word cleaning glued into "areusing" on stills and the render, and `check.py render`
   flagged as a LOOK. `retakes.py caption_words` and `retakes.py fix` on captions.json now write one

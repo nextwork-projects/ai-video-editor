@@ -167,7 +167,7 @@ def text_sizes(anim, w, h):
     return out
 
 
-def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=()):
+def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=(), edit="edits/<name>"):
     """named: [(t, name)] the profile's things said (route.py beats.json)."""
     out = []
     aspect = aspect_of(plan)
@@ -209,7 +209,8 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             fps = plan["fps"]
             if not any(k["from"] <= c["start"] * fps and c["end"] * fps <= k["to"] + 1 for k in plan.get("cutouts") or []):
                 out.append(finding("FAIL", c["start"], f"{name} card sits behind the speaker but there is no cutout for it",
-                                   "run matte.py edits/<name> (it cuts the speaker out where behind cards are up)"))
+                                   f"run matte.py {edit} (it cuts the speaker out where behind cards are up, "
+                                   "reusing every frame already cut)"))
             continue
         ink = aspect == "9:16" and explain_ink(c, W, H)
         if ink and (ink[1] - ink[0] < INK_MIN_W or abs((ink[0] + ink[1]) / 2 - 50) > CENTRE_INK):
@@ -421,6 +422,38 @@ def stream(video, vf, w, h, fps=FPS):
     p.wait()
 
 
+def cutout_alpha(edit, plan, t):
+    """The speaker's matte the render drew at t (0-255, the cut's size), or None when no cutout is up:
+    the plan's cutouts, at the plan's frame (not the check's sample number)."""
+    import cv2
+    f = round(t * plan["fps"])
+    k = next((x for x in plan.get("cutouts") or [] if x["from"] <= f <= x["to"]), None)
+    png = k and Path(edit) / k["src"] / f"{f:06d}.png"
+    return cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3] if png and png.exists() else None
+
+
+def face_cover(ink, head, person=None):
+    """Share of the head box (px x0, y0, x1, y1) the card is drawn ON. A behind card under a cutout is
+    on the head only where the speaker is (person: the matte's solid pixels) and the card still shows;
+    where the cutout is drawn over it, the frame is the speaker, so there is no ink there."""
+    x0, y0, x1, y1 = head
+    on = ink[y0:y1, x0:x1]
+    if person is not None:
+        on = on * person[y0:y1, x0:x1]
+    return float(on.sum()) / max(1, (x1 - x0) * (y1 - y0))
+
+
+def sampled(video, vf, w, h, fps):
+    """(t, frame) FPS times a second, each an exact frame of the video (t = its frame / fps): ffmpeg's fps
+    filter picked the render's frame 108 for 3.5 s, mid zoom-out, so the footage and the matte the check
+    compared it with were 0.1 s off and a card under the cutout read as on the face."""
+    k = 0
+    for f, frame in enumerate(stream(video, vf, w, h, fps)):
+        if f == round(k * fps / FPS):
+            yield f / fps, frame
+            k += 1
+
+
 def check_render(edit, plan, video):
     import cv2
     import numpy as np
@@ -433,7 +466,8 @@ def check_render(edit, plan, video):
     W, H = plan["width"] // 2, plan["height"] // 2
     cards = plan["cards"]
     m = probe(edit / plan["video"])
-    behind = stream(edit / plan["video"], proxy_filter(m["width"], m["height"], plan["width"], plan["height"]), W, H)
+    fps = plan["fps"]
+    behind = sampled(edit / plan["video"], proxy_filter(m["width"], m["height"], plan["width"], plan["height"]), W, H, fps)
     ground = None
     if split:
         g = plan["layout"]["ground"].lstrip("#")
@@ -442,9 +476,8 @@ def check_render(edit, plan, video):
     pix = lambda b, pad=0: (max(0, int((b[0] - pad) / 100 * W)), max(0, int((b[1] - pad) / 100 * H)),
                             min(W, int((b[0] + b[2] + pad) / 100 * W)), min(H, int((b[1] + b[3] + pad) / 100 * H)))
     per = {i: {"diffs": [], "cover": [], "prev": None, "mid": None} for i in range(len(cards))}
-    for n, frame in enumerate(stream(video, "null", W, H)):
-        t = n / FPS
-        cut = next(behind, None)
+    for n, (t, frame) in enumerate(sampled(video, "null", W, H, fps)):
+        cut = next(behind, (0, None))[1]
         up = [i for i, c in enumerate(cards) if c["start"] + 0.35 <= t <= c["end"] - 0.2]
         if not up:
             continue
@@ -469,15 +502,8 @@ def check_render(edit, plan, video):
                     heads.append(b)
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        # a behind card may sit inside the head box (beside the hair, behind it): only ink ON the speaker
-        # (the cutout's solid pixels, on the same zoom) counts as covering him
-        person = None
-        if not split and any(cards[i].get("layer") == "behind" for i in up):
-            k = next((x for x in plan.get("cutouts") or [] if x["from"] <= n <= x["to"]), None)
-            png = k and edit / k["src"] / f"{n - k['from']:06d}.png"
-            if png and png.exists():
-                al = cv2.resize(cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3], (W, H), interpolation=cv2.INTER_AREA)
-                person = cv2.warpAffine(al, zm, (W, H)) > 230
+        al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
+        person = None if al is None else cv2.warpAffine(cv2.resize(al, (W, H), interpolation=cv2.INTER_AREA), zm, (W, H)) > 230
         for i in up:
             c, st = cards[i], per[i]
             x0, y0, x1, y1 = pix(c["box"], 2)
@@ -486,12 +512,7 @@ def check_render(edit, plan, video):
             mask = np.zeros_like(ink)
             mask[y0:y1, x0:x1] = ink[y0:y1, x0:x1]
             for hb in heads:
-                hx0, hy0, hx1, hy1 = pix(hb)
-                area = max(1, (hx1 - hx0) * (hy1 - hy0))
-                on = mask[hy0:hy1, hx0:hx1]
-                if c.get("layer") == "behind" and person is not None:
-                    on = on * person[hy0:hy1, hx0:hx1]
-                st["cover"].append((t, float(on.sum()) / area))
+                st["cover"].append((t, face_cover(mask, pix(hb), person if c.get("layer") == "behind" else None)))
             region = grey[y0:y1, x0:x1]
             if st["prev"] is not None:
                 st["diffs"].append((t, float(np.abs(region - st["prev"]).mean())))
@@ -510,7 +531,8 @@ def check_render(edit, plan, video):
         if bad:
             out.append(finding("FAIL", bad[0][0], f"{name} card is drawn over the face at {len(bad)} sample(s), "
                                f"up to {100 * max(f for _, f in bad):.0f}% of the head",
-                               "run face.py, plan again (plan.py moves it off the head); check the box in visuals.json"))
+                               f"its cutout is missing there: run matte.py {edit}, render again" if c.get("layer") == "behind"
+                               else "run face.py, plan again (plan.py moves it off the head); check the box in visuals.json"))
         if st["mid"] and st["mid"][1]:
             x0, y0, x1, y1 = st["mid"][1]
             cx = (x0 + x1) / 2
@@ -613,8 +635,40 @@ def demo():
     # a behind card may reach the head, but needs its cutout
     bh = {**plan, "cards": [{**plan["cards"][2], "layer": "behind"}]}
     assert any("no cutout" in f["what"] for f in check_plan(bh, face)) and not any("covers the head" in f["what"] for f in check_plan(bh, face))
+    fix = [f["fix"] for f in check_plan(bh, face, edit="/w/edits/take --plan plan-16x9.json") if "no cutout" in f["what"]]
+    assert fix and "matte.py /w/edits/take --plan plan-16x9.json" in fix[0] and "<name>" not in fix[0], fix
     bh["cutouts"] = [{"src": "cutout/x.mov", "from": 0, "to": 10 ** 6}]
     assert not any("no cutout" in f["what"] for f in check_plan(bh, face))
+    # render: a behind card tucked under the head (the sample take, 4.5 s: hair over the card) is not on the
+    # face. The matte is the one the render drew: the plan's frame 135, not the check's 18th sample.
+    import tempfile
+    import cv2
+    import numpy as np
+    with tempfile.TemporaryDirectory() as t:
+        cp = {"fps": 30, "cutouts": [{"src": "cutout/p", "from": 105, "to": 212}]}
+        (Path(t) / "cutout/p").mkdir(parents=True)
+        al = np.zeros((96, 54), np.uint8)
+        cv2.ellipse(al, (27, 40), (12, 16), 0, 0, 360, 255, -1)          # the head, solid
+        cv2.imwrite(str(Path(t) / "cutout/p/000135.png"), np.dstack([al, al, al, al]))
+        mt = cutout_alpha(t, cp, 4.5)
+        assert mt is not None and mt[40, 27] == 255, "the matte at 4.5 s is frame 135"
+        assert cutout_alpha(t, cp, 3.0) is None and cutout_alpha(t, {**cp, "cutouts": []}, 4.5) is None
+        person = mt > 230
+        head = (13, 20, 42, 60)
+        card = np.zeros_like(al)
+        card[10:50, 5:50] = 1                       # the card's box reaches well into the head box
+        under = card * ~person                      # drawn under the cutout: it shows only off the speaker
+        assert face_cover(under, head, person) == 0, face_cover(under, head, person)
+        assert face_cover(under, head) > FACE_COVER          # no cutout there: the same ink is on the head
+        assert face_cover(card, head, person) > FACE_COVER   # a card drawn over the speaker still FAILs
+    # and the frame compared is the plan's own frame at t: 3.5 s is frame 105 of a 30 fps render
+    global stream
+    real, stream = stream, lambda v, vf, w, h, fps=FPS: iter(range(1362))
+    try:
+        smp = list(sampled("render.mp4", "null", 540, 960, 30))
+    finally:
+        stream = real
+    assert (3.5, 105) in smp and len(smp) == 182 and all(f == round(t * 30) for t, f in smp), smp[:5]
     # the sample take's flow and logo_cluster (backlog 2026-10-07): a flow in the 21%-tall band above the head
     # renders small and pushed right (check.py render FAILed it at +5.6%), so the plan check FAILs it too and
     # points at the plan; as plan.py now lays it out, a full-frame scene, it passes
@@ -752,7 +806,8 @@ def main():
         if not face:
             print("note: no face.json, the head check is skipped (run face.py)")
         named = [(x["start"], n) for x in rd("beats.json") or [] for n in x.get("names") or []]
-        found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named)
+        found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named,
+                           f"{edit}" + (f" --plan {a.plan}" if a.plan != "plan.json" else ""))
         extra = {"static_s": static_s}
     else:
         video = edit / f"render{tag}.mp4"

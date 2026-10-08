@@ -53,7 +53,7 @@ export type Card = {
   key?: [number, number, number, number]; // behind: the region plan.py keeps clear of the head, % of the frame
 };
 // The speaker cut out of the cut (matte.py): a folder of RGBA PNGs (000000.png = frame `from`), frames from..to of the cut.
-type Cutout = { src: string; from: number; to: number };
+type Cutout = { src: string; from: number; to: number }; // src/<frame of the cut>.png, frames from..to (matte.py)
 // "split": the visual in a top panel on `ground`, the speaker in a window under the seam. Percent of the frame.
 type Layout = {
   mode: "overlay" | "split";
@@ -313,7 +313,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
           // fades in over the handle before the card (its refined edge differs a little from the raw camera)
           <AbsoluteFill key={c.src} style={{ ...cam, opacity: Math.min(1, c.from === 0 ? 1 : (frame - c.from + 1) / (CUT_FADE_S * fps),
             c.to >= durationInFrames - 1 ? 1 : (c.to - frame + 1) / (CUT_FADE_S * fps)) }}>
-            <Img src={staticFile(`${c.src}/${String(frame - c.from).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </AbsoluteFill>
         ))}
         {cardViews}

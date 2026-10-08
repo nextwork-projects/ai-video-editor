@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """The speaker cut out of cut.mp4, so cards with "layer": "behind" sit behind the head and shoulders.
 
-    ~/.ai-video-editor/venv/bin/python matte.py edits/NAME [--plan plan.json] [--modal]
+    ~/.ai-video-editor/venv/bin/python matte.py edits/NAME [--plan plan.json] [--modal] [--estimate]
     ~/.ai-video-editor/venv/bin/python matte.py fetch      download the model (setup.py matte calls it)
     ~/.ai-video-editor/venv/bin/python matte.py demo       self-check, no video needed
 
-Only the time ranges where a behind card is up (plus HANDLE_S each side) are cut, one folder of RGBA
-PNG frames each (000000.png is the range's first frame), into edits/NAME/cutout/. Their list goes into the plan as "cutouts"; the renderer draws
-the cutout over the cards only while one is up and the raw camera everywhere else. A range already
-cut (same frames, newer than cut.mp4) is reused.
+Only the time ranges where a behind card is up (plus HANDLE_S each side) are cut, as RGBA PNG frames
+named by their frame of the cut (000105.png is frame 105) in one folder per cut and output size,
+edits/NAME/cutout/WxH-KEY/ (KEY: cut.mp4's size and time, so a new cut never reuses an old matte).
+Their ranges go into the plan as "cutouts"; the renderer draws the cutout over the cards only while
+one is up and the raw camera everywhere else. A frame already cut is never cut again: a re-plan that
+moves a card cuts only the frames it adds, and plan.py writes "cutouts" itself whenever every frame
+a range needs is already there. --estimate prints the frames to cut and the time, then stops.
 
 Per frame:
   1. Robust Video Matting (mobilenetv3, onnxruntime): a recurrent person matte that keeps hair, hands
@@ -38,6 +41,7 @@ Exit codes: 0 done (read any WARNING it prints), 1 error, 2 usage.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -55,12 +59,46 @@ FLAT_LO, FLAT_HI = 18.0, 40.0       # wall plate RMS error (0-255 per pixel): un
 # Modal (modal.com/pricing, 2026-10): per physical core and per GiB of memory, per second.
 MODAL_CPU, MODAL_MEM_GB = 8, 8
 MODAL_CPU_USD_S, MODAL_MEM_USD_S = 0.0000131, 0.00000222
+LAPTOP_S = 0.26     # s a frame on the test laptop (the sample take, 1080x1920, 2026-10-07)
 
 
 def model(check=False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import models   # pinned URL + sha256
     return str(models.fetch(MODEL.name, check))
+
+
+def pool(edit, plan):
+    """The cutout folder (relative to edit) for this cut at this output size: frames are keyed by it
+    and their frame number, so any plan of the same cut reuses them."""
+    import hashlib
+    st = (Path(edit) / plan["video"]).stat()
+    key = hashlib.sha1(f"{st.st_size}-{st.st_mtime_ns}".encode()).hexdigest()[:8]
+    return f"cutout/{plan['width']}x{plan['height']}-{key}"
+
+
+def missing(plan, edit):
+    """(cutouts, runs): the plan's behind ranges as cutouts, and the [a, b] runs of frames not cut yet."""
+    rel = pool(edit, plan)
+    runs = []
+    cutouts = [{"src": rel, "from": a, "to": b} for a, b in behind_ranges(plan)]
+    for c in cutouts:
+        for f in range(c["from"], c["to"] + 1):
+            if (Path(edit) / rel / f"{f:06d}.png").exists():
+                continue
+            if runs and runs[-1][1] == f - 1:
+                runs[-1][1] = f
+            else:
+                runs.append([f, f])
+    return cutouts, runs
+
+
+def kept(plan, edit):
+    """plan.py: the cutouts every one of whose frames is already cut (a re-plan keeps them)."""
+    if not (Path(edit) / plan["video"]).exists():
+        return []
+    cutouts, runs = missing(plan, edit)
+    return [c for c in cutouts if not any(a <= c["to"] and b >= c["from"] for a, b in runs)]
 
 
 def behind_ranges(plan):
@@ -141,7 +179,8 @@ def stabilise(cams, alphas, i, cv2, np):
 
 
 def cut_range(video, fps, w, h, vf, a, b, out, model_path, providers=("CPUExecutionProvider",)):
-    """Frames a..b (inclusive) of video (already w x h; vf an ffmpeg filter, "null" for none), RGBA at out.
+    """Frames a..b (inclusive) of video (already w x h; vf an ffmpeg filter, "null" for none), RGBA at
+    out/<frame>.png.
     Returns timings in seconds: decode+matte, refine, total."""
     import cv2
     import numpy as np
@@ -168,7 +207,9 @@ def cut_range(video, fps, w, h, vf, a, b, out, model_path, providers=("CPUExecut
         t_ref += time.time() - t1
         rgba = np.concatenate([np.clip(rgb, 0, 255), al[..., None] * 255], 2).round().astype(np.uint8)
         rgba[rgba[..., 3] == 0] = 0     # nothing behind a clear pixel: smaller files
-        cv2.imwrite(str(out / f"{wrote:06d}.png"), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+        tmp = out / f"{a + wrote:06d}.tmp.png"     # named by its frame of the cut; whole or not there
+        cv2.imwrite(str(tmp), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+        os.replace(tmp, out / f"{a + wrote:06d}.png")
         wrote += 1
 
     size = w * h * 3
@@ -222,7 +263,7 @@ def verify(plan, edit, w, h):
         t = (c["start"] + c["end"]) / 2
         f = round(t * plan["fps"])
         cut = next((x for x in plan["cutouts"] if x["from"] <= f <= x["to"]), None)
-        al = read_alpha(edit / cut["src"], f - cut["from"], w, h)
+        al = read_alpha(edit / cut["src"], f, w, h)
         msg = []
         if c.get("key"):
             x, y, kw, kh = c["key"]
@@ -275,7 +316,7 @@ def run_modal(video, jobs, model_path):
         import sys as s
         s.path.insert(0, "/m")
         import matte
-        out = f"/vol/{job}/{Path(args['out']).name}"
+        out = f"/vol/{job}/{args['a']}-{args['b']}"
         r = matte.cut_range(f"/vol/{job}/{name}", args["fps"], args["w"], args["h"], args["vf"], args["a"], args["b"], out, "/m/rvm.onnx")
         import shutil
         shutil.make_archive(out, "tar", out)     # one file down instead of hundreds
@@ -291,9 +332,9 @@ def run_modal(video, jobs, model_path):
             res = list(one.starmap([(job, Path(video).name, j) for j in jobs]))
             import shutil
             for j in jobs:
-                tar = j["out"] + ".tar"
+                tar = f"{j['out']}-{j['a']}.tar"
                 with open(tar, "wb") as f:
-                    vol.read_file_into_fileobj(f"/{job}/{Path(j['out']).name}.tar", f)
+                    vol.read_file_into_fileobj(f"/{job}/{j['a']}-{j['b']}.tar", f)
                 shutil.unpack_archive(tar, j["out"])
                 os.remove(tar)
         finally:
@@ -316,29 +357,32 @@ def main():
     plan_name = args[args.index("--plan") + 1] if "--plan" in args else "plan.json"
     plan_path = edit / plan_name
     plan = json.loads(plan_path.read_text())
-    ranges = behind_ranges(plan)
-    if not ranges:
+    if not behind_ranges(plan):
         plan.pop("cutouts", None)
         plan_path.write_text(json.dumps(plan, indent=1))
         print("no behind cards: nothing to cut out")
         return
-    sys.path.insert(0, str(Path(__file__).parent))
-    from edit import prepare_public
-    # The footage exactly as the renderer draws it: edit.py's output-size copy of the cut
-    video = prepare_public(edit, {**plan, "cutouts": []}, plan_path.stem[len("plan"):]) / plan["video"]
     w, h, fps = plan["width"], plan["height"], plan["fps"]
+    cutouts, runs = missing(plan, edit)
+    rel = cutouts[0]["src"]
+    frames = sum(b - a + 1 for a, b in runs)
+    need = sum(c["to"] - c["from"] + 1 for c in cutouts)
+    print(f"{len(cutouts)} range{'s' * (len(cutouts) > 1)} behind cards, {frames} frames to cut "
+          f"({need - frames} reused); about {frames * LAPTOP_S:.0f} s on a laptop, free"
+          + (f", or about ${frames * LAPTOP_S * (MODAL_CPU * MODAL_CPU_USD_S + MODAL_MEM_GB * MODAL_MEM_USD_S):.3f} on "
+             "Modal" if frames else ""), flush=True)
+    if "--estimate" in args:
+        return
     vf = "null"
-    (edit / "cutout").mkdir(exist_ok=True)
-    cutouts, jobs = [], []
-    for a, b in ranges:
-        rel = f"cutout/behind-{w}x{h}-{a}-{b}"
-        cutouts.append({"src": rel, "from": a, "to": b})
-        done = edit / rel / f"{b - a:06d}.png"       # the last frame: written only when the range finished
-        if not (done.exists() and done.stat().st_mtime > video.stat().st_mtime):
-            jobs.append({"fps": fps, "w": w, "h": h, "vf": vf, "a": a, "b": b, "out": str(edit / rel)})
-    frames = sum(j["b"] - j["a"] + 1 for j in jobs)
-    print(f"{len(ranges)} range{'s' * (len(ranges) > 1)} behind cards, {frames} frames to cut "
-          f"({len(ranges) - len(jobs)} reused)", flush=True)
+    if runs:
+        for old in (edit / "cutout").glob(f"*{w}x{h}-*"):    # an older cut's frames (or the pre-pool range folders)
+            if old.name != Path(rel).name:
+                shutil.rmtree(old)
+        sys.path.insert(0, str(Path(__file__).parent))
+        from edit import prepare_public
+        # The footage exactly as the renderer draws it: edit.py's output-size copy of the cut
+        video = prepare_public(edit, {**plan, "cutouts": []}, plan_path.stem[len("plan"):]) / plan["video"]
+    jobs = [{"fps": fps, "w": w, "h": h, "vf": vf, "a": a, "b": b, "out": str(edit / rel)} for a, b in runs]
     t0 = time.time()
     if jobs and "--modal" in args:
         res, wall, usd = run_modal(video, jobs, model())
@@ -366,6 +410,26 @@ def demo():
         {"layer": "behind", "start": 1.0, "end": 2.0}, {"layer": "behind", "start": 2.5, "end": 3.0},
         {"start": 4.0, "end": 5.0}, {"layer": "behind", "start": 9.8, "end": 10.0}]}
     assert behind_ranges(plan) == [[15, 105], [279, 299]], behind_ranges(plan)   # merged; clamped at the end
+    # A re-plan keeps the cutout: frames are keyed by the cut and their frame number, so a card that moves
+    # (the sample take: frames 8-115 -> 105-212) needs only the frames it adds, and a plan whose ranges are
+    # all cut gets its cutouts back from plan.py with nothing to run.
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        e = Path(t)
+        (e / "cut.mp4").write_bytes(b"x")
+        p1 = {"video": "cut.mp4", "width": 1080, "height": 1920, "fps": 30, "durationInFrames": 300,
+              "cards": [{"layer": "behind", "start": 0.77, "end": 3.33}]}
+        cuts, runs = missing(p1, e)
+        assert runs == [[8, 115]] and kept(p1, e) == [], runs
+        (e / cuts[0]["src"]).mkdir(parents=True)
+        for f in range(8, 116):
+            (e / cuts[0]["src"] / f"{f:06d}.png").write_bytes(b"")
+        assert kept(p1, e) == cuts and missing(p1, e)[1] == []
+        p2 = {**p1, "cards": [{"layer": "behind", "start": 4.0, "end": 6.57}]}
+        assert missing(p2, e) == ([{"src": cuts[0]["src"], "from": 105, "to": 212}], [[116, 212]]), missing(p2, e)
+        assert kept(p2, e) == []          # not every frame is there yet: check.py plan says to run matte.py
+        (e / "cut.mp4").write_bytes(b"a new cut")   # a new cut never reuses the old matte
+        assert pool(e, p1) != cuts[0]["src"] and missing(p1, e)[1] == [[8, 115]]
     # refine: a flat grey wall, an orange disc with a soft edge. The edge's colour must come out orange
     # (no grey bleed), and alpha must be firm inside and zero on the open wall.
     h, w = 200, 200

@@ -32,23 +32,6 @@ Sources:
 
 ## Next
 
-- `check.py render` FAILs a behind card the cutout already covers: "4.50s 'Jev' ... card is drawn
-  over the face at 2 sample(s), up to 8% of the head -> run face.py, plan again". matte.py said
-  "face 100% solid" and the frame at 4.5 s shows the hair over the card. The fix it names (face.py,
-  plan) was already done, so the model loops. Breaks PRINCIPLES "cards may tuck behind the head only
-  when the cutout is on". Done: frames inside a cutout range do not count as covering the face; the
-  sample's render check has no FAIL.
-
-- Behind-the-speaker order wastes a matte run and the SKILL does not say to repeat it. style-edit
-  SKILL.md step 4 runs plan, then matte, then `check.py plan`. Any plan FAIL fixed by a re-plan drops
-  the plan's `cutouts`; the next check FAILs "card sits behind the speaker but there is no cutout
-  for it -> run matte.py edits/<name>" (a literal `<name>`), and matte re-cut 108 frames in 29 s with
-  "0 reused" because the card's range moved (frames 8-115 -> 105-212). Only plan.md:79 says "Re-run
-  matte.py after every plan.py run". matte.py has no estimate mode, though the SKILL says "say its
-  time or cost first". Done: `check.py plan` runs before matte (or plan.py keeps matching cutouts),
-  SKILL step 4 says to re-run matte after a re-plan, messages print the real edit path, matte prints
-  its estimate before cutting.
-
 - An RSS feed link downloads the wrong thing. `route` sends a podcast feed (442 episodes) straight
   to clips with no episode chosen; `fetch` then runs yt-dlp with `--no-playlist`, which does not stop
   a feed: `yt-dlp --no-playlist --simulate` on it was still walking episodes after 5 minutes. The

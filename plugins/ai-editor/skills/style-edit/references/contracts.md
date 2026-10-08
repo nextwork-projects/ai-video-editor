@@ -261,8 +261,8 @@ A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. 
   per line from them. A sticker capture's images.json entry carries `xh`: the font's x-height in PNG px.
 - `layer`: `"behind"`: drawn over the footage and under the speaker's cutout (references/motion.md "Behind
   the speaker"), with `key` `[x, y, w, h]` %: the region plan.py kept clear of the head. The plan then
-  carries `"cutouts": [{"src": "cutout/behind-1080x1920-1-130", "from": 1, "to": 130}]` (matte.py: a folder of
-  RGBA PNGs, 000000.png is frame `from`; frames of the cut, inclusive), and check.py plan FAILs a behind card no cutout covers.
+  carries `"cutouts": [{"src": "cutout/1080x1920-d794f9af", "from": 1, "to": 130}]` (matte.py: a folder of
+  RGBA PNGs named by frame of the cut, 000001.png is frame 1; frames `from`-`to` inclusive), and check.py plan FAILs a behind card no cutout covers.
 - A scene starts SCENE_LEAD_S x k earlier than its word (k: punchy 0.7, snappy 0.8, smooth 1.0, calm 1.35);
   quality.py counts it landed when its transition is half done.
 - In the props the renderer reads (`anim.props`, or an image card's own `props`), plan.py writes for every box card:

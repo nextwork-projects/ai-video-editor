@@ -113,10 +113,10 @@ python3 "$S/plan.py" edits/<name>/style.json edits/<name>/captions.json [--aspec
 Writes `edits/<name>/plan.json`. Read every warning it prints. What it does (look, contrast, layout,
 timing, captions, zooms, a second shape with `--out`): `references/plan.md`.
 
-1. **Behind the speaker:** when the profile says `"behind": true`, run `matte.py` now
-   (`references/plan.md` "Behind the speaker"); say its time or cost first. Skip it when the profile says no.
-2. **Music:** unless the profile says `sound.music: false`, ask the music question and lay the bed
+1. **Music:** unless the profile says `sound.music: false`, ask the music question and lay the bed
    (`references/plan.md` "Music"), then run plan.py again. Sound cues need nothing: plan.py adds them.
+2. **Behind the speaker:** if the profile says `"behind": true`, run `matte.py` after the last plan.py run and
+   again after any later one (it cuts only new frames); say its `--estimate` first (`references/plan.md`).
 3. **Check the plan:**
 
 ```bash
