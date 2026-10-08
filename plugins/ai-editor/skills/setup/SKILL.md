@@ -93,8 +93,8 @@ python3 "$U" model
 ```
 
 `venv` installs faster-whisper (free transcription on this computer), numpy, pillow and yt-dlp
-into the venv in `~/.ai-video-editor` (`AI_EDITOR_HOME` moves it), at the exact versions in `requirements/requirements.lock` (about
-1 minute). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
+into the venv in `~/.ai-video-editor` (`AI_EDITOR_HOME` moves it), at the exact versions in `requirements/requirements.lock` (11-33 s
+on GitHub's clean runners). `model` downloads the transcription model once, about 500 MB, and checks its sha256.
 `Python 3.10+ needed`: go back to step 1's Python line. `Run the venv step first.`: run `venv`.
 
 ## 4. The renderer
@@ -104,7 +104,7 @@ python3 "$U" remotion
 ```
 
 Copies the renderer to `~/.ai-video-editor/remotion` and installs exactly its `package-lock.json`
-with `npm ci` (about 700 MB, under a minute on a fast line). This is the biggest download: say so
+with `npm ci` (about 700 MB; with Chrome's headless shell, 8-33 s on GitHub's clean runners). This is the biggest download: say so
 first. If the user wants to start a creator teardown while it runs, run it in the background and
 carry on: the teardown does not need it. `npm missing`: install Node (step 2) first.
 

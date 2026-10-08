@@ -17,7 +17,7 @@ for s in "$T/fetch.py demo" "$T/editplan.py demo" "$T/visual.py demo" "$T/graphi
   "$A/style-edit/scripts/quality.py demo" "$A/style-edit/scripts/sfx.py demo" "$A/style-edit/scripts/sheet.py demo" "$A/style-edit/scripts/ai_tells.py demo" \
   "$A/style-edit/scripts/route.py demo" "$A/product-video/scripts/gates.py demo" "$A/product-video/scripts/product.py demo" \
   "$A/product-video/scripts/journey.py demo" "$A/product-video/scripts/meter.py demo" "$A/product-video/scripts/sound.py demo" \
-  "$A/improve/scripts/improve.py demo" "$A/style-edit/scripts/preview.py demo" "tests/golden.py demo"; do
+  "$A/improve/scripts/improve.py demo" "$A/style-edit/scripts/preview.py demo" "tests/golden.py demo" "tests/fresh_install.py demo"; do
   echo "== $s"
   # shellcheck disable=SC2086
   "$PY" $s

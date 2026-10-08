@@ -82,8 +82,10 @@ single skill folders, clone the whole repo too.
 ## What happens next
 
 1. **Setup**, first time only. Claude checks your computer and installs what is missing: Python,
-   ffmpeg, Node, the free transcription model and the renderer (2-10 minutes, about 1.5 GB, most of
-   it the renderer). It asks before each step. Anything that needs your password, Claude gives you
+   ffmpeg, Node, the free transcription model and the renderer (about 1.5 GB, most of it the
+   renderer). On GitHub's clean runners the install took 25-36 s on Linux, 33-49 s on a Mac and
+   66-75 s on Windows, with the 75 MB test model in place of the 500 MB default; a home line is
+   slower. It asks before each step. Anything that needs your password, Claude gives you
    to paste into your own terminal.
 2. **Keys**, optional, about 5 minutes. Three free or near-free accounts that make each edit use
    less of your Claude usage. Skip them and add them later by saying **finish setup**. Never paste
