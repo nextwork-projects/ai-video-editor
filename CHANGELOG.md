@@ -4,6 +4,8 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.1.0, creator-teardown 2.4.0 (2026-10-08)
+
 - Setup times are now measured, not guessed. Six clean GitHub runs of the e2e job (2026-10-08) took
   25-36 s to install from zero on Linux, 33-49 s on a Mac, 66-75 s on Windows (packages 11-33 s,
   renderer with Chrome 8-33 s), with the tiny test model. README and the setup skill quote these.
