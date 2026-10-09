@@ -32,7 +32,7 @@ captions.json -> beats.json -> visuals.json -> images/ + images.json -> plan.jso
 References, read only when a step says: `references/visuals.md` (each format in detail),
 `references/plan.md` (plan.py, cutout, sound, music, checks), `references/motion.md` (templates,
 transitions, marks), `references/render.md` (targets, live preview, export), `references/review.md`
-(the review page), `references/ai-tells.md` (the banned AI looks). `references/contracts.md` is every file's full shape, for people: never read it to run the skill.
+(the review page), `references/ai-tells.md` (the banned AI looks). `references/contracts.md` (every file's shape) is for people: never read it.
 
 ## 0. Read the taste and profile
 
@@ -208,7 +208,7 @@ Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/rende
 ## 8. Hand over
 
 Hand over on the review page (`references/review.md`), then `serve` and `wait` in the background:
-`python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --video edits/<name>/render.mp4 --transcript edits/<name>/words.json --plan edits/<name>/plan.json`
+`python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --video edits/<name>/render.mp4`
 (no page yet: `start`, same flags). Card, caption, zoom notes: plan, stills, render, `round`; cut notes: the cut skill.
 
 ## 9. Export to another editor

@@ -627,6 +627,10 @@ def main():
     s.add_argument("--new-t", type=float, help="where the note's moment is in the new render")
     a = ap.parse_args()
     folder = Path(a.folder).resolve()
+    if getattr(a, "stage", None) == "edit":  # an edit round reads the edit folder's own files
+        for k, f in (("transcript", "words.json"), ("plan", "plan.json")):
+            if getattr(a, k, 0) is None and (folder / f).exists():
+                setattr(a, k, str(folder / f))
     if a.cmd != "start" and not (folder / "review.json").exists():
         sys.exit(f"no review in {folder}: run `start` first")
     if a.cmd == "start":
