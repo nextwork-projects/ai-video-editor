@@ -5,7 +5,7 @@
     python3 clips.py candidates <clips_dir> [--min 20 --max 40] [--speakers 1|2] [--style style.json] [--top 8]
     python3 clips.py page       <clips_dir> [--recommend c3,c7]
     python3 clips.py trim       <clips_dir> <cand_id> [<cand_id> ...] [--name NAME] [--edits edits]
-    $PY     clips.py reframe    <edit_dir>        (venv python: OpenCV) a wide clip to 9:16 round the speaker
+    python3 "$PY" clips.py reframe <edit_dir>   (venv python: OpenCV) a wide clip to 9:16 round the speaker
     python3 clips.py demo
 
 <clips_dir> holds source.mp4 (or a symlink to it; a podcast's audio keeps its own extension, source.mp3)

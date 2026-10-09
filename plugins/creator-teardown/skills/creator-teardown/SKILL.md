@@ -30,7 +30,7 @@ the skill, follow `${CLAUDE_SKILL_DIR}/references/setup.md`. The ElevenLabs and
 Gemini keys are optional. Never ask for either in the chat: the user saves them with
 `setkey` (`setkey --gemini`) in their own terminal.
 
-`$VPY` below is `python3 "${CLAUDE_SKILL_DIR}/scripts/run.py"` (`py` on Windows), which runs a script with
+`VPY="${CLAUDE_SKILL_DIR}/scripts/run.py"`; `python3 "$VPY"` below (`py` on Windows) runs a script with
 the tool venv's Python wherever `AI_EDITOR_HOME` puts it.
 
 ## Pipeline
@@ -70,7 +70,7 @@ the ranking and the control group use likes; say so in the teardown.
 ### Step 2: Download and transcribe the winners and a control group
 
 ```bash
-$VPY "${CLAUDE_SKILL_DIR}/scripts/visual.py" download <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/visual.py" download <handle>
 python3 "${CLAUDE_SKILL_DIR}/scripts/fetch.py" transcribe <handle>
 ```
 
@@ -81,7 +81,7 @@ picks exact videos. The median ones are the control: a move that appears in the 
 video *and* the 3K video is that creator's habit, not the reason the 500K one
 worked. Keep at least 2.
 
-Run `transcribe` and `$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle> --no-merge` at the same
+Run `transcribe` and `python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle> --no-merge` at the same
 time (two Bash calls in one message): the model watches while Whisper listens. Every measuring script
 works on several videos at once (`CT_JOBS=1` turns that off on a small laptop).
 
@@ -122,9 +122,9 @@ is a format someone can film; "hook, then list, then close" is not.
 ### Step 3b: The visual pass (measured, no images for you to read)
 
 ```bash
-$VPY "${CLAUDE_SKILL_DIR}/scripts/visual.py" measure <handle>
-$VPY "${CLAUDE_SKILL_DIR}/scripts/look.py" measure <handle>
-$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/visual.py" measure <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/look.py" measure <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/gemini.py" look <handle>
 ```
 
 Run them after `transcribe` (`look.py` matches OCR text to the spoken words).
@@ -147,7 +147,7 @@ and the teardown says both.
 call with `model: "haiku"` that reads `sheets/<id>.jpg` for each video (one 3 x 3
 sheet each, made by `visual.py`) and writes `video/<id>.look-ai.json` per
 `gemini.py prompt`. Exact brief in `references/look-pass.md`. Then
-`$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" merge <handle>`.
+`python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/gemini.py" merge <handle>`.
 
 **No OCR engine** (doctor says optional): `captions` stays unmeasured and look.md
 says so. Install it (`doctor` prints the line) rather than reading sheets yourself.
@@ -155,10 +155,10 @@ says so. Install it (`doctor` prints the line) rather than reading sheets yourse
 ### Step 3c: The deep pass and the page
 
 ```bash
-$VPY "${CLAUDE_SKILL_DIR}/scripts/graphics.py" measure <handle>
-$VPY "${CLAUDE_SKILL_DIR}/scripts/gemini.py" kinds <handle>
-$VPY "${CLAUDE_SKILL_DIR}/scripts/sound.py" measure <handle>
-$VPY "${CLAUDE_SKILL_DIR}/scripts/report.py" build <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/graphics.py" measure <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/gemini.py" kinds <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/sound.py" measure <handle>
+python3 "$VPY" "${CLAUDE_SKILL_DIR}/scripts/report.py" build <handle>
 ```
 
 Each measure prints one summary line and the file it wrote (`--json` prints the full block; not

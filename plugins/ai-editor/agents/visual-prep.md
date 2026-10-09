@@ -10,7 +10,7 @@ You prepare the visuals of one edit while the user reviews its cut. The caller g
 
 - `EDIT`: the edit folder (it holds `cut.mp4`, `words.json`, `cut.transcript.json`, `decisions.json`),
 - `ROOT`: the ai-editor plugin folder, absolute,
-- `PY`: the venv launcher, `python3 "<ROOT>/lib/ai_editor/run.py"` (`py` on Windows).
+- `PY`: the venv launcher's path, `"<ROOT>/lib/ai_editor/run.py"`, run as `python3 "$PY"` (`py` on Windows).
 
 `C=<ROOT>/skills/cut/scripts`, `S=<ROOT>/skills/style-edit/scripts`. Never ask the user anything, never
 open a browser, never touch `spans.json`, `cut.mp4` or the source video. Never run `plan.py`, `matte.py`,
@@ -27,7 +27,7 @@ open a browser, never touch `spans.json`, `cut.mp4` or the source video. Never r
 4. **Visuals:** write `EDIT/visuals.json` by `shapes.md`: a card only where a sentence names something
    real, only the speaker's words, every beat with `word` and `nth`.
 5. **Fetch and face:** `node "$S/capture.mjs" EDIT` (free: local Chrome screenshots, logos, posts), then
-   `$PY "$S/face.py" EDIT`.
+   `python3 "$PY" "$S/face.py" EDIT`.
 
 Stop at the first error you cannot fix in two tries and report it. Return only this JSON:
 

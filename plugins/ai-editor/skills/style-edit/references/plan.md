@@ -25,7 +25,7 @@ Wait for its JSON if it is still running. Cut approved unchanged: go to step 4. 
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" remap edits/<name>
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" captions edits/<name>
 python3 "$S/route.py" beats edits/<name>
-$VPY "$S/face.py" edits/<name>
+python3 "$VPY" "$S/face.py" edits/<name>
 ```
 
 `remap` re-points each beat in visuals.json and images.json to the new cut and prints the ones it
@@ -90,7 +90,7 @@ the speaker, and a card above the head grows down behind the hair while its mark
 clear of the head. Overlay layout only. Then cut the speaker out where those cards are up:
 
 ```bash
-$VPY "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
+python3 "$VPY" "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 ```
 
 It writes `edits/<name>/cutout/<size>-<key>/` (RGBA PNGs named by their frame of the cut, about
@@ -133,7 +133,7 @@ lay the bed under the voice (a file of their own: copy it into the edit folder a
 `--track`):
 
 ```bash
-$VPY "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
+python3 "$VPY" "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
 ```
 
 `.sfx/music.wav`: the track, or a bed generated for this cut's length (product-video sound.py,
