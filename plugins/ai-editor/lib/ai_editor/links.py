@@ -9,7 +9,8 @@
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
-Kinds: own (the user's footage: cut + style-edit), creator (creator-teardown), long (clips),
+Kinds: own (the user's footage: cut + style-edit), takes (several own files joined into one video, then cut),
+creator (creator-teardown), long (clips),
 product (product-video), music (the music question with rights), video (a single video whose
 kind depends on its length and whose it is: `decide`), ask (one question in the question box),
 unsupported (a sentence to say to the user).
@@ -54,9 +55,10 @@ SLOW = ("yt-dlp did not finish in {} minutes on that link. Paste one video's own
         "channel or podcast feed), or download the file in the browser and give me its path.")
 LOOKUP = "https://itunes.apple.com/lookup?id="
 TEARDOWN_PLATFORMS = ("tiktok", "youtube", "instagram")  # what creator-teardown's fetch.py lists
-ORDER = ("ask", "creator", "own", "video", "long", "product", "music", "unsupported")
+ORDER = ("ask", "creator", "takes", "own", "video", "long", "product", "music", "unsupported")
 ACTION = {
     "own": "fetch into the edit folder, then cut + style-edit",
+    "takes": "join the files in order into edits/<name>/joined.mp4 (cut/references/takes.md), then cut + style-edit",
     "creator": "creator-teardown (quick mode), then blend the style",
     "long": "clips",
     "product": "product-video",
@@ -65,7 +67,7 @@ ACTION = {
     "ask": "one question in the question box, recommended option first",
     "unsupported": "say the note to the user",
 }
-LABEL = {"own": "Edit it as my video", "creator": "Copy this creator's style",
+LABEL = {"own": "Edit it as my video", "takes": "One video: join them in this order", "separate": "Separate videos", "creator": "Copy this creator's style",
          "long": "Make short clips from it", "music": "Use it as music"}
 _EXT = "|".join(e[1:] for e in VIDEO_EXT + AUDIO_EXT)
 TOKEN_RE = re.compile(
@@ -321,6 +323,17 @@ def group(items):
     for it in items:
         if it["kind"] in ("video", "ask") and it.get("handle") and it.get("platform") in TEARDOWN_PLATFORMS:
             by.setdefault((it["platform"], it["handle"]), []).append(it)
+    takes = sorted((it for it in items if it["kind"] == "own" and it.get("local")), key=lambda it: it["url"].lower())
+    if len(takes) >= 2:   # several of the user's own files: one video in parts, or separate videos?
+        # ponytail: file-name order; join.py --sort created re-orders by the camera's timestamp
+        names = ", ".join(Path(t["url"]).name for t in takes)
+        merged = _item("ask", f"{len(takes)} files", name=takes[0]["name"], files=[t["url"] for t in takes],
+                       question=f"Are these {len(takes)} files one video ({names}, in that order) or separate videos?",
+                       options=[{"kind": "takes", "label": LABEL["takes"]},
+                                {"kind": "separate", "label": LABEL["separate"]}],
+                       action="one question in the question box. takes: " + ACTION["takes"]
+                              + ". separate: each file is an `own` item with its own edit folder")
+        items = [merged] + [it for it in items if not any(it is t for t in takes)]
     out, done = [], set()
     for it in items:
         key = (it.get("platform"), it.get("handle"))
@@ -830,6 +843,12 @@ def demo():
     items = [decide(classify(u)) for u in ("https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@a/video/2")]
     g = group(items)
     assert len(g) == 1 and g[0]["kind"] == "creator" and g[0]["handle"] == "a" and len(g[0]["urls"]) == 2, g
+    # several own files: one question (one video joined, or separate), file names in order
+    g = group([classify(u) for u in ("~/b.mov", "https://example.com", "~/A.mov")])
+    assert g[0]["kind"] == "ask" and [o["kind"] for o in g[0]["options"]] == ["takes", "separate"], g
+    assert [Path(f).name for f in g[0]["files"]] == ["A.mov", "b.mov"] and g[0]["name"] == "a", g
+    assert "A.mov, b.mov" in g[0]["question"] and [i["kind"] for i in g[1:]] == ["product"], g
+    assert [i["kind"] for i in group([classify("~/a.mov")])] == ["own"]   # one file: no question
     p = plan([classify(u) for u in ("https://open.spotify.com/track/x", "https://example.com", "~/take.mov",
                                     "https://www.tiktok.com/@a")])
     assert [i["kind"] for i in p] == ["creator", "own", "product", "music"], p
