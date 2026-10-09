@@ -1,6 +1,6 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before style-edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (style-edit), and not for analysing someone else's videos (creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take or several joined (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before style-edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (style-edit), and not for analysing someone else's videos (creator-teardown).
 license: MIT
 compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster-whisper). Recommended TypeSafe key (Jev decides the cut for a fraction of a cent; without it Claude decides). Optional ElevenLabs key or CrisperWhisper. Mac, Windows or Linux. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -28,8 +28,8 @@ No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ## No video yet?
 
-Ask for the path of their own take first. If they have none, offer the sample take (a raw vertical
-take with retakes, false starts and pauses left in) and download it into their folder:
+Ask for their take's path. Several files: `references/takes.md`. None: offer the sample take (raw,
+vertical, retakes, false starts and pauses kept) and download it to their folder:
 
 ```bash
 curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/releases/download/sample-video/sample-take.mp4
@@ -71,7 +71,7 @@ some ums and false starts; Scribe and CrisperWhisper keep them for the cut. With
 setup can add one (CrisperWhisper's weights are non-commercial only). A take full of retakes:
 `AI_EDITOR_WHISPER_MODEL=medium` hears them better (1.5 GB, twice as slow). Step 5 catches the rest.
 
-**Never read `words.raw.json`**: `transcript.txt` has its words at 1/12 the size.
+**Never read `words.raw.json`**: `transcript.txt` is 1/12 the size.
 
 ## 2. Decide what to cut
 

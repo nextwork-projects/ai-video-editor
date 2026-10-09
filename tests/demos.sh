@@ -9,7 +9,7 @@ A=plugins/ai-editor/skills
 L=plugins/ai-editor/lib/ai_editor
 for s in "$T/fetch.py demo" "$T/editplan.py demo" "$T/visual.py demo" "$T/graphics.py demo" "$T/sound.py demo" \
   "$T/report.py demo" "$T/look.py demo" "$T/gemini.py demo" "$T/parallel.py demo" \
-  "$A/cut/scripts/test_build_timeline.py" "$A/cut/scripts/test_retakes.py" "$A/cut/scripts/test_media.py" "$A/cut/scripts/verify_cut.py demo" "$A/cut/scripts/hook_check.py demo" \
+  "$A/cut/scripts/test_build_timeline.py" "$A/cut/scripts/test_retakes.py" "$A/cut/scripts/test_media.py" "$A/cut/scripts/verify_cut.py demo" "$A/cut/scripts/hook_check.py demo" "$A/cut/scripts/join.py demo" \
   "$L/keys.py" "$L/jev.py" "$L/profile.py demo" "$L/links.py demo" "$L/lock.py demo" "$L/models.py" "$L/run.py demo" \
   "$A/style-edit/scripts/plan.py demo" "$A/style-edit/scripts/edit.py demo" "$A/style-edit/scripts/export_nle.py demo" "$A/style-edit/scripts/chapters.py demo" \
   "$A/style-edit/scripts/matte.py demo" "$A/clips/scripts/clips.py demo" "$A/setup/scripts/setup.py demo" \

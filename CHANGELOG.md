@@ -4,6 +4,14 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Several takes of one video. When the user hands over two or more files, the editor asks in the
+  question box whether they are one video (in file-name order, or filming order) or separate videos.
+  For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
+  then the normal cut runs. Each clip is fitted to the first clip's size (rotation applied, black bars,
+  no stretching), one frame rate and 48 kHz audio, so upright, sideways and variable frame rate phone
+  clips join cleanly. It exits 1 when any clip or the joined file has audio and video more than 0.1 s
+  apart. `links.py route` asks the question as one `ask` item (kind `takes`). Details:
+  `cut/references/takes.md`. Tests: `join.py demo` (in demos.sh), `links.py demo`.
 - A whole edit no longer waits for the cut's approval to start the visuals. When start runs the cut,
   the new `visual-prep` agent starts in the background as the cut page opens: images, captions,
   beats, visuals.json, captures and the face pass, on the first cut. It plans, renders and uploads
