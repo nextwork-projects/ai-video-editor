@@ -159,7 +159,9 @@ hand as below.
    `"captions": {"present": false}` in that edit's `style.json`, or the captions stack.
 
 Either way, open every clip's `cut-check.html` and show all the stills sheets together for one
-approval, ask the render question once for all of them, and render. Open every render and give the
+approval, ask the render question once for all of them, and render. After approval, run
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/judge_cut.py" score` on each clip's folder (cut
+`references/judge.md`). Open every render and give the
 full paths.
 
 ## If a script stops

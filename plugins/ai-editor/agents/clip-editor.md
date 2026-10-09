@@ -23,8 +23,10 @@ open a browser, never render the final video, never touch another clip's folder 
    `<ROOT>/skills/cut/references/shapes.md` gives. Every cut quotes the transcript. Last take wins. Never
    read `words.raw.json`.
 3. **Build:** `python3 "$C/build_timeline.py" EDIT/source.mp4 EDIT --dry-run`, fix any `ERROR`, run it
-   without `--dry-run`, then read `paper-edit.md` straight through and fix a flub, a bad join or a lost
-   line in `spans.json`. Three passes at most.
+   without `--dry-run`. Then grade the cut on paper (a flub, a bad join or a lost line):
+   `python3 "$C/judge_cut.py" prompt EDIT`, read `EDIT/judge-prompt.md` and grade as its rubric says,
+   write the JSON to `EDIT/judge.json`, then `python3 "$C/judge_cut.py" apply EDIT`. Exit 3: spans
+   changed, grade again. Three rounds at most, then build again if spans changed.
 4. **Render and verify:** `python3 "$C/render.py" EDIT/source.mp4 EDIT`, then
    `$PY "$C/verify_cut.py" EDIT --engine <the caller's engine>`. One fix cycle for MISSING or SURVIVED,
    then `python3 "$C/preview_cut.py" EDIT --no-open`.

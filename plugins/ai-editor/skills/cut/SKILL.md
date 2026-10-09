@@ -109,16 +109,14 @@ python3 "$S/build_timeline.py" <source> edits/<name>
 Every pause (breaths included) over `--max-pause` (0.15 s) becomes 0.10 s; under music only gaps
 between words are trimmed. Fix any `ERROR` the dry run prints, then run it for real.
 
-Then read `edits/<name>/paper-edit.md` straight through. It is what the viewer will hear, with
-`<<n>>` at each join. Critique it yourself before rendering:
-- A flub, restart or "wait" still in the text: add a span.
-- A join that reads wrong, or two halves of different takes stitched into a sentence nobody said:
-  move the span.
-- A good line gone that no better take replaces: remove that span.
+Then the `cut-judge` agent scores `paper-edit.md` (what plays, `<<n>>` at each join) on a rubric
+and fixes `spans.json`: a flub, restart or "wait" left in (add a span), a bad join or two takes
+stitched into a sentence nobody said (move it), a good line lost that no better take replaces
+(remove it). Launch, readers for takes over 5 min, and the approval score: `references/judge.md`.
 - A `CLIPPED` line at the top means a pause cut ate a word. Rebuild with a larger `--pad`.
 - Joins inside speech move to a quiet frame. Any `still in speech`: listen to it in step 5.
 
-Loop until it reads clean: it is free, a render is not.
+Build again if spans changed: paper is free, a render is not.
 
 ## 4. Render
 
