@@ -13,6 +13,8 @@ render.py frame counts: "span N: X frames, wanted X+1" must never happen.
    and 60 fps, cut with random spans by build_timeline's own frame code and rendered by render.py.
 3. Music bed: speech-like tones (one word barely over the music) on a constant music bed. The
    pauses between words are tightened and no word loses a frame.
+4. A mistimed word: its label starts 0.6 s after its audio (as transcribers do with numbers). The
+   lead-in cut trusts the label and lands inside the word; the splice check moves it to the quiet.
 """
 import json
 import math
@@ -123,6 +125,25 @@ def test_music_bed():
         assert kept < 7 - 2.0, (kept, spans)      # the 0.7-0.85 s pauses were tightened
 
 
+def test_mistimed_word_is_not_clipped():
+    words = [(1.0, 1.8), (2.3, 2.8), (3.3, 3.7)]          # where the audio really is
+    labels = [(1.6, 1.8), (2.3, 2.8), (3.3, 3.7)]         # the first label starts 0.6 s late
+    tone = "+".join(f"between(t,{a},{b})*0.4*sin(2*PI*{200 + 40 * i}*t)" for i, (a, b) in enumerate(words))
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        src, ed = d / "late.mp4", d / "edit"
+        ed.mkdir()
+        ff("-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=4.5", "-f", "lavfi", "-i", f"aevalsrc='{tone}':s=48000:d=4.5",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", src)
+        (ed / "words.raw.json").write_text(json.dumps(
+            [{"text": f"w{i}", "start": a, "end": b, "type": "word"} for i, (a, b) in enumerate(labels)]))
+        r = subprocess.run([sys.executable, HERE / "build_timeline.py", src, ed], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        spans = json.loads((ed / "decisions.json").read_text())
+        assert spans[0]["start"] <= 1.0 + 1e-6, (spans, r.stdout)        # the whole first word plays
+        assert "0 still in speech" in r.stdout, r.stdout
+        assert json.loads((ed / "report.json").read_text())["splices_in_speech"] == []
+
 
 def test_scribe_network_error_is_a_message():
     """No network: a one-line message and exit 3, not a traceback."""
@@ -177,5 +198,6 @@ if __name__ == "__main__":
     test_window_property()
     test_real_renders()
     test_music_bed()
+    test_mistimed_word_is_not_clipped()
     test_scribe_network_error_is_a_message()
     print("all ok")

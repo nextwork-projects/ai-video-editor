@@ -9,11 +9,9 @@ compatibility: Python 3.9+, ffmpeg and the venv the setup skill installs (faster
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
-Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows (asking, looking real, motion, story and framing, privacy, cost).
+Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows.
 
 Every question to the user goes in the question box: call the AskUserQuestion tool (2-4 options, the recommended one first). Only in an agent without that tool, ask numbered questions in text.
-
-One raw take in, a clean jump cut out.
 
 ```
 edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (what to remove, quoted),
@@ -109,8 +107,7 @@ python3 "$S/build_timeline.py" <source> edits/<name>
 ```
 
 Every pause (breaths included) over `--max-pause` (0.15 s) becomes 0.10 s; under music only gaps
-between words are trimmed. Fix any `ERROR` the dry run prints (a quote that does not match, or a
-phrase found twice without `occurrence`), then run it for real.
+between words are trimmed. Fix any `ERROR` the dry run prints, then run it for real.
 
 Then read `edits/<name>/paper-edit.md` straight through. It is what the viewer will hear, with
 `<<n>>` at each join. Critique it yourself before rendering:
@@ -119,6 +116,7 @@ Then read `edits/<name>/paper-edit.md` straight through. It is what the viewer w
   move the span.
 - A good line gone that no better take replaces: remove that span.
 - A `CLIPPED` line at the top means a pause cut ate a word. Rebuild with a larger `--pad`.
+- Joins inside speech move to a quiet frame. Any `still in speech`: listen to it in step 5.
 
 Loop until it reads clean: it is free, a render is not.
 
@@ -128,8 +126,7 @@ Loop until it reads clean: it is free, a render is not.
 python3 "$S/render.py" <source> edits/<name>
 ```
 
-Source resolution, frame-accurate, short audio fades at every join. A 3-minute 4K take takes a few
-minutes: run long takes in the background.
+A 3-minute 4K take takes a few minutes: run long takes in the background.
 
 ## 5. Verify
 
@@ -142,6 +139,7 @@ Re-transcribes cut.mp4 and diffs it against the words the cut meant to keep.
 - **SURVIVED**: each line prints its cut and source time and the span to add. A real repeat or
   stumble: add that span to `spans.json`. Clean speech there is a mishearing.
 - **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
+- **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 
 One fix cycle, then show the user whatever is left.
 

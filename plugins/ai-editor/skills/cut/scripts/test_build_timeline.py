@@ -148,6 +148,19 @@ def test_hidden_repeat_is_listed_and_shown():
         B.window_rms_db, B.derive_noise_db = old
 
 
+def test_splice_never_reaches_a_removed_word():
+    """Speech runs 1.0-2.0 s with no gap ("the the thing"); the first "the" (1.0-1.3) is removed and the
+    keep starts at 1.3, inside speech. Walking back to the quiet would bring the stumble back, so the
+    edge stays and is listed. Without the removed word it moves to the quiet at 1.0 s."""
+    lvl = [-20.0 if 1.0 <= i * B.RMS_WIN_S < 2.0 else -70.0 for i in range(int(3 / B.RMS_WIN_S))]
+    frames = [[0, 15], [39, 90]]
+    got, moved, left = B.fix_splices(frames, 30, lvl, -40.0, 90, removed=[(1.0, 1.3)])
+    assert got == frames and left == [1.3] and not moved, (got, moved, left)
+    got, moved, left = B.fix_splices(frames, 30, lvl, -40.0, 90)
+    assert got == [[0, 15], [30, 90]] and moved == [(1.3, 1.0)] and not left, (got, moved, left)
+    assert B.fix_splices(got, 30, lvl, -40.0, 90)[1:] == ([], [])      # a second pass finds nothing
+
+
 if __name__ == "__main__":
     test_derive()
     test_audible_end()
@@ -156,4 +169,5 @@ if __name__ == "__main__":
     test_frames_and_retime()
     test_stretched_label_is_not_clipped()
     test_hidden_repeat_is_listed_and_shown()
+    test_splice_never_reaches_a_removed_word()
     print("all ok")

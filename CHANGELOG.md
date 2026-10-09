@@ -11,6 +11,16 @@ What changed for every user, newest first.
   skill alone starts nothing. Every prepared visual names a word and which time it is said, so a
   re-cut after notes needs one command: `retakes.py remap` re-points each one to the new cut and
   drops those whose word was cut. Test: `test_retakes.py`.
+- A join could cut into a word whose transcript time was wrong (numbers worst: a word that started
+  0.6 s before its label lost its first syllable to the lead-in cut). `build_timeline.py` now reads the
+  audio at every join and moves any that lands inside speech out to the nearest quiet frame, at most
+  0.6 s and never into a word the cut removes. It prints how many it moved and lists any it could not
+  fix (`splices_in_speech` in report.json). Skipped under a music bed, where word labels bound the
+  joins. Tests: `test_media.py` (a tone burst with a late label), `test_build_timeline.py`.
+- A keeper that starts with a stumble ("now, now one thing") passed every check. `verify_cut.py` now
+  lists each word or two-word pair said twice in a row in the render as `DOUBLED`, with its time and
+  the span that cuts the first one. Claude keeps the natural ones. Test: `verify_cut.py demo`.
+
 - The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
   containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
   default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s

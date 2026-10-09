@@ -23,7 +23,8 @@ Keep the first if it carries a detail the second drops.
 ### 2. Doubled discourse marker
 "You see, you see", "So, so", "But, but": cut the doubling, even when both are fluent. This covers
 connecting words only. Repeated content ("I know a man... I know a man") can be deliberate and
-stays.
+stays. `verify_cut.py` lists every word or two-word pair said twice in a row in the render
+(`DOUBLED`), with the span that cuts the first one.
 
 ### 3. Restating the point after it lands
 Once the point has landed, cut the sentences that only say it again.
