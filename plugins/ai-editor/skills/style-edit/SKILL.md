@@ -220,7 +220,7 @@ python3 "$S/export_nle.py" edits/<name> --to fcpxml|premiere|resolve|capcut|edl|
 ```
 
 Writes `edits/<name>/export/`. Moving cards render with alpha first (about 0.7 s a card frame; say
-so). Tell the user which file to open and how: `references/render.md` "Export to another editor".
+so). Tell the user which file to open and how: `references/render.md` "Export to another editor". For a 16:9 video, asked or not, also offer YouTube chapters in the question box (`references/render.md` "YouTube chapters").
 
 ## If a script stops
 
@@ -244,7 +244,7 @@ so). Tell the user which file to open and how: `references/render.md` "Export to
 
 - `scripts/`: `route.py` beats, `capture.mjs` captures, `plan.py` plan, `face.py` head, `matte.py`
   cutout, `sfx.py` sound, `check.py` + `quality.py` checks, `sheet.py` stills sheet, `edit.py` stills,
-  estimate and render, `preview.py` live preview, `export_nle.py` export. Each has a `demo` self-check.
+  estimate and render, `preview.py` live preview, `export_nle.py` export, `chapters.py` chapters. Each has a `demo` self-check.
 - `${CLAUDE_PLUGIN_ROOT}/agents/template-filler.md` (haiku), `stills-critic.md` (sonnet): the helpers.
 - `${CLAUDE_PLUGIN_ROOT}/remotion/`: the renderer, copied to `~/.ai-video-editor/remotion` and refreshed
   on every run. `tests/golden.py` at the repo root: golden frames; `--update` after an intended look change.
