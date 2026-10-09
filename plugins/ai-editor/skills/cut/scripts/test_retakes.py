@@ -256,6 +256,30 @@ def test_sample_list_and_comparison_are_not_candidates():
     assert [c["kind"] for c in loose] == ["filler"], loose
 
 
+def test_remap_follows_the_words_through_a_recut():
+    """Visuals prepared on the first cut: a re-cut that removes the first "notion" re-points the second
+    to nth 1, drops a beat whose word was cut, keeps a beat with no nth, and a second run changes nothing."""
+    raw = take("notion is great | notion again | then figma | done")
+    spans_old = [{"start": 0.0, "end": 100.0}]
+    first, figma = raw[0], raw[6]
+    spans_new = [{"start": first["end"] + 0.05, "end": figma["start"] - 0.05}, {"start": figma["end"] + 0.05, "end": 100.0}]
+    beats = [{"word": "notion", "nth": 2, "kind": "logo"}, {"word": "figma", "nth": 1, "kind": "logo"},
+             {"word": "done", "kind": "capture"}]
+    kept, dropped = R.remap_beats(raw, spans_old, spans_new, beats)
+    assert kept == [{"word": "notion", "nth": 1, "kind": "logo"}, {"word": "done", "kind": "capture"}], kept
+    assert [b["word"] for b in dropped] == ["figma"], dropped
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "words.raw.json").write_text(json.dumps(raw))
+        (d / "prep-decisions.json").write_text(json.dumps(spans_old))
+        (d / "decisions.json").write_text(json.dumps(spans_new))
+        (d / "visuals.json").write_text(json.dumps(beats))
+        R.remap(d)
+        once = json.loads((d / "visuals.json").read_text())
+        R.remap(d)
+        assert once == kept == json.loads((d / "visuals.json").read_text()), once
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

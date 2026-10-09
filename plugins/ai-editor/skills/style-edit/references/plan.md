@@ -3,12 +3,35 @@
 Moved out of SKILL.md step 4. Read the section the step points at.
 
 ## Contents
+- Prepared while the cut was reviewed
 - No creator: the default style
 - What plan.py does
 - Behind the speaker (the cutout)
 - Sound cues
 - Music
 - What the checks FAIL and WARN
+
+## Prepared while the cut was reviewed
+
+Called by start for a whole edit, the cut skill starts the `visual-prep` agent as the cut page opens.
+It does steps 1-3 and `face.py` on the first cut and copies its `decisions.json` to
+`prep-decisions.json`. Every visual it writes names a word and which time it is said (`nth`), never a
+second. It plans, renders and uploads nothing; its one bill is the step 3 Jev call (a fraction of a
+cent).
+
+Wait for its JSON if it is still running. Cut approved unchanged: go to step 4. Cut changed after notes:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" remap edits/<name>
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" captions edits/<name>
+python3 "$S/route.py" beats edits/<name>
+$VPY "$S/face.py" edits/<name>
+```
+
+`remap` re-points each beat in visuals.json and images.json to the new cut and prints the ones it
+dropped because their word was cut. Add a beat (step 3) for a line the re-cut brought back that names
+something real, then run `capture.mjs` again (it keeps files already fetched). Captures and logos do
+not change with the cut. Then step 4.
 
 ## No creator: the default style
 

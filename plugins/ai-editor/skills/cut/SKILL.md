@@ -22,7 +22,7 @@ edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (wha
 ```
 
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
-started in. Never modify, move or copy the source file. Pass its path.
+started in. Never modify, move or copy the source file: pass its path.
 
 `$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`, the tool venv. On Windows, use `py`
 wherever these commands say `python3`.
@@ -39,7 +39,7 @@ curl -L -o sample-take.mp4 https://github.com/nextwork-projects/ai-video-editor/
 
 ## 0. Ask: the cut first, or everything at once
 
-Before anything else, ask one question in the question box (start decides this itself for a whole edit):
+Before anything else, ask one question in the question box (start decides this for a whole edit):
 
 > Do you want just the cut first, or the cut and the styled edit in one go?
 > - **Just the cut first (Recommended).** You approve the cut before I add captions, zooms or
@@ -73,7 +73,7 @@ some ums and false starts; Scribe and CrisperWhisper keep them for the cut. With
 setup can add one (CrisperWhisper's weights are non-commercial only). A take full of retakes:
 `AI_EDITOR_WHISPER_MODEL=medium` hears them better (1.5 GB, twice as slow). Step 5 catches the rest.
 
-**Never read `words.raw.json`** (12x the size of `transcript.txt`, which has the same words).
+**Never read `words.raw.json`**: `transcript.txt` has its words at 1/12 the size.
 
 ## 2. Decide what to cut
 
@@ -120,7 +120,7 @@ Then read `edits/<name>/paper-edit.md` straight through. It is what the viewer w
 - A good line gone that no better take replaces: remove that span.
 - A `CLIPPED` line at the top means a pause cut ate a word. Rebuild with a larger `--pad`.
 
-Loop until it reads clean. It costs nothing; a render costs minutes.
+Loop until it reads clean: it is free, a render is not.
 
 ## 4. Render
 
@@ -157,7 +157,8 @@ rushed or slow: rebuild with another `--max-pause`. After any change: build, ren
 `hooks.json` exists: after approval, ask about hook variants (`references/retake-detection.md`).
 
 Only the user's approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
-cut first", say they can ask for the style. Never start style-edit on your own.
+cut first", say they can ask for the style. Never start style-edit on your own. Called by start: as
+the page opens, start the `visual-prep` agent in the background.
 
 ## If a script stops
 
@@ -169,7 +170,7 @@ cut first", say they can ask for the style. Never start style-edit on your own.
 | `spans.json exists. Pass --force` | only on a fresh decision: `propose --force` (keeps spans.prev.json) |
 | build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |
 | `cannot derive a silence threshold` / `marked no silence` | speech and background are under 10 dB apart: `ffmpeg -i <source> -af volumedetect -vn -f null -`, pass `--noise` about 10 dB above the mean |
-| render `ERROR ... (kept in <tmp>)` | say the message; re-run render once; the temp folder has the segments |
+| render `ERROR ... (kept in <tmp>)` | say it; re-run render once |
 
 ## Rules
 

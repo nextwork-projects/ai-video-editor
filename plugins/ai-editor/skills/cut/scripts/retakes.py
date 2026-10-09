@@ -7,6 +7,7 @@ reviews only what Jev was unsure of.
     python3 retakes.py fix     <edit_dir> cloud=Claude [jiv=Jev ...]   fix misheard words
     python3 retakes.py captions <edit_dir>             captions.json + captions.txt for style-edit
     python3 retakes.py hook    <edit_dir> <n>          <edit_dir>-hook<n>/: the cut opening on alternate hook n
+    python3 retakes.py remap   <edit_dir>              re-point visuals built before a re-cut
 
 text     words.raw.json as "[start-end] words" per phrase, about a fifth of its size. Read
          this, never the raw JSON.
@@ -35,6 +36,12 @@ captions The caption words: what the verify pass heard in cut.mp4 (cut.transcrip
          it, with every word it heard differently at the same time (textnorm.pair_by_time) taken
          from the approved cut text (words.json), names spelled as the profile's `names`, and
          every fix in fixes.json applied. Writes captions.json and captions.txt (proofread this).
+remap    Visuals prepared while the user reviewed the cut (visuals.json, images.json) name a word and
+         which time it is said ("nth"). A re-cut can remove a word or an earlier time it was said.
+         Reads prep-decisions.json (the cut the visuals were keyed to, copied when prep started) and
+         decisions.json (the cut now), finds each beat's word in the source, and rewrites its nth for
+         the new cut. A beat whose word was cut is dropped and printed. Then copies decisions.json
+         over prep-decisions.json, so running it twice changes nothing.
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (fall back to deciding yourself)
 """
@@ -644,9 +651,55 @@ def captions(d):
     return words, changed
 
 
+def remap_beats(raw, old_spans, new_spans, beats):
+    """beats keyed to (word, nth) on the old cut -> (kept, dropped) on the new one. A beat with no nth is
+    kept as is (plan.py takes the next time the word is said). raw: the source words."""
+    from build_timeline import is_kept
+    key = lambda t: re.sub(r"[^\w'’-]+", "", t).lower()      # plan.py clean().lower()
+    old = [i for i, w in enumerate(raw) if is_kept(w, old_spans)]
+    new = {i for i, w in enumerate(raw) if is_kept(w, new_spans)}
+    kept, dropped = [], []
+    for b in beats:
+        if not b.get("word") or not b.get("nth"):
+            kept.append(b)
+            continue
+        hits = [i for i in old if key(raw[i]["text"]) == key(b["word"])]
+        if len(hits) < b["nth"]:
+            print(f"warning: '{b['word']}' #{b['nth']} is not in the earlier cut, left as is", file=sys.stderr)
+            kept.append(b)
+            continue
+        i = hits[b["nth"] - 1]
+        if i not in new:
+            dropped.append(b)
+            continue
+        kept.append({**b, "nth": sum(1 for j in new if j <= i and key(raw[j]["text"]) == key(b["word"]))})
+    return kept, dropped
+
+
+def remap(d):
+    from build_timeline import load_fitted
+    d = Path(d)
+    prev = d / "prep-decisions.json"
+    if not prev.exists():
+        sys.exit(f"ERROR: no prep-decisions.json in {d}: copy decisions.json to it when visual prep starts")
+    old, new = json.loads(prev.read_text()), json.loads((d / "decisions.json").read_text())
+    raw = [w for w in load_fitted(d) if w.get("type", "word") == "word"]
+    for name in ("visuals.json", "images.json"):
+        f = d / name
+        if not f.exists():
+            continue
+        beats = json.loads(f.read_text())
+        kept, dropped = remap_beats(raw, old, new, beats)
+        f.write_text(json.dumps(kept, indent=1))
+        moved = sum(1 for a, b in zip([x for x in beats if x not in dropped], kept) if a.get("nth") != b.get("nth"))
+        print(f"{f}: {len(kept)} kept, {moved} re-pointed, {len(dropped)} dropped"
+              + "".join(f"\n  dropped '{b['word']}' ({b.get('kind') or b.get('src')}): its word was cut" for b in dropped))
+    prev.write_text(json.dumps(new, indent=1))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook"])
+    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook", "remap"])
     ap.add_argument("edit_dir")
     ap.add_argument("pairs", nargs="*", help="fix: old=new; hook: the alternate's number")
     ap.add_argument("--force", action="store_true")
@@ -668,6 +721,8 @@ def main():
         if not (d / "spans.json").exists():
             sys.exit(f"ERROR: no spans.json in {d}: decide the main cut first")
         print(hook_variant(d, int(a.pairs[0])))
+    elif a.cmd == "remap":
+        remap(d)
     elif a.cmd == "captions":
         if not (d / "cut.transcript.json").exists():
             sys.exit(f"ERROR: no cut.transcript.json in {d}: run the cut skill's verify step first")
