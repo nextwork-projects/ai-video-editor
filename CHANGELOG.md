@@ -6,8 +6,22 @@ What changed for every user, newest first.
 
 ## ai-editor 2.2.0 (2026-10-09)
 
+- Fixes from a real-footage test of this release:
+  - `learn.py` measures your pauses from the audio of both files (build_timeline.py's threshold and
+    silencedetect), at every join, not from word gaps. Whisper stretches word ends over pauses, so a
+    205 s take measured 6 pauses and saved `cut.max_pause` 0.08; it now measures 18 joins, median
+    0.17 s, and saves 0.26. Re-learning the same value saves nothing. Test: `learn.py demo`.
+  - A `build_timeline.py --dry-run` no longer counts your taste rules as applied, so the next
+    correction is not reported as a regression. Test: `taste.py demo`.
+  - `join.py` output was 21 ms out of sync (audio late). Parts now keep PCM audio and the joined
+    file encodes it once. `check()` fails a file whose streams start over half a frame apart.
+    `parts.json` adds each part's audio length and full path. Test: `join.py demo`.
+  - `links.py` reads macOS Terminal drag-and-drop paths (`My\ Takes/IMG\ 0001.MOV`), says when a
+    local file is not there, and keeps several files in the order you gave them. Test: `links.py demo`.
+  - The skills define `$PY` and `$VPY` as the run.py path (`python3 "$PY" ...`), so the commands
+    work in zsh, the macOS default.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
-  question box whether they are one video (in file-name order, or filming order) or separate videos.
+  question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
   then the normal cut runs. Each clip is fitted to the first clip's size (rotation applied, black bars,
   no stretching), one frame rate and 48 kHz audio, so upright, sideways and variable frame rate phone
