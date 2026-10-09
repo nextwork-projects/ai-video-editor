@@ -152,7 +152,7 @@ came out and what the page shows (struck-through words are cut, highlighted ones
 calls). Then **wait**. "keep <line>": delete or narrow that span. "cut <line>": add one. Pauses
 rushed or slow: rebuild with another `--max-pause`. After any change: build, render, verify, reopen.
 
-`hooks.json` exists: after approval, ask about hook variants (`references/retake-detection.md`).
+After approval: hook check, then hook variants if `hooks.json` exists (`references/retake-detection.md`).
 
 Only the user's approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
 cut first", say they can ask for the style. Never start style-edit on your own. Called by start: as

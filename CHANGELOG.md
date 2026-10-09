@@ -21,6 +21,14 @@ What changed for every user, newest first.
   lists each word or two-word pair said twice in a row in the render as `DOUBLED`, with its time and
   the span that cuts the first one. Claude keeps the natural ones. Test: `verify_cut.py demo`.
 
+- YouTube chapters from the final cut. For a 16:9 video, style-edit step 9 offers chapters next to
+  the export. Claude picks the titles from the transcript; `chapters.py` times each one off
+  `cut.transcript.json` and checks YouTube's rules: first at 0:00, at least 3, each at least 10 s,
+  in order. Writes `edits/<name>/chapters.txt`, and `description.txt` with `--intro`. Test:
+  `chapters.py demo` (in demos.sh).
+- Hook check. When the user gave a title, `cut/scripts/hook_check.py` finds the second its key words
+  are first said in the cut and prints the first 10 s, so Claude can say when the opening misses the
+  promise. Cut step 6 runs it after approval. Test: `hook_check.py demo` (in demos.sh).
 - The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
   containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
   default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s
