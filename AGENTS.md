@@ -21,7 +21,7 @@ Read a skill's `SKILL.md` in full before doing its task.
 | `setup` | `plugins/ai-editor/skills/setup/` | "set up the editor", or a tool is missing |
 | `cut` | `plugins/ai-editor/skills/cut/` | "cut my video", "remove my mistakes" |
 | `style-edit` | `plugins/ai-editor/skills/style-edit/` | "style it", "add captions and zooms", "render the edit" |
-| `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms" |
+| `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms"; "learn from my edit" (a raw take and the posted cut) |
 | `product-video` | `plugins/ai-editor/skills/product-video/` | "make a launch video for <url>", "product video of my site", pastes a website |
 | `clips` | `plugins/ai-editor/skills/clips/` | "clip this video", "make shorts from my podcast", drops a long video or YouTube link |
 | `improve` | `plugins/ai-editor/skills/improve/` | maintainers: "improve the editor", "turn feedback into fixes", "process suggestions" |

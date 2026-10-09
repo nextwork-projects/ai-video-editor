@@ -12,6 +12,14 @@ What changed for every user, newest first.
   clips join cleanly. It exits 1 when any clip or the joined file has audio and video more than 0.1 s
   apart. `links.py route` asks the question as one `ask` item (kind `takes`). Details:
   `cut/references/takes.md`. Tests: `join.py demo` (in demos.sh), `links.py demo`.
+- The editor can learn how you cut from a video you already edited by hand. Give it the raw take and
+  the version you posted (setup asks once, and start offers it when you say you edit by hand). The
+  taste skill's `learn.py` transcribes both, lines the words up and measures the pauses you leave,
+  the pauses you tighten, which take of a repeated line you keep, and the fillers you keep. It saves
+  what it measured often enough as your taste, with the counts in each rule: `cut.max_pause`, the new
+  `cut.keep_fillers` (retakes.py then proposes no filler cuts) and word rules for retakes. It also
+  lists the false cuts: words you kept that the default cut would remove. Test: `learn.py demo`,
+  `test_retakes.py`.
 - A whole edit no longer waits for the cut's approval to start the visuals. When start runs the cut,
   the new `visual-prep` agent starts in the background as the cut page opens: images, captions,
   beats, visuals.json, captures and the face pass, on the first cut. It plans, renders and uploads

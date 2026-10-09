@@ -1,6 +1,6 @@
 ---
 name: taste
-description: Remembers how the user likes their videos edited, so they never give the same correction twice. Saves every correction or preference about an edit (the cut, captions, visuals, sound, layout) into ~/.ai-video-editor/taste.md as a plain rule, and into taste.json when it maps to a setting the scripts read (pause length, caption size, words per caption, zooms per minute, sound on or off, layout), deduplicated, scoped to every video or just this one, and counted each time it is applied so `report` shows what it learned and what had to be said twice; one that would help everyone goes to the maintainers. Every other AI editor skill reads both before it starts. Use whenever the user reacts to an edit ("too slow", "captions are too small", "fewer zooms", "I hate the whoosh", "always use the split", "don't put logos there", "that's perfect, keep it like that"), and when they ask "what do you know about my taste", "show my settings", "forget that rule", "reset my taste" or "are you learning".
+description: Remembers how the user likes their videos edited, so they never give the same correction twice. Saves every correction or preference about an edit (the cut, captions, visuals, sound, layout) into ~/.ai-video-editor/taste.md as a plain rule, and into taste.json when it maps to a setting the scripts read (pause length, fillers, caption size, words per caption, zooms, sound, layout), deduplicated, scoped to every video or just this one, and counted each time it is applied so `report` shows what it learned; one that would help everyone goes to the maintainers. Every other AI editor skill reads both before it starts. Use whenever the user reacts to an edit ("too slow", "captions are too small", "fewer zooms", "I hate the whoosh", "that's perfect, keep it like that"), and when they ask "what do you know about my taste", "show my settings", "forget that rule" or "are you learning". Also learns how they cut from a raw take and their posted version ("I already edit by hand", "learn from my edit").
 license: MIT
 compatibility: Python 3.9+, standard library only. Runs from the full ai-editor plugin folder (uses its lib/).
 ---
@@ -50,6 +50,7 @@ python3 "$S/taste.py" add visuals "Logos stay smaller than the captions" --edit 
 | fewer / more zooms | `zoom.per_min=` (0 turns zooms off) |
 | no sound effects | `sfx=false` |
 | always split / always overlay | `layout.mode=split` or `overlay` |
+| keep my ums / don't cut fillers | `cut.keep_fillers=true` (retakes.py proposes no filler cuts) |
 
    No setting fits (card timing, a capture cropped wrong, a look), so it is a word rule: write it
    so it can be followed next time ("Captures crop to the sentence that proves the point").
@@ -72,6 +73,13 @@ python3 "$S/taste.py" issue          # shows the issue it would open
    GitHub issue?" with `Yes, open an issue (Recommended)` / `No, keep it on my computer`. On yes:
    `python3 "$S/taste.py" issue --yes`, and give them the issue link. No gh, or no: it stays in
    `~/.ai-video-editor/suggestions.jsonl`, where the maintainers' `improve` skill reads it.
+
+## Learn from a past edit
+
+When the user already edits by hand (or says yes to setup's "Have a raw take and the version you
+posted? I can learn how you cut."), ask for both paths and read `references/learn-from-edit.md`.
+It runs `learn.py <raw> <posted>`, which saves their pause length, retake and filler habits as
+rules with counts, so the first edit already cuts like them.
 
 ## Is it learning
 
@@ -106,6 +114,7 @@ the creator's style disagree, say so once and follow the rule.
 
 ## Files
 
+- `scripts/learn.py`: a raw take and the user's posted cut of it in, their cut settings out; `demo`.
 - `scripts/taste.py`: `add`, `report`, `show`, `forget`, `rule`, `set`, `unset`, `get`, `suggest`, `issue`, `demo`. A thin
   CLI over the plugin's `lib/ai_editor/taste.py`, whose `load_json()` and `merge()` are what plan.py
   and the cut use to lay the taste over the defaults and style.json.

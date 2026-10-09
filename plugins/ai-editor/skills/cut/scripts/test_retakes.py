@@ -254,6 +254,8 @@ def test_sample_list_and_comparison_are_not_candidates():
     # a "like" set off as a hesitation is still asked about
     loose = R.find(take("and like the thing is simple."))
     assert [c["kind"] for c in loose] == ["filler"], loose
+    # the user's taste says keep fillers (learned from their own edit): none is a candidate, not even "um"
+    assert not R.find(take("and like the um thing is simple."), keep_fillers=True)
 
 
 def test_remap_follows_the_words_through_a_recut():

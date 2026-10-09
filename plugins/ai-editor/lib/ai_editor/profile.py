@@ -22,7 +22,8 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "captions": {"on": true, "style": "creator"},     style: creator | bold | karaoke | minimal
    "sound": {"sfx": true, "music": false},
    "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
-   "cloud_cleanup": true}                              delete uploaded footage from GitHub / S3 after a cloud render
+   "cloud_cleanup": true,                              delete uploaded footage from GitHub / S3 after a cloud render
+   "past_edit": true}                                  learned from a raw take and their posted cut (taste learn.py); false: declined
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
 `editorial` preset. No creator: DEFAULT_STYLE (style-edit references/plan.md "No creator"). Stdlib only.
@@ -38,7 +39,8 @@ from pathlib import Path
 
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
 # Style questions are asked once, at setup. Video questions belong to each video, asked by start.
-STYLE_QUESTIONS = ("platform", "creators", "liked_videos", "brand", "assets_dir", "avoid", "captions", "sound", "behind")
+STYLE_QUESTIONS = ("platform", "creators", "liked_videos", "brand", "assets_dir", "avoid", "captions", "sound", "behind",
+                   "past_edit")
 VIDEO_QUESTIONS = ("audience", "names")
 QUESTIONS = STYLE_QUESTIONS + VIDEO_QUESTIONS
 DEFAULTS = {"platform": "tiktok", "aspect": "9:16", "creators": [], "liked_videos": [], "brand": {"use_creator": True},

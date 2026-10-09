@@ -32,7 +32,7 @@ Files in ~/.ai-video-editor/ (AI_EDITOR_HOME overrides; outside the plugin, so u
               "applied_in": [edit names], "since_fix", "regressions": [{"edit", "at"}]}]
   suggestions.jsonl  corrections the user said would help everyone: {"at", "what", "rule", "owner", "example"}
 
-How a rule is applied: plan.py and build_timeline.py call load_json() (their only hook). It returns
+How a rule is applied: plan.py, build_timeline.py and retakes.py call load_json() (their only hook). It returns
 taste.json plus the "this video only" settings of the edit being worked on, and counts every setting
 rule it hands over as applied to that edit. Word rules are counted by `show --edit`.
 Stdlib only. Exit codes: 0 ok, 1 error, 2 usage
@@ -270,7 +270,7 @@ def guess_edit(argv):
 
 
 # Which settings each caller acts on, so a plan.py run does not count the cut's pause rule.
-CALLERS = {"build_timeline.py": lambda k: k.startswith("cut."),
+CALLERS = {"build_timeline.py": lambda k: k == "cut.max_pause", "retakes.py": lambda k: k == "cut.keep_fillers",
            "plan.py": lambda k: not k.startswith("cut.")}
 
 

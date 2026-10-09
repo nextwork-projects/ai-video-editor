@@ -285,8 +285,15 @@ def loose_like(toks, i):
     return bool(set(nwords(prev["text"])) & LIKE_BEFORE)
 
 
-def find(toks):
-    """Every candidate, each with the Jev questions that decide it."""
+def keeps_fillers(d):
+    """The user's taste says keep every filler (taste skill, learned from a past edit)."""
+    from ai_editor import taste
+    return bool(taste.load_json(d).get("cut", {}).get("keep_fillers"))
+
+
+def find(toks, keep_fillers=False):
+    """Every candidate, each with the Jev questions that decide it. keep_fillers (the user's taste
+    `cut.keep_fillers`, learned from their own edit): no filler is a candidate."""
     phr = phrases(toks)
     end_of = {i: b for a, b in phr for i in range(a, b + 1)}
     cands = []
@@ -353,7 +360,7 @@ def find(toks):
             w0 = flat[:m.start()].count(" ")
             w1 = w0 + m.group(0).count(" ")
             a, b = seq[w0][1], seq[w1][1]
-            if a >= tail or (kind == "filler" and m.group(0) == "like" and not loose_like(toks, a)):
+            if a >= tail or (kind == "filler" and (keep_fillers or m.group(0) == "like" and not loose_like(toks, a))):
                 continue
             ctx = say(toks, max(0, a - 12), min(len(toks) - 1, b + 12))
             cid = f"c{len(cands)}"
@@ -370,7 +377,7 @@ def find(toks):
         ws = nwords(t["text"])
         if t.get("type") == "audio_event":
             add("audio_event", i, i)
-        elif ws and all(w in HARD_FILLERS for w in ws):
+        elif ws and all(w in HARD_FILLERS for w in ws) and not keep_fillers:
             add("filler", i, i)
     return sorted(cands, key=lambda c: c["cut"][0])
 
@@ -482,7 +489,7 @@ def propose(d, key=None, canned=None, force=False):
     d = Path(d)
     toks = load(d)
     (d / "transcript.txt").write_text(text_view(toks, d.name))
-    cands = find(toks)
+    cands = find(toks, keeps_fillers(d))
     write_hooks(d, toks)
     if key is None and canned is None:
         (d / "candidates.md").write_text(candidates_md(cands))
@@ -738,7 +745,7 @@ def main():
         try:
             code = propose(d, key=key, force=a.force)
         except jev.JevError as e:
-            (d / "candidates.md").write_text(candidates_md(find(load(d))))
+            (d / "candidates.md").write_text(candidates_md(find(load(d), keeps_fillers(d))))
             if e.rejected_key:
                 print(f"TypeSafe rejected the saved key ({e}). Save a new one with the setup skill's setkey step. "
                       "Meanwhile decide the cut yourself from transcript.txt and candidates.md.", file=sys.stderr)
