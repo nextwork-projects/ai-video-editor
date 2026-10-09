@@ -74,6 +74,7 @@ enforced. What enforces each rule and the test that proves it: the repo's
 - Code measures; cheap models judge; Claude decides only what is left. Claude never reads raw
   transcripts or frame-by-frame images when a script can summarise them. (cut `retakes.py`,
   creator-teardown `look.py`, `sheet.py`)
+- Joins land on quiet audio. (`build_timeline.py`)
 
 ## Speed
 
