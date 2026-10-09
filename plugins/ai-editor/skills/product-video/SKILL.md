@@ -207,8 +207,8 @@ python3 "$S/product.py" share product/<name>
 ```
 
 `share.txt`: the caption (checked: only the site's sentences and its domain), the URL, and alt text
-that says what is shown. Open the render (`open` / `start ""` / `xdg-open`), give the full paths of
-the video, sheet and share.txt, and ask for notes. Notes about taste go to the taste skill.
+that says what is shown. Hand the render over on the review page (`../style-edit/references/review.md`;
+folder `product/<name>`, `alt` for a second tag), give the paths of the sheet and share.txt. Notes about taste go to the taste skill.
 
 A logged-in run: say where the login is kept (`node "$S/login.mjs" where <domain>` prints the folder)
 and that it stays logged in on this computer until removed. Once the video is approved, ask in the

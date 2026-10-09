@@ -34,6 +34,14 @@ What changed for every user, newest first.
   WARNs a one-frame jump that no cut, zoom or card change explains. Each names the time and the fix. A
   fault the footage itself has is skipped. Test: `quality.py demo` (a clean clip passes; a white flash,
   black frames and a jump are caught).
+- Every render now opens on a review page in the browser instead of a file path in the chat: the
+  cut, the styled edit, each clip and a product video. Play, scrub and leave a note at a moment (the
+  frame is saved, images can be pasted on), send the notes, and Claude fixes and renders the next
+  round on the same page, with its progress shown live. Approve moves on. Earlier rounds stay as
+  tabs; several videos in a round (every clip of a long video) are tabs you can compare side by
+  side. Notes save in `edits/<name>/review.json`. Stdlib only, Mac, Windows and Linux, the default
+  browser, 127.0.0.1 with a random token. The live preview before the render is unchanged.
+  `lib/ai_editor/review.py`, `style-edit/references/review.md`. Test: `review.py demo` (in demos.sh).
 
 - The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
   containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by

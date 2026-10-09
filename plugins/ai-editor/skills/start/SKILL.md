@@ -96,7 +96,7 @@ can do itself.
 
 ## 4. After
 
-Open the render, give its full path, and ask for notes. Corrections go to the taste skill so they
+The render is handed over on the review page (style-edit step 8): the user leaves notes on it. Corrections go to the taste skill so they
 are never needed again; a change of brand, creators or platform goes back into the profile with
 `python3 "$P" set ...`.
 

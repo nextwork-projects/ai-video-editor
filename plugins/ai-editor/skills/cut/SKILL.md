@@ -15,8 +15,8 @@ Every question to the user goes in the question box: call the AskUserQuestion to
 
 ```
 edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (what to remove, quoted),
-  review.md (what Jev was unsure of), paper-edit.md (the cut as text), cut-check.html (the approval
-  page), cut.mp4 + words.json (the render and its words).
+  review.md (what Jev was unsure of), paper-edit.md (the cut as text), cut-check.html (the
+  transcript), review.json (notes), cut.mp4 + words.json (the render and its words).
 ```
 
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
@@ -145,12 +145,17 @@ One fix cycle, then show the user whatever is left.
 
 ## 6. The user approves
 
-After every render (the first and every re-cut) run `python3 "$S/preview_cut.py" edits/<name>`. It
-opens the page in the browser itself; never skip it or tell the user to open it (no browser, as on a
-remote machine: give the full path to `cut-check.html`). Tell the user in two lines how many seconds
-came out and what the page shows (struck-through words are cut, highlighted ones are judgement
-calls). Then **wait**. "keep <line>": delete or narrow that span. "cut <line>": add one. Pauses
-rushed or slow: rebuild with another `--max-pause`. After any change: build, render, verify, reopen.
+After every render, hand it over on the review page (`../style-edit/references/review.md`):
+
+```bash
+python3 "$S/preview_cut.py" edits/<name> --no-open
+R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"
+python3 "$R" edits/<name> start --video edits/<name>/cut.mp4 --stage cut --transcript edits/<name>/words.json
+```
+
+Then `serve` and `wait` in the background (re-cut: `resolve` first). Say the seconds cut.
+`wait` exits on send or approve, with the notes. "keep <line>": narrow or delete that
+span; "cut <line>": add one; pauses off: `--max-pause`. Then build, render, verify, `round`.
 
 After approval: hook check, then hook variants if `hooks.json` exists (`references/retake-detection.md`).
 

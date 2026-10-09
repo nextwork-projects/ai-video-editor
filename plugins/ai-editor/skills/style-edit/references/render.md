@@ -131,6 +131,9 @@ The server listens on 127.0.0.1 only and its URL carries a random token (`?t=...
 without it, reads and writes alike, gets 403, so another page open in the browser cannot change the
 edit. Open the URL it prints, as printed.
 
+The preview is before the render. After it, the render goes to the review page, where the user
+leaves notes at moments on the timeline: `review.md`.
+
 ## Motion check
 
 `check.py render` reads every frame of the render, not a still a second: a still a second hides a
