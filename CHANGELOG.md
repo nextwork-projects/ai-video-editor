@@ -4,6 +4,13 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- A whole edit no longer waits for the cut's approval to start the visuals. When start runs the cut,
+  the new `visual-prep` agent starts in the background as the cut page opens: images, captions,
+  beats, visuals.json, captures and the face pass, on the first cut. It plans, renders and uploads
+  nothing, and the cut page stays the only thing handed over. A cut-first request made to the cut
+  skill alone starts nothing. Every prepared visual names a word and which time it is said, so a
+  re-cut after notes needs one command: `retakes.py remap` re-points each one to the new cut and
+  drops those whose word was cut. Test: `test_retakes.py`.
 - The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
   containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
   default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s
