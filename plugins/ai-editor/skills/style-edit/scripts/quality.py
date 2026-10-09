@@ -15,6 +15,8 @@ Every frame of the render (half size) is compared with the cut behind it, as che
               a scene: its trigger word in captions.json, half its transition = 0.31 s x the motion k)
   static      the longest stretch where no card moves and nothing is cut
   rhythm      cuts and card entrances a minute against the creator's style.json
+  motion      the whole frame, every frame (a still a second hides these): a one-frame flash (frame 0 too),
+              black frames while the footage has picture, and a one-frame jump that no cut, zoom or card explains
 On the frame each card has settled (the same moment as its still):
   overflow    a text card's content reaching the card's own edge
   contrast    WCAG ratio, at the worst spot: caption fill against what is drawn right around it
@@ -47,6 +49,9 @@ FOOTAGE_MOVING = 0.4   # ...while the cut behind it changed this much at the sam
 FREEZE_RUN = 3         # 3 repeated frames = 0.1 s, the point where a held frame reads as a stutter
 SPIKE_X = 3.0          # an isolated jump: this many times every neighbour within 2 frames
 SPIKE_ABS = 2.0        # and a mean grey change over the card's box of at least this
+FLASH_D = 4.0          # whole frame: a frame this far (edit_events' jump floor) from the frames on both sides
+FLASH_BACK = 1 / 3     # while those two sides are within this share of it of each other: it showed for one frame
+BLACK_V, BLACK_SD = 12, 3   # whole frame mean grey under 12 and nearly flat (64x36): a black frame
 REV_RATIO = 0.35       # a turn where speed going in AND coming out are both over this share of peak:
                        # an ease decelerates into a turn, so one side of a smooth turn is near zero
 REV_MIN_PX = 3         # px at half size (6 px on the output): smaller travel is not visible
@@ -153,6 +158,39 @@ def spikes(d, skip=()):
         if nb and d[i] >= SPIKE_X * max(max(nb), 0.1):
             out.append(i)
     return out
+
+
+def motion_faults(fr, fb, hidden=(), skip=()):
+    """Whole-frame faults on 64x36 grey frames, every frame: fr the render, fb the cut behind it.
+    {"flash": [i], "black": [(first, length)], "snap": [i]}. A fault the cut behind also has is the footage's.
+    hidden: frames under a full-frame scene (the footage is not on screen); skip: frames a cut, zoom or card
+    change explains, never a snap."""
+    import numpy as np
+    fr, fb = np.asarray(fr, np.float32), np.asarray(fb, np.float32)
+    n = min(len(fr), len(fb))
+    gap = lambda f, a, b: float(np.abs(f[a] - f[b]).mean())  # noqa: E731
+    flash = []
+    for i in range(n - 1):
+        a, b = (gap(fr, i - 1, i) if i else None), gap(fr, i, i + 1)
+        back = gap(fr, i - 1, i + 1) if i else gap(fr, 1, 2) if n > 2 else b
+        side = b if a is None else min(a, b)
+        under = gap(fb, i, i + 1) if a is None else min(gap(fb, i - 1, i), gap(fb, i, i + 1))   # the footage's own
+        if side >= FLASH_D and back < FLASH_BACK * side and under < side / 2:
+            flash.append(i)
+    dark = lambda f: f.mean() < BLACK_V and f.std() < BLACK_SD  # noqa: E731
+    black, run = [], None
+    for i in range(n + 1):
+        if i < n and i not in hidden and dark(fr[i]) and not dark(fb[i]):
+            run = run or [i, 0]
+            run[1] += 1
+        elif run:
+            black.append(tuple(run))
+            run = None
+    d_r = [0.0] + [gap(fr, i - 1, i) for i in range(1, n)]
+    d_b = [0.0] + [gap(fb, i - 1, i) for i in range(1, n)]
+    near = set(skip) | {k for i in flash for k in (i, i + 1)} | {k for a, m in black for k in (a, a + m)}
+    near |= {i for i in range(n) if d_b[i] >= d_r[i] / 2}      # the footage changed as much: its own cut
+    return {"flash": flash, "black": black, "snap": spikes(d_r, near)}
 
 
 def jitter(series):
@@ -783,8 +821,26 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                      f"the render repeats {k} frame(s) while the footage moves ({a / fps:.2f} s)",
                      "render again; if it stays, re-encode cut.mp4 with a keyframe every 15 frames (edit.py does) and check the source for dropped frames"))
 
-    # rhythm + static stretches
+    # motion, the whole frame: a one-frame flash, black frames, a one-frame jump with nothing to explain it
     _, hard, jump, moves = edit_events(sr_a)
+    scenes = {n for i, c in enumerate(cards) if c.get("layout") == "scene" for n in range(first[i], last[i] + 1)}
+    events = set(hard + jump) | {round(t * fps) for t in cuts} | set(first) | set(last) | \
+        {round(z[k] * fps) for z in plan["zooms"] for k in ("start", "end")}
+    mf = motion_faults(sr_a, sb_a, scenes, {k for e in events for k in range(e - 2, e + 3)})
+    meas["motion"] = {"flash": [round(i / fps, 2) for i in mf["flash"]], "snap": [round(i / fps, 2) for i in mf["snap"]],
+                      "black": [[round(a / fps, 2), k] for a, k in mf["black"]]}
+    for i in mf["flash"]:
+        out.append(F("FAIL", i / fps, f"frame {i} ({i / fps:.2f} s) is a one-frame flash: it differs from the frames on both sides, "
+                     "which match each other", "something shows for one frame: an element's from-state is missing on its first "
+                     "frame, or a card or clip starts or ends one frame off. Look at that frame and the two round it, render again"))
+    for a, k in mf["black"]:
+        out.append(F("FAIL" if k <= 2 else "WARN", a / fps, f"{k} black frame(s) at {a / fps:.2f} s while the footage has picture",
+                     "a card, clip or cutout is missing there: check its src and frame range in plan.json, render again"))
+    for i in mf["snap"]:
+        out.append(F("WARN", i / fps, f"the picture jumps in one frame at {i / fps:.2f} s, with no cut, zoom or card change there",
+                     "a move with no easing or a missing in-between: ease that move or give the part an entrance, render again"))
+
+    # rhythm + static stretches
     events = sorted(set(hard + jump + [i for a, b in moves for i in range(a, b + 1)]))
     moving = np.zeros(nfr, bool)
     for i in events:
@@ -1099,6 +1155,38 @@ def demo():
     assert spikes(d) == [8] and spikes(d, {8}) == []
     ramp = [0.3, 2, 4, 6, 8, 6, 4, 2, 0.3]
     assert spikes(ramp) == []
+    # motion, the whole frame, read back from encoded clips (2 s, 30 fps): a bar sliding 1 px a frame over a
+    # ground that changes at frame 30 (a cut in the footage, so in both). Clean: passes. Bad: a white frame 0,
+    # a white flash at frame 20, a one-frame jump of the bar at frame 40, two black frames at 50-51
+    import subprocess as sp_
+    import tempfile
+    from check import stream
+
+    def clip(path, bad):
+        frames = []
+        for i in range(60):
+            f = np.full((72, 128, 3), 60 if i < 30 else 120, np.uint8)
+            x = 10 + i + (30 if bad and i >= 40 else 0)
+            f[:, x:x + 16] = 250
+            if bad and i in (0, 20):
+                f[:] = 255
+            if bad and i in (50, 51):
+                f[:] = 0
+            frames.append(f)
+        sp_.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "128x72", "-r", "30", "-i", "-",
+                 "-pix_fmt", "yuv420p", "-c:v", "libx264", str(path)], input=b"".join(f.tobytes() for f in frames), check=True)
+        return np.array([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in stream(path, "null", 64, 36, 30)], np.float32)
+
+    with tempfile.TemporaryDirectory() as td:
+        good, bad = clip(Path(td) / "good.mp4", False), clip(Path(td) / "bad.mp4", True)
+    assert len(good) == len(bad) == 60, (len(good), len(bad))
+    mf = motion_faults(good, good)
+    assert mf == {"flash": [], "black": [], "snap": []}, mf
+    mf = motion_faults(bad, good)
+    assert mf == {"flash": [0, 20], "black": [(50, 2)], "snap": [40]}, mf
+    assert motion_faults(bad, good, skip={39, 40, 41})["snap"] == []      # a card change at 40 explains the jump
+    assert motion_faults(bad, good, hidden={50, 51})["black"] == []       # under a full-frame scene: not missing footage
+    print("motion: clean clip passes; flash at frames 0 and 20, black at 50-51, jump at 40 caught")
     # jitter: a kink at speed both sides is caught, a sine turn is not
     assert jitter([0, 5, 10, 15, 20, 15, 10, 5])
     assert not jitter(list(30 * np.sin(np.linspace(0, np.pi, 40))))

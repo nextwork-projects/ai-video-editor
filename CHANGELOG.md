@@ -4,6 +4,12 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- `check.py render` now checks motion on every frame of the whole picture, not only on each card. It
+  FAILs a one-frame flash (frame 0 too) and one or two black frames while the footage has picture, and
+  WARNs a one-frame jump that no cut, zoom or card change explains. Each names the time and the fix. A
+  fault the footage itself has is skipped. Test: `quality.py demo` (a clean clip passes; a white flash,
+  black frames and a jump are caught).
+
 - The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
   containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
   default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s

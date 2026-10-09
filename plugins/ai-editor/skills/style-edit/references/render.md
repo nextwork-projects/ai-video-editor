@@ -131,6 +131,23 @@ The server listens on 127.0.0.1 only and its URL carries a random token (`?t=...
 without it, reads and writes alike, gets 403, so another page open in the browser cannot change the
 edit. Open the URL it prints, as printed.
 
+## Motion check
+
+`check.py render` reads every frame of the render, not a still a second: a still a second hides a
+frame that flickers. `quality.py` compares each frame of the whole picture with the frames round it
+and with the cut behind it. It names the time and the fix for:
+
+- a one-frame flash: a frame unlike the frames on both sides, which match each other. Frame 0
+  counts: an element that shows its finished state before its entrance starts. FAIL.
+- black frames while the footage has picture: a card, clip or cutout missing there. FAIL for one or
+  two frames, WARN for a longer run.
+- a one-frame jump: the picture changes in one frame where no cut, zoom or card change explains it.
+  WARN.
+
+A flash, black frame or jump the cut behind also has is the footage's own and is not reported, nor
+are black frames under a full-frame scene. The measurements land in `check.json` under `motion`.
+Test: `quality.py demo` encodes a clean clip and a bad one and reads both back.
+
 ## Export to another editor
 
 `export_nle.py` writes the jump cut as trims of the raw take (so every cut can be re-opened),
