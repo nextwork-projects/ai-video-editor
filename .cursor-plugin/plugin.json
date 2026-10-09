@@ -3,7 +3,7 @@
   "name": "ai-video-editor",
   "displayName": "AI Video Editor",
   "description": "Measure how a short-form creator edits, then cut and edit your own talking-head video in that style: retakes and pauses out, captions, zooms and cards rendered with Remotion.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": { "name": "NextWork", "url": "https://nextwork.ai" },
   "homepage": "https://github.com/nextwork-projects/ai-video-editor",
   "repository": "https://github.com/nextwork-projects/ai-video-editor",

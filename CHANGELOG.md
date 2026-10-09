@@ -4,6 +4,8 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.2.0 (2026-10-09)
+
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
   question box whether they are one video (in file-name order, or filming order) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
