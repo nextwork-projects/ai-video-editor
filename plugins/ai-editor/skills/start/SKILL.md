@@ -62,12 +62,13 @@ python3 "$P" missing --video     # audience, names: asked for every video
 python3 "$P" missing --style     # normally answered at setup; ask here only if setup was skipped
 ```
 
-Prints the question ids with no saved answer. When any id is printed, read `references/intake.md` (the questions, their calls and options, and the
+Prints the question ids with no saved answer. The style questions are asked once at the end of
+setup. When any id is printed, read `references/intake.md` (the questions, their calls and options, and the
 `set` command for each) and ask only those ids. Save each answer as soon as it comes in.
 
 `audience` and `names` belong to this video (the audience answer also saves `goal`): ask "Same
 audience and names as last time?" on later videos (one question, yes as the first option) instead of
-the full intake. Says they already edit by hand: run taste's "Learn from a past edit".
+the full intake. Everything else is asked once. Edits by hand already: taste's "Learn from a past edit".
 The profile lives in `~/.ai-video-editor/profile.json`; `python3 "$P" show` prints it. On "just edit
 it" or "use the defaults", save nothing and go on: every answer has a default.
 
