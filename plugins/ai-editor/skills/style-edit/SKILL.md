@@ -220,7 +220,7 @@ python3 "$S/export_nle.py" edits/<name> --to fcpxml|premiere|resolve|capcut|edl|
 ```
 
 Writes `edits/<name>/export/`. Moving cards render with alpha first (about 0.7 s a card frame; say
-so). Tell the user which file to open and how: `references/render.md` "Export to another editor". For a 16:9 video, asked or not, also offer YouTube chapters in the question box (`references/render.md` "YouTube chapters").
+so). Tell the user which file to open and how: `references/render.md` "Export to another editor". 16:9: also offer YouTube chapters (`references/render.md` "YouTube chapters").
 
 ## If a script stops
 
