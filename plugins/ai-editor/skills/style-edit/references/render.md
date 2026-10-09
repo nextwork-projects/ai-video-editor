@@ -131,6 +131,9 @@ The server listens on 127.0.0.1 only and its URL carries a random token (`?t=...
 without it, reads and writes alike, gets 403, so another page open in the browser cannot change the
 edit. Open the URL it prints, as printed.
 
+The preview is before the render. After it, the render goes to the review page, where the user
+leaves notes at moments on the timeline: `review.md`.
+
 ## Export to another editor
 
 `export_nle.py` writes the jump cut as trims of the raw take (so every cut can be re-opened),
