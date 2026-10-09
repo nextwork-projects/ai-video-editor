@@ -159,7 +159,9 @@ hand as below.
    `"captions": {"present": false}` in that edit's `style.json`, or the captions stack.
 
 Either way, open every clip's `cut-check.html` and show all the stills sheets together for one
-approval, ask the render question once for all of them, and render. Hand the renders over on one
+approval, ask the render question once for all of them, and render. After approval, run
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/judge_cut.py" score` on each clip's folder (cut
+`references/judge.md`). Hand the renders over on one
 review page, each clip a tab (`start` with clip 1, `alt` for the rest, folder `clips/<name>`; see
 `${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/review.md`), then `serve` and `wait` in the background.
 

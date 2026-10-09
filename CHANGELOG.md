@@ -20,6 +20,17 @@ What changed for every user, newest first.
   `cut.keep_fillers` (retakes.py then proposes no filler cuts) and word rules for retakes. It also
   lists the false cuts: words you kept that the default cut would remove. Test: `learn.py demo`,
   `test_retakes.py`.
+- The read-through before a render is scored, not eyeballed. The new `cut-judge` agent grades the
+  paper edit against `cut/references/judge-rubric.md` (six checks: a mistake left in, a broken join,
+  a good take destroyed, a lost setup, a weak reason, an under-cut) and returns findings as JSON.
+  `judge_cut.py apply` turns them into `spans.json` edits by quote, never by timestamp, and the agent
+  loops until nothing is left to apply (3 rounds at most). A restored line is frozen so rounds cannot
+  argue. Takes over 5 minutes first get parallel readers (`read_cut.py`, one `cut-reader` agent per
+  ~180 s, then one verifier per proposed cut that argues to keep it): they catch a line re-said in
+  new words and a sentence stitched from two takes, which word matching misses. After approval,
+  `judge_cut.py score` records which judge changes the user reverted in
+  `$AI_EDITOR_HOME/judge-eval.jsonl`; below 60% precision over 5+ changes, `apply` only suggests.
+  clip-editor grades each clip the same way. Tests: `judge_cut.py demo`, `read_cut.py demo`.
 - A whole edit no longer waits for the cut's approval to start the visuals. When start runs the cut,
   the new `visual-prep` agent starts in the background as the cut page opens: images, captions,
   beats, visuals.json, captures and the face pass, on the first cut. It plans, renders and uploads
