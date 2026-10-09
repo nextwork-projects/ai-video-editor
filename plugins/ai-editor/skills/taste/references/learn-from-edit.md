@@ -21,7 +21,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" "${CLAUDE_SKILL_DIR}/script
 
 - Both files are transcribed with the cut skill's `transcribe.py` (its default engine: local Whisper
   with no key) into `edits/learn-<raw name>/`. A re-run reuses them. A transcript JSON from
-  `transcribe.py` can stand in for either file.
+  `transcribe.py` can stand in for either file, but then pauses are not measured: they need the audio.
 - `--engine scribe` or `--engine crisper` for verbatim transcripts. Whisper drops many "um"s, so with
   it the filler counts are low and the filler rule is rarely learned. Pauses and retakes still work.
 - `--dry-run` measures and prints without saving anything.
@@ -30,16 +30,23 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" "${CLAUDE_SKILL_DIR}/script
 
 | line | what it is | saved as |
 |---|---|---|
-| pauses | the gap their cut left where the raw take paused 0.3 s or more | `cut.max_pause` (1.5 x their median gap: the cut tightens a pause to two thirds of it) |
-| breaths cut | how many of those pauses they tightened, and how many they left whole | shown only |
+| pauses | the silence their cut left at each join: where the raw take paused 0.3 s or more and they kept both sides, and where they joined two lines after cutting between them | `cut.max_pause` (1.5 x their median: the cut tightens a pause to two thirds of it) |
+| breaths cut | how many of the raw pauses they tightened, and how many they left whole | shown only |
 | retakes | a line said twice: did they keep the last take, the first, both or neither | a word rule, only when it is not "last take wins" |
-| fillers | "um"/"uh" kept or cut; "like", "you know", "i mean" kept or cut | `cut.keep_fillers=true` when they kept two thirds or more of the ums; a word rule for the soft ones |
+| fillers | "um"/"uh" kept or cut; "like", "you know", "i mean" kept or cut | `cut.keep_fillers=true` when they kept two thirds or more of the ums (`retakes.py propose` reads it and leaves fillers out of the candidates; build_timeline does not); a word rule for the soft ones |
 | FALSE CUTS | words their cut kept that our default cut removes | shown, with the time and the words |
 | missed | words their cut removed that our default cut keeps | shown, the five longest runs |
+
+Pauses are measured from the audio of both files, never from word gaps: Whisper stretches word
+ends over the pause, so most gaps read 0 s. Silence is found the way `build_timeline.py` finds it (a
+threshold from each file's own levels, then ffmpeg's silencedetect). The silence between two words is
+looked for from the first word's start to just into the next word.
 
 A setting is saved only from enough evidence: 5 pauses, 2 retakes, 3 fillers. Fewer than that is
 one habit, not a style. Each rule's text carries its counts ("you kept the first 3 of 4 times"), so
 `taste.py report` shows where it came from. A second past edit updates the same rules, never a copy.
+Learning the same value again saves nothing (it shows "already in your taste"), so it never reads as a
+correction or a regression.
 
 ## Tell the user
 

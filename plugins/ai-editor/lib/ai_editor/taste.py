@@ -277,7 +277,8 @@ CALLERS = {"build_timeline.py": lambda k: k == "cut.max_pause", "retakes.py": la
 def load_json(edit_dir=None, count=True):
     """THE HOOK. What plan.py and build_timeline.py read: taste.json, plus the "this video only"
     settings of the edit being worked on (found from the script's arguments when not passed).
-    Counts each setting rule it hands over as applied to that edit."""
+    Counts each setting rule it hands over as applied to that edit, except on a --dry-run (nothing is
+    built, so nothing was applied, and the next correction would wrongly read as a regression)."""
     data = read_json()
     if not rules_path().exists():
         return data
@@ -288,7 +289,7 @@ def load_json(edit_dir=None, count=True):
     for r in mine:
         if r["scope"] != "all":
             data = set_key(data, r["setting"], r["value"])
-    if count:
+    if count and "--dry-run" not in sys.argv[1:]:
         # ponytail: caller found by script name; give load_json a key filter if a third caller appears
         acts = CALLERS.get(Path(sys.argv[0]).name, lambda k: True)
         ids = {r["id"] for r in mine if acts(r["setting"])}
@@ -436,6 +437,9 @@ def demo():
         rs = {x["setting"]: x for x in load_rules() if x.get("setting")}
         assert rs["captions.size_pct"]["applied"] == 1 and rs["captions.size_pct"]["applied_in"] == ["vid-a"]
         assert rs["cut.max_pause"]["applied"] == 0
+        sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed), "--dry-run"]
+        load_json()     # a dry run builds nothing: not applied
+        assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 0}
         sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed)]
         load_json()
         assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 1}
