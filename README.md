@@ -15,6 +15,8 @@ It also makes three other things:
 - **A creator teardown.** Paste a profile; you get what makes their videos work and a style you can
   edit with.
 
+![Six frames from an edit of the sample take: word captions, a captured page and logos timed to the words](docs/screens/after-talking-head.jpg)
+
 <!-- TODO(owner): drop a 10-second before/after demo GIF at docs/demo.gif, then replace this comment with: ![Before and after](docs/demo.gif) -->
 
 Built by [NextWork](https://nextwork.ai). Free and open source (MIT). Works on Mac, Windows and Linux.
