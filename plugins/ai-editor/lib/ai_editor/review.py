@@ -20,6 +20,16 @@ product video). Notes save with the edit, never in the plugin:
                                      none. Each note records it: "taste": rule id | video-only | suggested | one-off
     python3 review.py demo                         self-check on a generated 6 s clip
 
+Each round also gets review/data-<stage><round>.json for the page, built from the edit folder when
+the files are there: the cut's transcript with every cut word and pause struck (decisions.json +
+words.raw.json), the timeline's segments (cut points, or chapters.txt on the edit), and the edit's
+Cards / Zooms / Captions tracks (plan.json). A missing file leaves that part out.
+A note saved while a round is with Claude (after send) is queued for the next round: "queued": true, round
+n+1. `wait` never sees it. `round` makes it an open note of the new round, moved to where the same words
+are said when both rounds have the cut's transcript (else at the same time), with a new frame still.
+Stop merges queued notes into the reopened round.
+`status` exits 3 with STOPPED when the user pressed Stop on the page: stop the round and run `wait`.
+
 `wait` exits when the user presses send or approve, and prints every note of the round: its time,
 the text, the words being said, the card on screen (from plan.json) and the frame still's path.
 While `wait` runs the page says Claude is listening; without it the notes still save, and the next
@@ -92,6 +102,106 @@ def probe(video):
     return len(r) >= 2 and r[1].isdigit() and int(r[1]) > int(r[0])   # ffprobe can print a trailing comma
 
 
+def duration(video):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+                       capture_output=True, text=True).stdout.strip()
+    try:
+        return float(r)
+    except ValueError:
+        return None
+
+
+def kept_s(w, spans):
+    """Seconds of a word inside the kept spans (build_timeline.is_kept's measure)."""
+    return sum(max(0.0, min(w["end"], s["end"]) - max(w["start"], s["start"])) for s in spans)
+
+
+def cut_transcript(folder, dur):
+    """The source transcript laid on the cut: every word, cut ones marked, removed pauses as chips, in lines.
+    None unless decisions.json (kept source spans) and words.raw.json are there and add up to this video."""
+    try:
+        spans = sorted(load(folder / "decisions.json"), key=lambda s: s["start"])
+        words = [w for w in load(folder / "words.raw.json") if w.get("type", "word") == "word"]
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if not spans or not words or dur is None or abs(sum(s["end"] - s["start"] for s in spans) - dur) > 0.5:
+        return None
+    offs, t = [], 0.0
+    for s in spans:
+        offs.append(t)
+        t += s["end"] - s["start"]
+
+    def on_cut(w):   # a kept word's start on the cut's timeline, in the span it plays in (build_timeline.retime)
+        i = max(range(len(spans)), key=lambda k: min(w["end"], spans[k]["end"]) - max(w["start"], spans[k]["start"]))
+        return round(max(w["start"], spans[i]["start"]) - spans[i]["start"] + offs[i], 2)
+
+    lines, line, prev = [], [], 0.0
+    for w in words:
+        gap = {"start": prev, "end": w["start"]}
+        removed = (gap["end"] - gap["start"]) - kept_s(gap, spans)
+        if removed >= 0.3:
+            line.append({"p": round(removed, 1)})
+        kept = kept_s(w, spans) >= min(0.1, (w["end"] - w["start"]) / 2)
+        line.append({"w": w["text"].strip(), "t": on_cut(w) if kept else None})
+        prev = w["end"]
+        if w["text"].strip()[-1:] in ".?!" or len(line) >= 24:
+            lines.append(line)
+            line = []
+    lines += [line] if line else []
+    try:
+        src = float(load(folder / "report.json")["duration"])
+    except (OSError, ValueError, KeyError, TypeError):
+        src = words[-1]["end"]
+    cuts = sum(1 for a, b in zip([{"end": 0.0}] + spans, spans + [{"start": src}]) if b["start"] - a["end"] > 0.05)
+    return {"lines": [{"t": next((x["t"] for x in ln if x.get("t") is not None), None), "tokens": ln} for ln in lines],
+            "cuts": cuts, "source_s": round(src, 1), "points": [round(o, 2) for o in offs[1:]]}
+
+
+def chapters_of(folder):
+    """chapters.txt ("0:00 title" lines, chapters.py) as [[seconds, title], ...]."""
+    try:
+        rows = (folder / "chapters.txt").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for r in rows:
+        m = re.match(r"(?:(\d+):)?(\d+):(\d+)\s+(.+)", r.strip())
+        if m:
+            out.append([int(m[1] or 0) * 3600 + int(m[2]) * 60 + int(m[3]), m[4]])
+    return out
+
+
+def data_of(folder, name):
+    try:
+        return load(folder / "review" / Path(name).name) if name else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def round_data(folder, video, stage, rnd, plan):
+    """review/data-<stage><round>.json: what the page draws beside the video. Every part optional."""
+    dur = duration(video)
+    d = {"duration": dur}
+    tx = cut_transcript(folder, dur)
+    if tx and stage == "cut":
+        d["transcript"] = tx
+    if stage == "edit" and chapters_of(folder):
+        d["chapters"] = chapters_of(folder)
+    elif tx:
+        d["points"] = tx["points"]
+    try:
+        p = load(plan) if plan else None
+    except (OSError, ValueError):
+        p = None
+    if stage == "edit" and isinstance(p, dict):
+        span = lambda xs: [[round(x["start"], 2), round(x["end"], 2)] for x in xs or [] if "start" in x and "end" in x]
+        d["tracks"] = {"cards": span(p.get("cards")), "zooms": span(p.get("zooms")),
+                       "captions": span((p.get("captions") or {}).get("chunks"))}
+    name = f"data-{stage}{rnd}.json"
+    (folder / "review" / name).write_text(json.dumps(d), encoding="utf-8")
+    return name
+
+
 def words_of(transcript):
     """A transcript's words: the plugin's list shape, or {"words": [...]} from other tools."""
     if not transcript or not Path(transcript).exists():
@@ -146,7 +256,9 @@ def log_pct(path):
 def log_round(d):
     """Every round's video is kept, so the page has a tab per round."""
     rs = [r for r in d.setdefault("rounds", []) if (r["stage"], r["round"]) != (d["stage"], d["round"])]
-    d["rounds"] = rs + [{k: d.get(k) for k in ("stage", "round", "video", "note", "label", "alts")}]
+    old = next((r for r in d["rounds"] if (r["stage"], r["round"]) == (d["stage"], d["round"])), {})
+    d["rounds"] = rs + [{**{k: d.get(k) for k in ("stage", "round", "video", "note", "label", "alts", "data")},
+                         "at": old.get("at") or now()}]
 
 
 def alt_of(d, name, rnd=None):
@@ -154,6 +266,25 @@ def alt_of(d, name, rnd=None):
     r = rnd or d
     a = next((a for a in r.get("alts") or [] if a["name"] == name), None)
     return a or {"video": r["video"], "transcript": d.get("transcript")}
+
+
+def editable(d, c):
+    """The page may change or delete a note of the open round, or one queued for the next."""
+    return c.get("queued") or (c["round"] == d["round"] and c["stage"] == d["stage"] and not d.get("sent"))
+
+
+def remap(t, old, new):
+    """A time on the old round's cut moved to where the same word is said on the new one, by the two rounds'
+    cut transcripts (both from words.raw.json, so word n is the same word). None when that cannot be told."""
+    flat = lambda tx: [x for ln in tx["lines"] for x in ln["tokens"] if "w" in x]
+    if not old or not new or len(flat(old)) != len(flat(new)):
+        return None
+    a, b = flat(old), flat(new)
+    i = max((k for k, x in enumerate(a) if x["t"] is not None and x["t"] <= t), default=None)
+    j = next((k for k in range(i, len(b)) if b[k]["t"] is not None), None) if i is not None else None
+    if j is None:
+        return None
+    return round(b[j]["t"] + (t - a[i]["t"] if j == i else 0), 2)
 
 
 def fmt(t):
@@ -248,6 +379,11 @@ def make_handler(folder, token):
                 r = next((r for r in d.get("rounds", []) if f"{r['stage']}-{r['round']}" == q.get("k")), d)
                 p = Path(alt_of(d, q.get("alt", ""), r)["video"])
                 return self.file(p, "video/mp4") if p.exists() else self.send(404, {})
+            if path == "/data":   # the round's transcript, segments and tracks (round_data)
+                d = load(rj)
+                r = next((r for r in d.get("rounds", []) if f"{r['stage']}-{r['round']}" == q.get("k")), None)
+                p = folder / "review" / Path(r.get("data") or "-").name if r else None
+                return self.send(200, p.read_bytes() if p and p.is_file() else {})
             if path.startswith("/frames/"):
                 p = folder / "review" / Path(unquote(path)).name
                 ct = {".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}.get(p.suffix, "image/jpeg")
@@ -267,17 +403,18 @@ def make_handler(folder, token):
             path = urlsplit(self.path).path
             if path == "/comment":
                 return self.comment(body)
+            if path == "/edit":
+                return self.edit(body)
             if path == "/scope":   # a saved note: all versions ("*") or one version (a name, None = main)
                 def sc(d):
                     for c in d["comments"]:
-                        if c["id"] == body.get("id") and c["round"] == d["round"] and not d.get("sent"):
+                        if c["id"] == body.get("id") and editable(d, c):
                             c["alt"] = body.get("alt") or None
                 update(rj, sc)
                 return self.send(200, {})
             if path == "/delete":
                 def rm(d):
-                    d["comments"] = [c for c in d["comments"] if not (
-                        c["id"] == body.get("id") and c["round"] == d["round"] and not d.get("sent"))]
+                    d["comments"] = [c for c in d["comments"] if not (c["id"] == body.get("id") and editable(d, c))]
                 update(rj, rm)
                 return self.send(200, {})
             if path == "/check":   # "got it" on one of Claude's answers
@@ -289,12 +426,26 @@ def make_handler(folder, token):
                 update(rj, ck)
                 return self.send(200, {})
             if path == "/event":
-                if body.get("type") not in ("send", "approve"):
+                if body.get("type") not in ("send", "approve", "stop"):
                     return self.send(400, {})
+                if body["type"] == "stop":   # the round's notes open again; `status` tells Claude to stop
+                    def st(d):
+                        if d.get("sent") and d["events"] and d["events"][-1]["type"] == "send":
+                            d["events"].append({"type": "stop", "stage": d["stage"], "round": d["round"],
+                                                "at": now(), "handled": True})
+                            d["sent"], d["stopped"] = False, now()
+                            for c in d["comments"]:   # notes queued meanwhile join the reopened round
+                                if c.pop("queued", None):
+                                    c["round"] = d["round"]
+                            for x in d.get("activity", []):
+                                x["done"] = True
+                    update(rj, st)
+                    return self.send(200, {})
                 def ev(d):
                     d["events"].append({"type": body["type"], "stage": d["stage"], "round": d["round"],
                                         "at": now(), "handled": False})
                     d["sent"] = True
+                    d.pop("stopped", None)
                 update(rj, ev)
                 return self.send(200, {})
             self.send(404, {})
@@ -310,35 +461,100 @@ def make_handler(folder, token):
             except (KeyError, TypeError, ValueError):
                 return self.send(400, {"error": "no time"})
             d = load(rj)
-            if d.get("sent"):
-                return self.send(409, {"error": "this round is with Claude"})
+            last = d["events"][-1]["type"] if d["events"] else None
+            if d.get("sent") and last != "send":   # approved: nothing comes after it on this stage
+                return self.send(409, {"error": "this round is approved"})
+            queued = bool(d.get("sent"))   # with Claude: the note waits for the next round
             alt = body.get("alt") or None
             src = alt_of(d, alt if alt != "*" else None)
             cid = max([c["id"] for c in d["comments"]] + [0]) + 1
             frame = f"r{d['stage']}{d['round']}-c{cid}.jpg"
             grab(src["video"], t, folder / "review" / frame)
-            images = []   # pasted or dropped pictures: only these types, under 15 MB each, at most 6
-            for i, im in enumerate(imgs[:6]):
-                m = re.match(r"data:image/(png|jpeg|gif|webp);base64,(.+)", im if isinstance(im, str) else "", re.S)
-                if not m:
-                    continue
-                try:
-                    raw = base64.b64decode(m[2])
-                except ValueError:
-                    continue
-                if len(raw) > MAX_IMAGE:
-                    continue
-                name = f"r{d['stage']}{d['round']}-c{cid}-img{i + 1}.{'jpg' if m[1] == 'jpeg' else m[1]}"
-                (folder / "review" / name).write_bytes(raw)
-                images.append(name)
-            c = {"id": cid, "round": d["round"], "stage": d["stage"], "t": round(t, 2), "alt": alt,
+            images = save_images(folder, imgs, f"r{d['stage']}{d['round']}-c{cid}")
+            c = {"id": cid, "round": d["round"] + queued, "stage": d["stage"], "t": round(t, 2), "alt": alt,
                  "t_end": round(te, 2) if te is not None else None, "text": text,
                  "words": words_at(src.get("transcript"), t, te if te is not None else t),
                  "card": card_at(d.get("plan"), t) if d["stage"] == "edit" else None,
                  "frame": frame, "images": images, "status": "open", "reply": None, "new_t": None, "at": now()}
+            if queued:
+                c["queued"] = True
             update(rj, lambda d: d["comments"].append(c))
             return self.send(200, c)
+
+        def edit(self, body):
+            """A note changed in place: its text, its time (moved to the playhead: new frame still and words),
+            its version scope, its images (kept names plus new data urls). Same id; refused once Claude has it."""
+            d = load(rj)
+            c = next((x for x in d["comments"] if x["id"] == body.get("id")), None)
+            if not c:
+                return self.send(404, {"error": "no such note"})
+            if not editable(d, c):
+                return self.send(409, {"error": "this round is with Claude" if d.get("sent") else "this note is from an earlier round"})
+            new = dict(c)
+            if "text" in body:
+                new["text"] = str(body["text"] or "").strip()
+            if "alt" in body:
+                new["alt"] = body["alt"] or None
+            if "images" in body:
+                new["images"] = save_images(folder, body["images"] or [], f"r{c['stage']}{c['round']}-c{c['id']}",
+                                            keep=c.get("images") or [])
+            if not new["text"] and not new["images"]:
+                return self.send(400, {"error": "empty"})
+            src = alt_of(d, new["alt"] if new["alt"] != "*" else None)
+            if "t" in body:
+                try:
+                    t = round(float(body["t"]), 2)
+                except (TypeError, ValueError):
+                    return self.send(400, {"error": "no time"})
+                if c["t_end"] is not None:
+                    new["t_end"] = round(t + c["t_end"] - c["t"], 2)
+                new["t"], new["frame"] = t, f"r{c['stage']}{c['round']}-c{c['id']}-{int(time.time() * 1000) % 10 ** 8}.jpg"
+                grab(src["video"], t, folder / "review" / new["frame"])
+                new["card"] = card_at(d.get("plan"), t) if c["stage"] == "edit" else None
+            if "t" in body or "alt" in body:
+                new["words"] = words_at(src.get("transcript"), new["t"], new["t_end"] if new["t_end"] is not None else new["t"])
+            new["edited"] = now()
+
+            def put(d):   # again under the lock: the round may have gone to Claude meanwhile
+                for i, x in enumerate(d["comments"]):
+                    if x["id"] == new["id"]:
+                        if not editable(d, x):
+                            return False
+                        d["comments"][i] = {**new, "round": x["round"], **({"queued": True} if x.get("queued") else {})}
+                        return True
+                return False
+            if not update(rj, put):
+                return self.send(409, {"error": "this round is with Claude"})
+            return self.send(200, new)
     return H
+
+
+def save_images(folder, imgs, prefix, keep=()):
+    """A note's pictures: names it already has (kept) and pasted or dropped data urls (saved). Only these types,
+    under 15 MB each, at most 6."""
+    out = []
+    for im in imgs:
+        if len(out) == 6 or not isinstance(im, str):
+            continue
+        if im in keep:
+            out.append(im)
+            continue
+        m = re.match(r"data:image/(png|jpeg|gif|webp);base64,(.+)", im, re.S)
+        if not m:
+            continue
+        try:
+            raw = base64.b64decode(m[2])
+        except ValueError:
+            continue
+        if len(raw) > MAX_IMAGE:
+            continue
+        k = 1
+        while any((folder / "review" / f"{prefix}-img{k}.{x}").exists() for x in ("jpg", "png", "gif", "webp")):
+            k += 1
+        name = f"{prefix}-img{k}.{'jpg' if m[1] == 'jpeg' else m[1]}"
+        (folder / "review" / name).write_bytes(raw)
+        out.append(name)
+    return out
 
 
 def running(folder):
@@ -389,7 +605,9 @@ def cmd_start(a, folder):
              video=str(Path(a.video).resolve()), note=a.note or "", sent=False, alts=[],
              transcript=str(Path(a.transcript).resolve()) if a.transcript else None,
              plan=str(Path(a.plan).resolve()) if a.plan else None, vertical=probe(a.video), label=a.name)
+    d.pop("stopped", None)
     d["video"] = keep(folder, a.video, d["stage"], d["round"])
+    d["data"] = round_data(folder, d["video"], d["stage"], d["round"], d["plan"])
     log_round(d)
     save(rj, d)
     print(f"{rj}: {stage_name(d['stage'])}, round {d['round']}")
@@ -409,6 +627,30 @@ def cmd_round(a, folder):
             d["plan"] = str(Path(a.plan).resolve())
         d["note"], d["sent"], d["alts"] = a.note or "", False, []   # versions belong to a round: add them again
         d["label"] = a.name or d.get("label")
+        old = data_of(folder, d.get("data"))
+        d["data"] = round_data(folder, d["video"], d["stage"], d["round"], d.get("plan"))
+        new = data_of(folder, d["data"])
+        for c in d["comments"]:   # notes queued while Claude worked open on this round, where their words are said
+            if c.pop("queued", None):
+                nt = remap(c["t"], old.get("transcript"), new.get("transcript"))
+                if nt is None:
+                    nt = min(c["t"], new.get("duration") or c["t"])
+                    if old.get("duration") and new.get("duration") and abs(old["duration"] - new["duration"]) > 0.05:
+                        c["moved"] = "time"   # the cut changed and no transcript says where: same time, check it
+                elif abs(nt - c["t"]) >= 0.05:
+                    c["moved"] = "words"
+                if c.get("moved"):
+                    c["t_was"] = c["t"]
+                if c["t_end"] is not None:
+                    c["t_end"] = round(c["t_end"] + nt - c["t"], 2)
+                c.update(round=d["round"], stage=d["stage"], t=nt, frame=f"r{d['stage']}{d['round']}-c{c['id']}.jpg")
+                src = alt_of(d, c["alt"] if c["alt"] != "*" else None)
+                if c["alt"] not in (None, "*"):   # versions belong to a round: its version is gone, so the main video
+                    c["alt"], src = None, alt_of(d, None)
+                grab(src["video"], nt, folder / "review" / c["frame"])
+                c["words"] = words_at(src.get("transcript"), nt, c["t_end"] if c["t_end"] is not None else nt)
+                c["card"] = card_at(d.get("plan"), nt) if d["stage"] == "edit" else None
+        d.pop("stopped", None)
         for x in d.get("activity", []):
             x["done"] = True
         log_round(d)
@@ -441,6 +683,12 @@ def cmd_resolve(a, folder):
 
 def cmd_status(a, folder):
     """One step of what Claude is doing for the next round. Each new step closes the one before."""
+    stopped = load(folder / "review.json").get("stopped")
+    if stopped:
+        print(f"STOPPED: the user pressed Stop on the page at {stopped}. Stop this round's work, say so in one "
+              f"line, and run `wait` again: the notes are open for more.")
+        sys.exit(3)
+
     def f(d):
         act = d.setdefault("activity", [])
         for x in act:
@@ -510,7 +758,7 @@ def cmd_wait(folder, poll=1.0):
 
 def learned_round(d):
     """The round `wait` last handed over: the one `learn` acts on."""
-    e = next((e for e in reversed(d["events"]) if e["handled"]), None)
+    e = next((e for e in reversed(d["events"]) if e["handled"] and e["type"] != "stop"), None)
     return (e["stage"], e["round"]) if e else (d["stage"], d["round"])
 
 
@@ -609,22 +857,83 @@ def demo():
     assert c["words"] == "hello world" and c["card"] is None and (folder / "review" / c["frame"]).stat().st_size > 0
     png = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJ"
            "RU5ErkJggg==")
+    # edit in place, same id: the text; an image added then removed; moved to the playhead and back
+    e = post("/edit", {"id": c["id"], "text": "cut the hello, please"})
+    assert e["id"] == c["id"] and e["text"] == "cut the hello, please" and e["edited"] and e["t"] == 1.2, e
+    e = post("/edit", {"id": c["id"], "images": [png]})
+    assert e["images"] == [f"rcut1-c{c['id']}-img1.png"] and e["text"] == "cut the hello, please", e
+    assert post("/edit", {"id": c["id"], "images": []})["images"] == []
+    e = post("/edit", {"id": c["id"], "t": 5.1})
+    assert e["t"] == 5.1 and e["words"] == "later" and e["frame"] != c["frame"] and (folder / "review" / e["frame"]).stat().st_size > 0, e
+    c = post("/edit", {"id": c["id"], "t": 1.2})
+    assert c["words"] == "hello world" and [x["text"] for x in load(folder / "review.json")["comments"]] == ["cut the hello, please"]
+    for bad in ({"id": c["id"], "text": ""}, {"id": 999, "text": "x"}):
+        try:
+            post("/edit", bad)
+            raise AssertionError(f"edit {bad}")
+        except urllib.error.HTTPError as err:
+            assert err.code in (400, 404), err.code
     ci = post("/comment", {"t": 1.5, "text": "", "images": [png, "data:text/html;base64,PGI+"]})
     assert ci["images"] == [f"rcut1-c{ci['id']}-img1.png"]
     assert get("/frames/" + ci["images"][0]).headers["Content-Type"] == "image/png"
     post("/delete", {"id": ci["id"]})
     assert [x["id"] for x in load(folder / "review.json")["comments"]] == [c["id"]]
     assert not json.loads(get("/state").read())["listening"]
+    # the cut's transcript: kept words on the cut's timeline, the cut word struck, the removed pause a chip
+    (folder / "words.raw.json").write_text(json.dumps([
+        {"text": "hello", "start": 0.0, "end": 0.4, "type": "word"}, {"text": "um,", "start": 0.5, "end": 0.8, "type": "word"},
+        {"text": "world.", "start": 2.0, "end": 2.5, "type": "word"}, {"text": "later", "start": 3.0, "end": 9.0, "type": "word"}]), encoding="utf-8")
+    (folder / "decisions.json").write_text(json.dumps([{"start": 0.0, "end": 0.45}, {"start": 1.95, "end": 7.5}]), encoding="utf-8")
+    tx = cut_transcript(folder, 6.0)
+    toks = [x for ln in tx["lines"] for x in ln["tokens"]]
+    assert toks == [{"w": "hello", "t": 0.0}, {"w": "um,", "t": None}, {"p": 1.1}, {"w": "world.", "t": 0.5},
+                    {"w": "later", "t": 1.5}], toks
+    assert [ln["t"] for ln in tx["lines"]] == [0.0, 1.5] and tx["points"] == [0.45] and tx["cuts"] == 2, tx
+    assert cut_transcript(folder, 30.0) is None   # decisions that do not add up to this video: no transcript
+    round_data(folder, vid, "cut", 1, None)
+    assert json.loads(get("/data?k=cut-1").read())["transcript"]["cuts"] == 2
+    assert json.loads(get("/data?k=nope").read()) == {}
+    # stop does nothing until a send; after a send it opens the notes again and `status` tells Claude to stop
+    post("/event", {"type": "stop"})
+    assert not load(folder / "review.json")["sent"]
+    post("/event", {"type": "send"})
+    cq = post("/comment", {"t": 2.0, "text": "queued then stopped"})   # with Claude: queued for the next round
+    assert cq["queued"] and cq["round"] == 2, cq
+    post("/event", {"type": "stop"})
+    d = load(folder / "review.json")
+    assert not d["sent"] and d["stopped"] and d["events"][-1]["type"] == "stop" and d["events"][-1]["handled"], d["events"]
+    q = next(x for x in d["comments"] if x["id"] == cq["id"])
+    assert q["round"] == 1 and "queued" not in q, q   # stop: the queued note joins the reopened round
+    post("/delete", {"id": cq["id"]})
+    d = load(folder / "review.json")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            cmd_status(ns(text="rendering", log=None, done=False), folder)
+        raise AssertionError("status after stop")
+    except SystemExit as e:
+        assert e.code == 3 and "STOPPED" in o.getvalue()
+    d["events"] = []
+    save(folder / "review.json", d)
     # send: wait prints the note and its still; the page says the round is with Claude
     post("/event", {"type": "send"})
     out = waited()
     assert out.startswith("SEND: demo the cut, round 1, 1 note.") and "#1 0:01.2" in out and 'said: "hello world"' in out, out
     assert str(folder / "review" / c["frame"]) in out and not (folder / "review" / ".listening").exists()
-    try:
-        post("/comment", {"t": 2, "text": "too late"})
-        raise AssertionError("a note after send")
-    except urllib.error.HTTPError as e:
-        assert e.code == 409
+    assert "): cut the hello, please" in out, out   # wait hands over the final text
+    try:   # Claude has this round: its notes are read-only
+        post("/edit", {"id": c["id"], "text": "too late"})
+        raise AssertionError("edit after pick-up")
+    except urllib.error.HTTPError as err:
+        assert err.code == 409
+    # a note while Claude works: queued for the next round, deletable, never in what `wait` hands over
+    cx = post("/comment", {"t": 5.2, "text": "delete me"})
+    post("/delete", {"id": cx["id"]})
+    cn = post("/comment", {"t": 1.2, "text": "and the pause"})
+    assert cn["queued"] and cn["round"] == 2 and cn["words"] == "hello world", cn
+    cn = post("/edit", {"id": cn["id"], "text": "and the pause after it"})   # a queued note stays editable, and queued
+    assert next(x for x in load(folder / "review.json")["comments"] if x["id"] == cn["id"])["queued"]
+    assert [x["id"] for x in load(folder / "review.json")["comments"]] == [c["id"], cn["id"]]
+    assert all(e["handled"] for e in load(folder / "review.json")["events"])   # nothing for `wait` to return on
     assert "LEARN:" in out.splitlines()[-2] and f"{folder} learn --scope style|video|everyone" in out, out
     # round 2 on the styled edit: the card under a note comes with it, Claude's answer shows.
     # The cut's note was never learned: round says so, then learn --none marks it one-off
@@ -632,6 +941,14 @@ def demo():
     with contextlib.redirect_stdout(o):
         cmd_round(ns(video=str(vid), stage="edit", transcript=None, plan=str(pl), note=None, name=None), folder)
     assert "notes not learned yet: 1." in o.getvalue(), o.getvalue()
+    # the queued note is an open note of the new round, its words and a new frame still with it
+    n = next(x for x in load(folder / "review.json")["comments"] if x["id"] == cn["id"])
+    assert (n["stage"], n["round"], n["status"], n["words"]) == ("edit", 1, "open", "hello world") and "queued" not in n, n
+    assert n["frame"] == f"redit1-c{cn['id']}.jpg" and (folder / "review" / n["frame"]).stat().st_size > 0, n
+    # after a re-cut, a queued note moves to where its words are said (the word "world" moved 0.5 s later)
+    otx = {"lines": [{"tokens": [{"w": "hello", "t": 0.0}, {"w": "um,", "t": 0.4}, {"w": "world", "t": 0.8}]}]}
+    ntx = {"lines": [{"tokens": [{"w": "hello", "t": 0.0}, {"p": 0.3}, {"w": "um,", "t": None}, {"w": "world", "t": 0.4}]}]}
+    assert remap(1.0, otx, ntx) == 0.6 and remap(0.5, otx, ntx) == 0.4 and remap(1.0, otx, None) is None
     learn = lambda **k: cmd_learn(ns(**{"scope": None, "rule": None, "none": False, **k}), folder)
     with contextlib.redirect_stdout(io.StringIO()):
         learn(none=True)
@@ -641,15 +958,19 @@ def demo():
     assert c2["card"]["trigger_word"] == "later" and c2["stage"] == "edit" and c2["round"] == 1, c2
     s = json.loads(get("/state").read())
     assert s["comments"][0]["status"] == "fixed" and not s["sent"] and [r["stage"] for r in s["rounds"]] == ["cut", "edit"]
+    assert not s.get("stopped") and all(r["at"] for r in s["rounds"])
+    trk = json.loads(get("/data?k=edit-1").read())
+    assert trk["tracks"] == {"cards": [[3.5, 5.5]], "zooms": [], "captions": []} and "transcript" not in trk, trk
     # another video in the round: its own notes, notes on every video, scope switched and back
     cmd_alt(ns(name="wide", video=str(vid), transcript=str(tr)), folder)
     assert get("/video?k=edit-1&alt=wide").status == 200
     c3 = post("/comment", {"t": 5.1, "text": "louder here", "alt": "wide"})
-    assert c3["alt"] == "wide" and c3["words"] == "later"
+    assert c3["alt"] == "wide" and c3["words"] == "later", c3
     c4 = post("/comment", {"t": 1.0, "text": "on all of them", "alt": "*"})
     post("/scope", {"id": c3["id"], "alt": "*"})
     assert next(x for x in load(folder / "review.json")["comments"] if x["id"] == c3["id"])["alt"] == "*"
     post("/scope", {"id": c3["id"], "alt": "wide"})
+    assert post("/edit", {"id": c3["id"], "alt": "*"})["alt"] == "*" and post("/edit", {"id": c3["id"], "alt": "wide"})["alt"] == "wide"
     # live progress from a render log
     lg = tmp / "r.log"
     lg.write_text("Rendered 10/40\nRendered 30/40\n", encoding="utf-8")
@@ -658,9 +979,14 @@ def demo():
     assert st["text"] == "rendering" and st["pct"] == 75 and not st["done"], st
     post("/event", {"type": "approve"})
     out = waited()
-    assert out.startswith("APPROVE: demo the edit, round 1, 3 notes.") and f"also wide: {folder / 'review' / 'v-edit1-wide.mp4'}" in out, out
+    assert out.startswith("APPROVE: demo the edit, round 1, 4 notes.") and f"also wide: {folder / 'review' / 'v-edit1-wide.mp4'}" in out, out
     assert f"#{c4['id']} 0:01.0 (1.0s) [all videos]: on all of them" in out, out
     assert f"#{c3['id']} 0:05.1 (5.1s) [wide] [card 0 image 'later']: louder here" in out, out
+    try:
+        post("/comment", {"t": 2, "text": "after approve"})
+        raise AssertionError("a note after approve")
+    except urllib.error.HTTPError as e:
+        assert e.code == 409
     # learn: the preference notes go to taste (scope asked once a batch), every note records what happened
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from ai_editor import taste
@@ -688,10 +1014,11 @@ def demo():
     js = re.search(r"^function listenText\(S\)\{.*?\n\}", HTML.read_text(encoding="utf-8"), re.M | re.S)
     assert js, "review.html has no listenText()"
     if shutil.which("node"):
-        ev = lambda t, n: {"listening": False, "sent": True, "events": [{"type": t, "stage": "edit", "handled": True}]}
+        ev = lambda t, n: {"listening": False, "sent": True, "round": n, "comments": [],
+                           "events": [{"type": t, "stage": "edit", "handled": True}]}
         o = subprocess.run(["node", "-e", js.group(0) + "for(const s of " + json.dumps([ev("approve", 0), ev("send", 1)])
                             + ")console.log(listenText(s))"], capture_output=True, text=True, check=True).stdout
-        assert o.splitlines() == ["approved", "Claude is working on your notes"], o
+        assert o.splitlines() == ["Approved", "Claude is working on round 2"], o
     srv.shutdown()
     srv.server_close()
     shutil.rmtree(tmp, ignore_errors=True)

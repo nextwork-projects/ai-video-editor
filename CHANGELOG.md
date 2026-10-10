@@ -4,6 +4,24 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The review page is redesigned (direction B): a light stone page with a stage switch and a quiet
+  status line; on the cut, the transcript beside the video with cut words and pauses struck and the
+  line playing now highlighted; notes as bubbles with the frame, time and words, Claude's answers
+  and its work steps under them; a composer whose clock follows the playhead; a timeline split at
+  cut points or chapters with numbered note pins, and Cards / Zooms / Captions tracks on the edit;
+  Compare plays two rounds side by side; Stop while Claude works; a bottom sheet on phones.
+  `review.py` writes `review/data-<stage><round>.json` for it. Test: `review.py demo`.
+- Notes keep working while Claude works on a round: they are queued for the next round and open on
+  it when it lands, moved to where their words are said on the new cut, with a new frame still.
+  `wait` never returns on them; Stop puts them back into the reopened round. The note's time is
+  always the playhead, read at save: scrubbing, a transcript word, a pin or a key moves it, typing
+  or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
+- The review page has a dark mode. It follows the system setting until you pick light or dark with
+  the switch in the header, and remembers the pick in that browser.
+- Review notes can be edited in place while they are unsent or queued for the next round: the text
+  (click it, Enter saves, Esc cancels), the moment (move to playhead: new frame still and words), which
+  versions it is for, and its images. Once Claude has the round they are read-only. Test: `review.py demo`.
+
 ## ai-editor 2.2.0 (2026-10-09)
 
 - Review-page notes now reach your taste. After send or approve, Claude picks the notes that are
