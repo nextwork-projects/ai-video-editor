@@ -4,6 +4,13 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Out of the box, captions are plain white TikTok Sans: weight 600, 4.2% of the frame's long side (was
+  5.5% at 800), case as spoken, no stroke, box, shadow, highlight or pop. It is the default with no
+  creator and a new `plain` captions answer (`profile.py` `PLAIN_CAPTIONS`); a creator's measured
+  captions and your taste still win. Where the footage is too bright, a page gets a soft shadow, then a
+  feathered glow, and a stroke or backing only where it would read under 3.3:1. `check.py` warns on a
+  caption or look font Google Fonts does not have (the render would draw Inter), and a font that fails
+  to load now stops the render with its name. Tests: `profile.py demo`, `plan.py demo`, `check.py demo`.
 - The review page is redesigned (direction B): a light stone page with a stage switch and a quiet
   status line; on the cut, the transcript beside the video with cut words and pauses struck and the
   line playing now highlighted; notes as bubbles with the frame, time and words, Claude's answers

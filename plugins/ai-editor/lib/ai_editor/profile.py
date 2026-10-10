@@ -21,7 +21,7 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "assets_dir": "/path/to/my/screenshots",
    "names": [{"name": "Claude", "domain": "claude.com"}],
    "avoid": {"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"], "notes": ""},
-   "captions": {"on": true, "style": "creator"},     style: creator | bold | karaoke | minimal
+   "captions": {"on": true, "style": "creator"},     style: creator | plain | bold | karaoke | minimal
    "sound": {"sfx": true, "music": false},
    "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
    "cloud_cleanup": true,                              delete uploaded footage from GitHub / S3 after a cloud render
@@ -57,7 +57,14 @@ GENERIC_FONTS = {"inter", "roboto", "poppins", "montserrat", "open sans", "arial
                  "manrope", "dm sans", "plus jakarta sans", "outfit", "space grotesk", "satoshi", "general sans", "sora", "urbanist"}
 # Flat saturated colour grounds read as AI-made: only the user's own brand kit may name one.
 FLAT_GROUND_PRESETS = ("poster-red", "poster-green", "poster-blue")
+# plain: the no-creator default and an answer of its own. White TikTok Sans (SIL OFL, on Google Fonts) at 4.2% of the
+# long side, weight 600, as spoken (no forced case), no stroke, box, shadow, highlight or animation: each page cuts on.
+# plan.py's contrast ladder adds a soft shadow first, and more only where the footage behind a page needs it.
+PLAIN_CAPTIONS = {"style": "plain", "font_match": "TikTok Sans", "size_pct": 4.2, "weight": 600, "case": "as_is",
+                  "color": "#FFFFFF", "highlight_color": "#FFFFFF", "emphasis_color": "#FFFFFF", "stroke": False,
+                  "box": False, "shadow": False, "effect": "none", "animation": "none"}
 CAPTION_STYLES = {
+    "plain": PLAIN_CAPTIONS,
     "bold": {"effect": "pop", "weight": 800, "case": "lower", "words_per_caption": 2},
     "karaoke": {"effect": "karaoke", "weight": 800, "words_per_caption": 4, "max_lines": 2},
     "minimal": {"effect": "reveal", "weight": 600, "case": "lower", "words_per_caption": 3, "stroke": False},
@@ -149,7 +156,7 @@ def creator_look(style):
     if sat and "accent" not in out:
         out["accent"] = sat[0]
     font = ((style.get("captions") or {}).get("font_match") or "").strip()
-    if font and font.lower() not in GENERIC_FONTS and "font" not in out:
+    if font and (style.get("captions") or {}).get("style") != "plain" and font.lower() not in GENERIC_FONTS and "font" not in out:
         out["font"] = font
     return out
 
@@ -217,7 +224,8 @@ def resolve_look(style, prof=None, warn=print):
 # footage decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor
 # was built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
 # creator teardown): scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 zooms a minute; median shot 2.4 / 2.4 / 3.98 s;
-# 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three. The three measured
+# 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three. Captions are the owner's
+# plain look (PLAIN_CAPTIONS), smaller than the measured median; words a page and y stay measured. The three measured
 # punch zooms; the default pushes, because check.py render judges a punch by its one-frame travel.
 # max_hold_s: a sentence longer than this still gets a zoom change (plan.py place_zooms), so nothing holds still
 # past check.py's 6 s.
@@ -226,8 +234,7 @@ DEFAULT_STYLE = {
     "pace": {"median_shot_s": 2.4, "max_pause_s": 0.25},
     "motion": "smooth",
     "zoom": {"per_min": 9.5, "kind": "push", "scale": 1.18, "duration_s": 0.8, "on": "sentence_start", "max_hold_s": 5.0},
-    "captions": {"present": True, "words_per_caption": 3, "y_pct": 66, "size_pct": 5.5, "case": "lower",
-                 "weight": 800, "color": "#FFFFFF", "stroke": False, "box": False, "animation": "pop"},
+    "captions": {"present": True, "words_per_caption": 3, "y_pct": 66, **PLAIN_CAPTIONS},
 }
 
 
@@ -352,6 +359,11 @@ def demo():
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
         assert json.loads(out.read_text(encoding="utf-8"))["handle"] == "default"
+        save({"creators": [], "captions": {"on": True, "style": "creator"}})   # the recommended answer: plain white TikTok Sans
+        cap = write_style(d, out=Path(d) / "style.json")[1]["captions"]
+        assert cap["font_match"] == "TikTok Sans" and cap["size_pct"] < 5.5 and 600 <= cap["weight"] <= 700, cap
+        assert cap["color"] == "#FFFFFF" and not (cap["stroke"] or cap["box"] or cap["shadow"]) and cap["effect"] == "none", cap
+        assert "font" not in creator_look(default_style()), "plain captions keep the cards' own font"
         # the recommended path passes the editor's own smoothness check: a push eased at least 0.8 s (check.py
         # PUSH_MIN_S), never a punch of 0.0 s that the render check reads as a one-frame snap
         assert st["zoom"]["kind"] == "push" and st["zoom"]["duration_s"] >= 0.8, st["zoom"]
@@ -372,6 +384,10 @@ def demo():
               {"captions": {"style": "karaoke"}, "sound": {"sfx": False}})
     assert s["captions"]["size_pct"] == 7 and s["captions"]["effect"] == "karaoke" and s["sfx"] is False, s
     assert s["blend"] == {"captions": "b", "pace": "b", "visuals": "a"} and s["pace"]["median_shot_s"] == 1.2
+    # a creator's measured captions stand unless the user picks plain; plain over a creator keeps its words a page
+    assert blend(styles, [{"handle": "b"}], {})["captions"] == {"size_pct": 7, "font_match": "Inter"}
+    pl = blend(styles, [{"handle": "b"}], {"captions": {"style": "plain"}})["captions"]
+    assert pl["font_match"] == "TikTok Sans" and pl["size_pct"] == 4.2, pl
     assert s["transitions"] == [], s     # the pace creator's transitions come with pace (b only cuts)
     # a teardown older than "transitions": its measured cut kinds give them; with none measured, a note, no guess
     w = []

@@ -1622,8 +1622,14 @@ CONTRAST_TARGET = 4.7
 # quality.py's contrast check sees it: fitted to renders of white captions on a bright (#E6E1D8) and a
 # grey (#9A9A9A) desk, which agree to 0.04, rounded down. The renderer's default soft shadow, the
 # treatment's denser shadow, that plus a 0.1 em stroke, and all of it on a 0.45 backing (Captions.tsx).
-PULL = {"plain": 0.07, "shadow": 0.12, "stroke": 0.45, "backing": 0.7}
+# glow: plain captions' step after the shadow (Captions.tsx), fitted the same way at TikTok Sans 600, 4.2%: 0.29 / 0.31.
+PULL = {"plain": 0.07, "shadow": 0.12, "glow": 0.28, "stroke": 0.45, "backing": 0.7}
 TREATS = ("shadow", "stroke", "backing")
+# Plain captions (profile.py PLAIN_CAPTIONS) take a shadow, then a glow, and keep the glow while it reads at
+# PLAIN_MIN or better (the render check may WARN there, it does not FAIL). Only under that, where the page would
+# actually fail, do they get the stroke and then the backing.
+PLAIN_TREATS = ("shadow", "glow")
+PLAIN_MIN = CONTRAST_MIN + 0.3
 LUM = [((v / 255) / 12.92 if v / 255 <= 0.04045 else ((v / 255 + 0.055) / 1.055) ** 2.4) for v in range(256)]
 
 
@@ -1668,7 +1674,10 @@ def pick_treat(pixels, style):
         got = treat_for(pixels, fill, 0.0, tc)
     if got >= CONTRAST_TARGET:
         return None, hexc, got
-    for t in TREATS:
+    plain = style.get("style") == "plain"
+    for t in PLAIN_TREATS + TREATS[1:] if plain else TREATS:
+        if plain and t == "stroke" and got >= PLAIN_MIN:
+            return "glow", hexc, got
         got = treat_for(pixels, fill, PULL[t], tc)
         if got >= CONTRAST_TARGET:
             break
@@ -1747,7 +1756,12 @@ def treat_captions(plan, edit_dir, meta, floors=None):
     return sorted(done.values())
 
 
-STEPS = (None,) + TREATS
+STEPS = (None, "shadow", "glow", "stroke", "backing")   # every treatment, least visible first
+
+
+def steps_of(cs):
+    """The treatments a page of this caption style steps through: plain captions have the glow, others skip it."""
+    return STEPS if cs.get("style") == "plain" else (None,) + TREATS
 
 
 def contrast_summary(changed, chunks, worst=3):
@@ -1776,9 +1790,14 @@ def contrast_floors(edit_dir, out):
         if ck.exists() else None
     stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
     if low and out.exists() and stamp not in doc["read"]:
-        for c in json.loads(out.read_text(encoding="utf-8"))["captions"]["chunks"]:
-            if any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in low):
-                key, nxt = f"{c['start']:.2f}", STEPS[min(len(STEPS) - 1, STEPS.index(c.get("treat")) + 1)]
+        # a plain page keeps its glow unless the render read it under CONTRAST_MIN (fail_at): a WARN is its look
+        fail = ((json.loads(ck.read_text(encoding="utf-8")).get("render") or {}).get("caption_contrast") or {}).get("fail_at") or []
+        cap = json.loads(out.read_text(encoding="utf-8"))["captions"]
+        order = steps_of(cap.get("style") or {})
+        for c in cap["chunks"]:
+            hit = lambda ts: any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in ts)
+            if hit(low) and not (c.get("treat") == "glow" and not hit(fail)):
+                key, nxt = f"{c['start']:.2f}", order[min(len(order) - 1, order.index(c.get("treat")) + 1)]
                 if STEPS.index(nxt) > STEPS.index(doc["pages"].get(key)):
                     doc["pages"][key] = nxt
         doc["read"].append(stamp)
@@ -2101,6 +2120,18 @@ def demo_contrast():
     assert "5.0:1 'w8'" in got and "'w5'" not in got and "1 from the last render check" in got, got
     assert contrast_summary([], ch) == ""
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
+    # plain captions (the default): a glow where the shadow is not enough, never a stroke while the glow reads at
+    # PLAIN_MIN; under that (a page that would FAIL) the stroke, then the backing
+    plain = {"color": "#FFFFFF", "shadow": False, "style": "plain"}
+    assert pick_treat([(160, 160, 160)] * 9, plain)[0] == "glow" and pick_treat([(160, 160, 160)] * 9, white)[0] == "stroke"
+    assert pick_treat([(126, 126, 126)] * 9, plain)[0] == "shadow"
+    assert pick_treat([(190, 190, 190)] * 9, plain)[0] in ("stroke", "backing")
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "plan.json").write_text(json.dumps({"captions": {"style": plain, "chunks": [
+            {"start": 1.0, "end": 2.0, "treat": "glow"}, {"start": 2.0, "end": 3.0, "treat": "glow"}, {"start": 3.0, "end": 4.0, "treat": "shadow"}]}}), encoding="utf-8")
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5, 2.5, 3.5], "fail_at": [2.5]}}}), encoding="utf-8")
+        assert contrast_floors(d, d / "plan.json") == {"2.00": "stroke", "3.00": "glow"}   # a WARN keeps the glow
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
     assert pick_treat([(20, 20, 20)] * 9, {"color": "#111111"})[:2] == ("backing", "#F5F5F5")     # dark text

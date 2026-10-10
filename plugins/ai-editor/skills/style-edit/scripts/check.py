@@ -589,6 +589,26 @@ def check_audio(edit, words):
     return out, {"noise_db": round(noise, 1), "threshold": how}
 
 
+def google_fonts(remotion=None):
+    """The families the installed @remotion/google-fonts can load (look.tsx loadFamily), or None when it is not installed."""
+    if remotion is None:
+        from edit import REMOTION as remotion
+    idx = Path(remotion) / "node_modules/@remotion/google-fonts/dist/esm/index.mjs"
+    return set(re.findall(r"fontFamily: '([^']+)'", idx.read_text(encoding="utf-8"))) if idx.exists() else None
+
+
+def font_findings(plan, fonts):
+    """A caption or look font Google Fonts does not have: the renderer draws Inter in its place (look.tsx FALLBACK)."""
+    if fonts is None:
+        return []
+    lk, cs = plan.get("look") or {}, (plan.get("captions") or {}).get("style") or {}
+    named = {(cs.get("font_match") or "").strip(): "captions font_match"} if (plan.get("captions") or {}).get("chunks") else {}
+    named.update({(lk.get(k) or "").strip(): f"look {k}" for k in ("font", "font_display", "font_serif") if lk.get(k)})
+    return [finding("WARN", None, f"{where} '{f}' is not on Google Fonts: the render draws Inter in its place",
+                    "name a Google Fonts family (fonts.google.com) in style.json captions.font_match or the brand kit, then plan again")
+            for f, where in named.items() if f and f not in fonts]
+
+
 def report(found, mode):
     order = {"FAIL": 0, "WARN": 1, "LOOK": 2}
     found.sort(key=lambda f: (order[f["level"]], f["t"] if f["t"] is not None else -1))
@@ -619,6 +639,12 @@ def demo():
                             "g = check.stream(sys.argv[2], 'null', 64, 64); next(g); g.close()", str(Path(__file__).parent),
                             str(v)], capture_output=True, text=True)
         assert r.returncode == 0 and "Broken pipe" not in r.stderr and not r.stderr.strip(), r.stderr
+    fp = {"captions": {"style": {"font_match": "TikTok Sans"}, "chunks": [{}]}, "look": {"font": "Proxima Nova"}}
+    got = font_findings(fp, {"TikTok Sans", "Inter"})
+    assert len(got) == 1 and got[0]["what"].startswith("look font 'Proxima Nova'"), got
+    assert len(font_findings(fp, {"Inter"})) == 2 and font_findings(fp, None) == []
+    gf = google_fonts()
+    assert gf is None or {"TikTok Sans", "Inter", "IBM Plex Sans", "Newsreader"} <= gf, "the default fonts load"
     assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
     assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}
@@ -830,11 +856,13 @@ def main():
         found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named,
                            f"{edit}" + (f" --plan {a.plan}" if a.plan != "plan.json" else ""))
         extra = {"static_s": static_s}
+        found += font_findings(plan, google_fonts())
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():
             sys.exit(f"ERROR: {video} missing; render first")
         found, extra["cards"] = check_render(edit, plan, video)
+        found += font_findings(plan, google_fonts())
         import quality   # every frame, the settled cards, the audio, the files: quality.py
         style = json.loads(Path(a.style).read_text(encoding="utf-8")) if a.style else None
         if style_note(a.style, style):
