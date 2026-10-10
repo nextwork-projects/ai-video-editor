@@ -20,6 +20,33 @@ What changed for every user, newest first.
     local file is not there, and keeps several files in the order you gave them. Test: `links.py demo`.
   - The skills define `$PY` and `$VPY` as the run.py path (`python3 "$PY" ...`), so the commands
     work in zsh, the macOS default.
+  - The default style (no creator) pushes its zooms over 0.8 s instead of a 0.0 s punch, so the
+    recommended path passes the editor's own smoothness check. Test: `profile.py demo`.
+  - The render check measures each zoom against the cut behind it, so a handheld camera's own
+    movement no longer reads as a surge (16 of 16 zooms WARNed on the test take; now 0). It never
+    advises the zoom kind already in use. Test: `quality.py demo`.
+  - The render check no longer counts white text in the footage under a caption as a second caption
+    line, and reads a card's first frame against the footage a frame either side, so a card fading
+    in is not called a first-frame flash. Tests: `quality.py demo`.
+  - `route.py` no longer takes capitalised common words ("This", "Can", "So") for names when the
+    transcript has no full stop before them. Test: `route.py demo`.
+  - `plan.py` prints its caption contrast fixes as one line with a count and the three lowest pages,
+    not one line a page. Test: `plan.py demo`.
+  - A laptop render that prints no new frame for 3 min (or 200 frames' time) is stopped and rendered
+    again in 200-frame pieces, then joined. A failed render prints one short message with the log
+    path and the next step instead of a traceback. `render.mjs` prints `Rendered N/M`. Test: `edit.py demo`.
+  - `edit.py estimate` says when its laptop speed comes from another video, as a rough guess.
+  - `chapters.py` writes nothing on a FAIL and removes an old `description.txt` when run without
+    `--intro`. Chapter titles are picked from `captions.txt`. Test: `chapters.py demo`.
+  - The default zoom spacing reads the same in start and style-edit: a move at least every 5 s.
+  - A `matte.py` WARNING names the field that moves the card: the beat's `box`. Test: `matte.py demo`.
+  - `profile.py defaults` saves the style defaults when the user says "use the defaults", so
+    `missing --style` stops listing all ten after setup. Test: `profile.py demo`.
+  - A local file's route action says it is cut where it is, never copied. Test: `links.py demo`.
+  - `retakes.py remap` follows a beat to the same word said again in its sentence instead of
+    dropping it. Test: `test_retakes.py`.
+  - `plan.py` uses the source's real frame rate (29.97 stays 29.97), so the plan has the cut's 1996
+    frames, not 1997. Test: `plan.py demo`.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
   question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
