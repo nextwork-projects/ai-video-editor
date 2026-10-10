@@ -257,7 +257,16 @@ def fit_labels(toks, lvl, noise_db):
             continue
         est = plausible_s(w["text"])
         nxt = next((t["start"] for t in toks[i + 1:] if t.get("type") in ("word", "audio_event")), w["end"] + est)
-        a = audible_start(lvl, noise_db, w["start"], min(nxt, w["end"] + est)) if lvl else None
+        s = w["start"]
+        k = int(s / RMS_WIN_S)
+        if lvl and 0 < k < len(lvl) and lvl[k - 1] > noise_db:
+            # the previous word is still sounding at the label start: its tail is not this word.
+            # Search from the silence after that tail; with no silence inside the label, keep the label start.
+            while k < len(lvl) and lvl[k] > noise_db and k * RMS_WIN_S < w["end"]:
+                k += 1
+            if k * RMS_WIN_S < w["end"]:
+                s = k * RMS_WIN_S
+        a = audible_start(lvl, noise_db, s, min(nxt, w["end"] + est)) if lvl else None
         if a is None:
             out[i] = (w["start"], round(w["start"] + est, 3))
             continue
@@ -500,7 +509,8 @@ def kept_frames(cuts, fps, dur, total=None):
         if b <= a:
             continue
         # A sliver between two cuts is the tail of a flub the transcriber mislabelled, not a word.
-        if a > cursor and (not kept and cursor == 0 or a - cursor >= MIN_KEPT_S * fps):
+        # At the head of the take it is a one-frame flash before the first jump.
+        if a - cursor >= MIN_KEPT_S * fps:
             kept.append([cursor, a])
         cursor = b
     if cursor < total:

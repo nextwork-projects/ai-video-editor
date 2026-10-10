@@ -17,6 +17,8 @@ quote to transcript words and proves the new span resolves to those same words. 
 Each prompt prints with the path its agent writes its JSON to (the same name, .json).
 Stdlib only. Exit codes: 0 ok, 1 error, 2 usage
 """
+import contextlib
+import io
 import json
 import re
 import sys
@@ -111,7 +113,8 @@ def kept_words(d):
 
 
 def paper_lines(toks, words, kept):
-    """One line per kept sentence: {"raw", "text"}; cut words struck through where they were cut."""
+    """One line per kept sentence: {"raw", "text", "t"}; cut words struck through where they were cut.
+    A cut block between sentences is its own line with raw None; t is when the next kept word starts."""
     pos = {i: n for n, i in enumerate(words)}
 
     def strike(a, b, g):
@@ -126,17 +129,17 @@ def paper_lines(toks, words, kept):
         cut = prev is not None and (pos[i] > pos[prev] + 1 or g >= STOP_S)
         if cur is None:
             if cut:
-                L.append({"raw": None, "text": "        " + strike(pos[prev] + 1, pos[i], g)})
+                L.append({"raw": None, "t": toks[i]["start"], "text": "        " + strike(pos[prev] + 1, pos[i], g)})
             cur = {"raw": toks[i]["start"], "words": []}
         elif cut:
             cur["words"].append(strike(pos[prev] + 1, pos[i], g))
         cur["words"].append(toks[i]["text"].strip())
         if END.search(toks[i]["text"].strip()):
-            L.append({"raw": cur["raw"], "text": " ".join(cur["words"])})
+            L.append({"raw": cur["raw"], "t": cur["raw"], "text": " ".join(cur["words"])})
             cur = None
         prev = i
     if cur:
-        L.append({"raw": cur["raw"], "text": " ".join(cur["words"])})
+        L.append({"raw": cur["raw"], "t": cur["raw"], "text": " ".join(cur["words"])})
     return L
 
 
@@ -154,6 +157,7 @@ def find(quote, near, toks, kept, after=0):
 
 
 def chunks(d, size=180.0, overlap=30.0):
+    """(prompts written, chunks skipped as [(k, start, end)]: no kept line, nothing to read)."""
     toks, words, kept = kept_words(d)
     L = paper_lines(toks, words, kept)
     r = Path(d) / "read"
@@ -162,15 +166,19 @@ def chunks(d, size=180.0, overlap=30.0):
     end = toks[kept[-1]]["end"] if kept else 0.0
     step = size - overlap
     n = max(1, int(-(-(end - overlap) // step)))
-    out = []
+    out, skipped = [], []
     for k in range(n):
         s = k * step
-        part = [l for l in L if l["raw"] is not None and s <= l["raw"] < s + size]
+        part = [l for l in L if s <= l["t"] < s + size]
         p = r / f"reader-{k}.md"
+        if not any(l["raw"] is not None for l in part):
+            p.unlink(missing_ok=True)
+            skipped.append((k, s, min(end, s + size)))
+            continue
         p.write_text(READER.format(how=HOW_TO_READ, span=f"{s:.0f}-{min(end, s + size):.0f} s of {end:.0f} s",
                                    text=fmt(part)))
         out.append(p)
-    return out
+    return out, skipped
 
 
 def proposals(d):
@@ -223,11 +231,14 @@ def verify(d, context=45.0):
     r = Path(d) / "read"
     for old in r.glob("verify-*"):
         old.unlink()
+    gone = [p.with_suffix(".json").name for p in sorted(r.glob("reader-*.md")) if not p.with_suffix(".json").exists()]
+    if gone:
+        print(f"  missing {', '.join(gone)}: those readers wrote nothing, their chunks are unread")
     F = proposals(d)
     (r / "proposed.json").write_text(json.dumps(F, indent=1))
     out = []
     for n, f in enumerate(x for x in F if x["status"] == "proposed"):
-        ctx = [l for l in L if l["raw"] is None or f["raw"] - context <= l["raw"] <= f["raw"] + context]
+        ctx = [l for l in L if f["raw"] - context <= l["t"] <= f["raw"] + context]
         mark = max((l for l in ctx if l["raw"] is not None and l["raw"] <= f["raw"] + 0.01),
                    key=lambda l: l["raw"], default=None)
         keeps = f'The copy the reader says stays: "{f["keeps"]}"' if f.get("keeps") else ""
@@ -288,8 +299,11 @@ def demo():
         d = Path(tmp)
         (d / "words.raw.json").write_text(json.dumps(toks))
         (d / "spans.json").write_text(json.dumps([{"text": "then pick a model", "kind": "retake"}]))
-        ps = chunks(d)
-        assert len(ps) == 3, ps                           # 400 s: 150 s steps -> three readers
+        ps, skipped = chunks(d)
+        assert [p.name for p in ps] == ["reader-0.md", "reader-2.md"], ps   # 400 s, 150 s steps: three chunks,
+        assert [k for k, _, _ in skipped] == [1]                              # the all-cut middle one unread
+        assert "~~(13 s) Then pick a model.~~" in ps[0].read_text()            # a cut line reaches its reader
+        assert "~~(380 s silence)~~" in ps[1].read_text() and "380 s" not in ps[0].read_text()
         paper = (d / "read" / "paper-cut.md").read_text()
         assert "~~(13 s) Then pick a model.~~" in paper, paper
         assert "[raw 0.0] Open the settings page first." in paper
@@ -300,8 +314,12 @@ def demo():
             {"kind": "lost_word", "quote": "Then save it.", "raw": 19, "why": "needs 'and'"}]}))
         # reader 1 overlaps and finds the same line again: a dup, not a second span
         (d / "read" / "reader-1.json").write_text('```json\n{"findings": [{"kind": "repeat", "quote": "the settings page", "raw": 0.4}]}\n```')
-        vs = verify(d)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            vs = verify(d)
+        assert "missing reader-2.json" in out.getvalue(), out.getvalue()
         assert [p.name for p in vs] == ["verify-0.md"], vs
+        assert "380 s" not in vs[0].read_text()          # context: the lines around the finding only
         assert ">> [raw 0.0] Open the settings page first." in vs[0].read_text()
         st = {f.get("quote"): f["status"] for f in json.loads((d / "read" / "proposed.json").read_text())}
         assert st["words nobody said"] == "quote not in kept text" and st["the settings page"] == "dup"
@@ -322,6 +340,9 @@ def main():
     a = sys.argv[1:]
     if a == ["demo"]:
         return demo()
+    if "-h" in a or "--help" in a:
+        print(__doc__)
+        return 0
     if len(a) < 2 or a[0] not in ("chunks", "verify", "merge"):
         sys.exit(__doc__)
     d = Path(a[1])
@@ -329,7 +350,9 @@ def main():
         sys.exit(f"ERROR: no such file: {d / 'words.raw.json'}")
     opt = lambda k, v: float(a[a.index(k) + 1]) if k in a else v
     if a[0] == "chunks":
-        ps = chunks(d, opt("--chunk", 180.0), opt("--overlap", 30.0))
+        ps, skipped = chunks(d, opt("--chunk", 180.0), opt("--overlap", 30.0))
+        for k, s, e in skipped:
+            print(f"  chunk {k} ({s:.0f}-{e:.0f} s) is all cut, no kept line: no prompt")
         print(f"{len(ps)} reader prompt(s): launch one cut-reader per prompt, all in one message")
     elif a[0] == "verify":
         ps = verify(d, opt("--context", 45.0))

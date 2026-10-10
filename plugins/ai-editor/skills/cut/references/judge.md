@@ -17,13 +17,16 @@ python3 "$R" chunks edits/<name>        # one reader prompt per ~180 s, 30 s ove
 ```
 
 Launch one `cut-reader` agent (`ai-editor:cut-reader`) per printed prompt, **all in one message**.
-Give each `PROMPT` and `OUT` exactly as printed. Then:
+Give each `PROMPT` and `OUT` exactly as printed. A chunk that is all cut gets no prompt: `chunks`
+says which it skipped, and the prompt numbers have gaps. Then:
 
 ```bash
 python3 "$R" verify edits/<name>        # one verifier prompt per proposed cut
 ```
 
-Launch one `cut-reader` per verifier prompt, again all in one message. Each argues to keep its line.
+`verify` names any `reader-N.json` that is missing: that chunk was not read. Launch its reader
+again first. Launch one `cut-reader` per verifier prompt, again all in one message. Each argues to
+keep its line.
 Then `python3 "$R" merge edits/<name>`: confirmed cuts go into `spans.json` (confidence medium).
 `FIX BY HAND` lines (a stitch, a word lost inside a cut) need a restore: narrow or delete that span
 yourself. Under 5 minutes, skip this section: the judge alone covers a short take.

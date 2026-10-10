@@ -32,6 +32,23 @@ What changed for every user, newest first.
     local file is not there, and keeps several files in the order you gave them. Test: `links.py demo`.
   - The skills define `$PY` and `$VPY` as the run.py path (`python3 "$PY" ...`), so the commands
     work in zsh, the macOS default.
+  - `judge_cut.py apply` dropped every finding that quoted a join (`he ended up <<7>> he ended up`)
+    as "quote is not in the paper edit": the paper lost its `<<n>>` markers before matching and the
+    quote kept them. Both now drop them. The judge's paper edit labels its lengths as words only, and
+    adds the last build's real lengths and its CLIPPED line from `paper-edit.md`. Test: `judge_cut.py demo`.
+  - A stretched word label that starts on the previous word's tail is fitted after the silence
+    inside it. The real take's "if" (labelled 192.75-193.41 s, said at 193.30 s) was fitted onto
+    "you", fell in a pause cut and showed as CLIPPED at any `--pad`. Test: `test_build_timeline.py`.
+  - `verify_cut.py` no longer prints a SURVIVED span that would cut words of a kept line. It says a
+    word label is off instead. On the real take it had offered a span that cut "better. if you".
+    Test: `verify_cut.py demo`.
+  - A kept span under 0.2 s at the head of the take is dropped. `decisions.json` had started with a
+    one-frame flash (0.0-0.033 s) and a jump to 0.43 s. Test: `test_build_timeline.py`.
+  - `read_cut.py chunks` writes no prompt for a chunk with no kept line (a long cut block) and says
+    which it skipped. Each reader now sees the cut blocks between sentences in its chunk; before,
+    only lines with a time reached a reader. A verifier sees only the lines around its finding, in
+    order, not every cut block in the take. `verify` names any reader-N.json that is missing, and
+    `-h` prints the help. Test: `read_cut.py demo`.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
   question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
