@@ -70,21 +70,21 @@ def path():
 
 def load():
     p = path()
-    return {**DEFAULTS, **(json.loads(p.read_text()) if p.exists() else {})}
+    return {**DEFAULTS, **(json.loads(p.read_text(encoding="utf-8")) if p.exists() else {})}
 
 
 def save(prof):
     HOME.mkdir(parents=True, exist_ok=True)
     raw = dict(prof)   # only what was answered: missing() reads the file
     raw["aspect"] = ASPECT.get(raw.get("platform"), raw.get("aspect", "9:16"))
-    path().write_text(json.dumps(raw, indent=1))
+    path().write_text(json.dumps(raw, indent=1), encoding="utf-8")
     return path()
 
 
 def save_defaults():
     """Every unanswered style question saved as its default: the answer "use the defaults" (or a style step
     finished on the recommended options) is an answer, so start never asks it again. Video questions stay."""
-    have = json.loads(path().read_text()) if path().exists() else {}
+    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
     new = [q for q in STYLE_QUESTIONS if q not in have]
     save({**have, **{q: DEFAULTS[q] for q in new}})
     return new
@@ -92,7 +92,7 @@ def save_defaults():
 
 def missing(group=QUESTIONS):
     """The intake questions in `group` with no saved answer yet."""
-    have = json.loads(path().read_text()) if path().exists() else {}
+    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
     return [q for q in group if q not in have]
 
 
@@ -301,7 +301,7 @@ def write_style(edit_dir, root=Path("."), out=None):
     for c in prof.get("creators") or []:
         p = Path(root) / "creator-teardowns" / c["handle"] / "style.json"
         if p.exists():
-            styles[c["handle"]] = json.loads(p.read_text())
+            styles[c["handle"]] = json.loads(p.read_text(encoding="utf-8"))
         else:
             print(f"warning: no {p}; run creator-teardown on @{c['handle']} first", file=sys.stderr)
     if not prof.get("creators"):
@@ -311,11 +311,11 @@ def write_style(edit_dir, root=Path("."), out=None):
     else:
         style = blend(styles, prof["creators"], prof)
     clip = Path(edit_dir) / "clip.json"
-    if clip.exists() and json.loads(clip.read_text()).get("audio_only"):   # a podcast clip: the words are the picture
+    if clip.exists() and json.loads(clip.read_text(encoding="utf-8")).get("audio_only"):   # a podcast clip: the words are the picture
         style["captions"] = {**style.get("captions", {}), "present": True}
     out = Path(out or Path(edit_dir) / "style.json")
     out.parent.mkdir(parents=True, exist_ok=True)   # start writes the style before cut makes edits/<name>/
-    out.write_text(json.dumps(style, indent=1))
+    out.write_text(json.dumps(style, indent=1), encoding="utf-8")
     return out, style
 
 
@@ -351,13 +351,13 @@ def demo():
         save({"creators": [], "captions": {"style": "karaoke"}})
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
-        assert json.loads(out.read_text())["handle"] == "default"
+        assert json.loads(out.read_text(encoding="utf-8"))["handle"] == "default"
         # the recommended path passes the editor's own smoothness check: a push eased at least 0.8 s (check.py
         # PUSH_MIN_S), never a punch of 0.0 s that the render check reads as a one-frame snap
         assert st["zoom"]["kind"] == "push" and st["zoom"]["duration_s"] >= 0.8, st["zoom"]
         # captions off in the profile, but an audio-only podcast clip keeps them: its words are the picture
         save({"captions": {"on": False}})
-        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}))
+        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}), encoding="utf-8")
         assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is True
         (Path(d) / "clip.json").unlink()
         assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is False
@@ -399,12 +399,12 @@ def demo():
         r = subprocess.run([sys.executable, __file__, "set", "platform=youtube", "sound.music=false",
                             'names=["Jev"]', "brand.url=https://x.io/?a=b"], capture_output=True, text=True, env=env)
         assert r.returncode == 0 and r.stdout.count("\n") == 1, (r.stdout, r.stderr)
-        got = json.loads((Path(d) / "profile.json").read_text())
+        got = json.loads((Path(d) / "profile.json").read_text(encoding="utf-8"))
         assert got["platform"] == "youtube" and got["sound"] == {"music": False} and got["names"] == ["Jev"], got
         assert got["brand"]["url"] == "https://x.io/?a=b", got
         r = subprocess.run([sys.executable, __file__, "set", "audience", "builders"], capture_output=True,
                            text=True, env=env)
-        assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text())["audience"] == "builders"
+        assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text(encoding="utf-8"))["audience"] == "builders"
         # the two forms mixed: the message names the argument that is not key=value
         r = subprocess.run([sys.executable, __file__, "set", "goal", "follow", "platform=youtube"], capture_output=True,
                            text=True, env=env)
@@ -430,7 +430,7 @@ def main():
         if bad:
             sys.exit(f"profile.py set: {bad[0]!r} is not key=value. Write every answer as key=value "
                      "(the `set key value` form takes one answer alone)")
-        prof = set_pairs(json.loads(path().read_text()) if path().exists() else {}, pairs)
+        prof = set_pairs(json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}, pairs)
         print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)

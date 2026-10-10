@@ -233,7 +233,7 @@ def main():
     if len(a) == 2 and a[0] == "beats":
         edit = Path(a[1])
         src = edit / "captions.json" if (edit / "captions.json").exists() else edit / "words.json"
-        words = [w for w in json.loads(src.read_text()) if w.get("type", "word") == "word" and w["text"].strip()]
+        words = [w for w in json.loads(src.read_text(encoding="utf-8")) if w.get("type", "word") == "word" and w["text"].strip()]
         from ai_editor import profile
         prof = profile.load()
         beats = sentences(words)
@@ -246,16 +246,16 @@ def main():
         for b in beats:
             b["names"] = named(b["text"], names + [{"name": w} for w in extra])
         st = edit / "style.json"
-        pref = prefer(json.loads(st.read_text())) if st.exists() else {}
+        pref = prefer(json.loads(st.read_text(encoding="utf-8"))) if st.exists() else {}
         if pref:
             print("the creator's mix: " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(pref.items(), key=lambda kv: -kv[1])))
         route(beats, edit, goal=prof.get("goal", ""), pref=pref)
-        (edit / "beats.json").write_text(json.dumps(beats, indent=1))
+        (edit / "beats.json").write_text(json.dumps(beats, indent=1), encoding="utf-8")
         for b in beats:
             print(f"{b['start']:6.2f}  {str(b.get('pick')):20}  {b['text']}" + (f"   [{', '.join(b['names'])}]" if b["names"] else ""))
         print(f"-> {edit / 'beats.json'}")
     elif len(a) == 4 and a[0] == "highlight":
-        blocks = json.loads((Path(a[1]) / a[2]).read_text() if not Path(a[2]).exists() else Path(a[2]).read_text())
+        blocks = json.loads((Path(a[1]) / a[2]).read_text(encoding="utf-8") if not Path(a[2]).exists() else Path(a[2]).read_text(encoding="utf-8"))
         best = pick_highlight(blocks, a[3], Path(a[1]))
         if best is None:
             print("no TypeSafe key: pick the evidence line from these blocks:\n" + "\n".join(f"- {b}" for b in blocks))

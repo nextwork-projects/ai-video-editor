@@ -40,7 +40,7 @@ def get(name):
     if os.environ.get(var, "").strip():
         return os.environ[var].strip(), f"the {var} variable"
     try:
-        lines = p.read_text().splitlines()
+        lines = p.read_text(encoding="utf-8").splitlines()
     except OSError:
         return None, None
     for line in lines:
@@ -60,7 +60,7 @@ def write_private(path, text):
         os.chmod(path, 0o600)
     except OSError:
         pass
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     return path
 
@@ -69,7 +69,7 @@ def save(name, key, path=None):
     """Write VAR=key, keeping every other line. Readable by this user only."""
     var, path = VARS[name], Path(path or key_file())
     path.parent.mkdir(parents=True, exist_ok=True)
-    keep = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
+    keep = [ln for ln in (path.read_text(encoding="utf-8").splitlines() if path.exists() else [])
             if ln.strip() and not ln.startswith(f"{var}=")]
     return write_private(path, "\n".join(keep + [f"{var}={key}"]) + "\n")
 
@@ -117,7 +117,7 @@ if __name__ == "__main__":   # self-check: saving one key keeps the others
         save("elevenlabs", "a" * 24, f)
         save("typesafe", "b" * 24, f)
         save("typesafe", "c" * 24, f)
-        assert f.read_text() == f"ELEVENLABS_API_KEY={'a' * 24}\nTYPESAFE_API_KEY={'c' * 24}\n"
+        assert f.read_text(encoding="utf-8") == f"ELEVENLABS_API_KEY={'a' * 24}\nTYPESAFE_API_KEY={'c' * 24}\n"
         assert os.name == "nt" or f.stat().st_mode & 0o777 == 0o600
         # AI_EDITOR_HOME isolates: its .env is read first, the shared file never
         os.environ["AI_EDITOR_HOME"] = d
@@ -138,7 +138,7 @@ if __name__ == "__main__":   # self-check: saving one key keeps the others
         cwd = os.getcwd()
         work = Path(d) / "another-project"
         work.mkdir()
-        (work / ".env").write_text(f"TYPESAFE_API_KEY={'e' * 24}\n")
+        (work / ".env").write_text(f"TYPESAFE_API_KEY={'e' * 24}\n", encoding="utf-8")
         os.chdir(work)   # the folder Claude Code started in: its .env is another project's, never read
         try:
             assert get("typesafe") == (None, None), "read a key from the working folder's .env"

@@ -118,7 +118,7 @@ def join(out, clips):
         total += d["video"]
         parts.append(part)
     lst = os.path.join(tmp, "list.txt")
-    with open(lst, "w") as f:
+    with open(lst, "w", encoding="utf-8") as f:
         # concat quoting: a ' in the temp path (a user name like O'Brien) is closed, escaped, reopened
         f.writelines("file '" + p.replace("'", "'\\''") + "'\n" for p in parts)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -127,7 +127,7 @@ def join(out, clips):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst,
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out], check=True)
     total = check(out, total, TOL + 0.02 * len(parts))["video"]   # each join can round by up to a frame
-    with open(out + ".parts.json", "w") as f:
+    with open(out + ".parts.json", "w", encoding="utf-8") as f:
         json.dump(placed, f, indent=1)
     shutil.rmtree(tmp)   # the parts of a 4K take run to gigabytes
     print(f"joined {len(clips)} clips into {out}: {total:.2f}s, {w}x{h} at {float(fps):.3f} fps")
@@ -156,7 +156,7 @@ def demo():
     d = durs(out)
     assert abs(d["video"] - d["audio"]) <= TOL, d
     assert abs(d.get("audio_start", 0) - d.get("video_start", 0)) <= 0.5 / 25, d    # in sync from the start
-    pj = json.load(open(out + ".parts.json"))
+    pj = json.load(open(out + ".parts.json", encoding="utf-8"))
     assert [p["clip"] for p in pj] == [os.path.realpath(x) for x in (a, b, c)] and all("audio" in p for p in pj), pj
     assert abs(d["video"] - 6.0) <= 0.15, d
     assert [p["start"] for p in placed][:2] == [0.0, placed[0]["dur"]], placed

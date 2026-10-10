@@ -202,12 +202,12 @@ def transcript(src, out, engine):
     skill's transcribe.py, once, and its silence measured."""
     src = Path(src)
     if src.suffix.lower() == ".json":
-        return words_of(json.loads(src.read_text())), None
+        return words_of(json.loads(src.read_text(encoding="utf-8"))), None
     if not out.exists():
         cmd = [sys.executable, str(CUT / "transcribe.py"), str(src), str(out)] + (["--engine", engine] if engine else [])
         if subprocess.run(cmd).returncode != 0:
             sys.exit(f"ERROR: could not transcribe {src}")
-    return words_of(json.loads(out.read_text())), silences(src)
+    return words_of(json.loads(out.read_text(encoding="utf-8"))), silences(src)
 
 
 def report(m, saved):
@@ -320,17 +320,17 @@ def demo():
         learn(raw, pub, sil_raw=sr, sil_pub=sp15)
         rs = taste.load_rules()
         assert len(rs[0]["corrections"]) == 2 and taste.read_json()["cut"]["max_pause"] == 0.22, rs
-        assert "Pauses left" in taste.md_path().read_text()
+        assert "Pauses left" in taste.md_path().read_text(encoding="utf-8")
         _, saved = learn(raw, pub, dry=True, sil_raw=sr, sil_pub=sp)
         assert saved and "dry run" in saved[0]
         # the CLI end to end on transcript JSONs, dry run: nothing written
-        (Path(d) / "raw.json").write_text(json.dumps(raw))
-        (Path(d) / "pub.json").write_text(json.dumps({"words": pub}))
+        (Path(d) / "raw.json").write_text(json.dumps(raw), encoding="utf-8")
+        (Path(d) / "pub.json").write_text(json.dumps({"words": pub}), encoding="utf-8")
         r = subprocess.run([sys.executable, __file__, str(Path(d) / "raw.json"), str(Path(d) / "pub.json"),
                             "--out", str(Path(d) / "o"), "--dry-run"], capture_output=True, text=True,
                            env=dict(os.environ, AI_EDITOR_HOME=str(Path(d) / "h")))
         assert r.returncode == 0 and "FALSE CUTS" in r.stdout and not (Path(d) / "h").exists(), (r.stdout, r.stderr)
-        assert json.loads((Path(d) / "o" / "learn.json").read_text())["retakes"]["first"] == 1
+        assert json.loads((Path(d) / "o" / "learn.json").read_text(encoding="utf-8"))["retakes"]["first"] == 1
     print("learn ok")
 
 
@@ -351,7 +351,7 @@ def main():
     if not raw or not pub:
         sys.exit("ERROR: a transcript has no words")
     m, saved = learn(raw, pub, a.dry_run, sil_raw, sil_pub)
-    (out / "learn.json").write_text(json.dumps({**m, "saved": saved}, indent=1))
+    (out / "learn.json").write_text(json.dumps({**m, "saved": saved}, indent=1), encoding="utf-8")
     print(report(m, saved))
     print(out / "learn.json")
 

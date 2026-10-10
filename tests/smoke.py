@@ -63,11 +63,11 @@ def steps(work):
         "--engine", "whisper", cwd=work)
     words = [{"text": t, "start": round(0.3 + i * 0.45, 2), "end": round(0.3 + i * 0.45 + 0.35, 2), "type": "word"}
              for i, t in enumerate("so notion is 10x faster than email now".split())]
-    (edit / "captions.json").write_text(json.dumps(words))
+    (edit / "captions.json").write_text(json.dumps(words), encoding="utf-8")
     style = {"handle": "smoke", "pace": {"max_pause_s": 0.2}, "zoom": {"per_min": 20, "kind": "punch", "scale": 1.15,
              "on": "sentence_start"}, "captions": {"present": True, "words_per_caption": 2, "y_pct": 68, "size_pct": 5,
              "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": True}}
-    (work / "style.json").write_text(json.dumps(style))
+    (work / "style.json").write_text(json.dumps(style), encoding="utf-8")
     (edit / "visuals.json").write_text(json.dumps([
         {"word": "notion", "nth": 1, "kind": "logo", "brand": "notion"},
         {"word": "notion", "nth": 1, "kind": "capture", "url": "https://example.com", "width": 500, "format": "sticker",
@@ -75,7 +75,7 @@ def steps(work):
         # a page's body text reads on a phone only re-set as a sticker (check.py plan FAILs a capture under 28 px x-height)
         {"word": "faster", "nth": 1, "kind": "anim", "type": "flow",
          "props": {"nodes": [{"icon": "mail", "label": "email"}, {"logo": "notion", "label": "notion"}]}},
-    ]))
+    ]), encoding="utf-8")
     run("node", SK / "style-edit/scripts/capture.mjs", edit, cwd=work)
     run(VPY, SK / "style-edit/scripts/face.py", edit, cwd=work)
     run(PY, SK / "style-edit/scripts/sfx.py", "build", edit, cwd=work)
@@ -113,9 +113,9 @@ def contrast(work):
              for i, t in enumerate("this desk is far too bright for white words".split())]
     style = {"handle": "plain", "captions": {"present": True, "words_per_caption": 3, "y_pct": 68, "size_pct": 5,
              "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": False}}
-    (work / "plain.json").write_text(json.dumps(style))
+    (work / "plain.json").write_text(json.dumps(style), encoding="utf-8")
     style["captions"]["shadow"] = False
-    (work / "noshadow.json").write_text(json.dumps(style))
+    (work / "noshadow.json").write_text(json.dumps(style), encoding="utf-8")
     for name, colour, sj in (("bright", "0xE6E1D8", "plain.json"), ("dark", "0x262626", "plain.json"),
                              ("noshadow", "0xE6E1D8", "noshadow.json")):
         ed = work / "edits" / name
@@ -123,9 +123,9 @@ def contrast(work):
         run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=540x960:r=30:d=3", "-f", "lavfi",
             "-i", "sine=f=220:d=3", "-vf", "noise=alls=12:allf=t", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac", ed / "cut.mp4", cwd=work)
-        (ed / "captions.json").write_text(json.dumps(words))
+        (ed / "captions.json").write_text(json.dumps(words), encoding="utf-8")
         run(PY, SK / "style-edit/scripts/plan.py", work / sj, ed / "captions.json", "--no-sfx", cwd=work)
-        treats = {c.get("treat") for c in json.loads((ed / "plan.json").read_text())["captions"]["chunks"]}
+        treats = {c.get("treat") for c in json.loads((ed / "plan.json").read_text(encoding="utf-8"))["captions"]["chunks"]}
         if treats != ({None} if name == "dark" else {"backing"}):   # aimed at the render WARN line (4.7:1)
             sys.exit(f"SMOKE FAIL: {name} desk captions treated {treats}")
         if name != "dark":
@@ -145,22 +145,22 @@ def podcast(work):
             "the ones who stay do one small thing every day. and that is the whole secret.").split()
     words = [{"text": t, "start": round(0.4 + i * 0.5, 2), "end": round(0.8 + i * 0.5, 2), "type": "word"}
              for i, t in enumerate(said)]
-    (pod / "words.raw.json").write_text(json.dumps(words))
+    (pod / "words.raw.json").write_text(json.dumps(words), encoding="utf-8")
     (pod / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.4, "end": words[-1]["end"],
-                                                      "hook": "this is the part"}]))
+                                                      "hook": "this is the part"}]), encoding="utf-8")
     run(PY, SK / "clips/scripts/clips.py", "trim", pod, "c0", "--edits", work / "edits", cwd=work)
     ed = work / "edits" / "pod-clip1"
-    if not json.loads((ed / "clip.json").read_text()).get("audio_only"):
+    if not json.loads((ed / "clip.json").read_text(encoding="utf-8")).get("audio_only"):
         sys.exit("SMOKE FAIL: an audio source's clip is not marked audio_only")
     (ed / "source.mp4").rename(ed / "cut.mp4")
-    (ed / "captions.json").write_text((ed / "words.raw.json").read_text())
+    (ed / "captions.json").write_text((ed / "words.raw.json").read_text(encoding="utf-8"), encoding="utf-8")
     style = {"handle": "pod", "captions": {"present": True, "words_per_caption": 3, "y_pct": 72, "size_pct": 5.5,
              "case": "lower", "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": True}}
-    (work / "pod.json").write_text(json.dumps(style))
+    (work / "pod.json").write_text(json.dumps(style), encoding="utf-8")
     run(PY, SK / "style-edit/scripts/plan.py", work / "pod.json", ed / "captions.json", "--no-sfx", cwd=work)
     run(PY, SK / "style-edit/scripts/edit.py", "render", ed, cwd=work)
     run(VPY, SK / "style-edit/scripts/check.py", "render", ed, cwd=work)   # exit 1 on any FAIL
-    still = [f["what"] for f in json.loads((ed / "check.json").read_text())["render"]["findings"]
+    still = [f["what"] for f in json.loads((ed / "check.json").read_text(encoding="utf-8"))["render"]["findings"]
              if "nothing moves" in f["what"] or "push did not render" in f["what"]]
     if still:
         sys.exit(f"SMOKE FAIL: the podcast clip holds still: {still}")

@@ -86,7 +86,7 @@ def main():
     a = ap.parse_args()
     d = Path(a.edit_dir)
 
-    spans = json.loads((d / "decisions.json").read_text())
+    spans = json.loads((d / "decisions.json").read_text(encoding="utf-8"))
     raw = [w for w in load_fitted(d) if w.get("type") == "word"]
     exp = timed_words(retime(raw, spans))      # the kept words, timed on the cut
     expected = [t for t, _, _ in exp]
@@ -121,7 +121,7 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
         return tok in removed or any(len(tok) >= 2 and len(r) >= 2 and
                                      (r.startswith(tok) or tok.startswith(r)) for r in removed)
 
-    rep = json.loads((d / "report.json").read_text()) if (d / "report.json").exists() else {"model_cuts": []}
+    rep = json.loads((d / "report.json").read_text(encoding="utf-8")) if (d / "report.json").exists() else {"model_cuts": []}
     noise = [t for _, t in missing if t in FILLERS] + [t for t in extra if t in FILLERS]
     missing = [(i, t) for i, t in missing if t not in FILLERS]
     survived = [t for t in extra if t not in FILLERS and fragment(t)]
@@ -184,7 +184,7 @@ def demo():
     import tempfile
     d = Path(tempfile.mkdtemp())   # report() reads report.json there: the cuts spans.json asked for
     (d / "report.json").write_text(json.dumps({"model_cuts": [
-        {"start": 5.05, "end": 5.35, "kind": "retake", "confidence": "high", "evidence": "and"}]}))
+        {"start": 5.05, "end": 5.35, "kind": "retake", "confidence": "high", "evidence": "and"}]}), encoding="utf-8")
     spans = [{"start": 0.0, "end": 2.0}, {"start": 5.0, "end": 8.0}]
     assert to_source(1.0, spans) == 1.0 and to_source(2.5, spans) == 5.5 and to_source(9, spans) == 8.0
     raw = [{"text": t, "start": s, "end": s + 0.3, "type": "word"} for t, s in
@@ -203,7 +203,7 @@ def demo():
     # the survivor is a word the cut keeps but its label sat in a pause cut: no span that cuts "if you"
     raw2 = [{"text": t, "start": s, "end": e, "type": "word"} for t, s, e in
             (("better.", 188.0, 188.4), ("if", 192.75, 192.84), ("you", 193.41, 193.51))]
-    (d / "report.json").write_text(json.dumps({"model_cuts": []}))
+    (d / "report.json").write_text(json.dumps({"model_cuts": []}), encoding="utf-8")
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         report(d, ["better", "you"], ["better", "if", "you"], {"if"}, [0, 2], [], [], [1],

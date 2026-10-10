@@ -58,7 +58,7 @@ def norm(s):
 
 
 def load(d, name):
-    return json.loads((Path(d) / name).read_text())
+    return json.loads((Path(d) / name).read_text(encoding="utf-8"))
 
 
 def wait_site(d, pages=False, timeout=240):
@@ -67,7 +67,7 @@ def wait_site(d, pages=False, timeout=240):
     p = Path(d) / "site.json"
     end = time.time() + timeout
     while True:
-        site = json.loads(p.read_text()) if p.exists() else None
+        site = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
         if site and not (pages and site.get("pages_pending")):
             return site
         if time.time() >= end:
@@ -96,7 +96,7 @@ def flow_text(d):
     for f in sorted((Path(d) / "flows").glob("*.json")) if d else []:
         if f.name == "whoami.json":
             continue
-        m = json.loads(f.read_text())
+        m = json.loads(f.read_text(encoding="utf-8"))
         out += [x["label"][5:] for x in m.get("steps", []) if (x.get("label") or "").startswith("text=")] + m.get("copy", [])
     return out
 
@@ -179,7 +179,7 @@ def cmd_pages(d):
                                 line=t, product=site.get("title", "")) for i, (t, _) in enumerate(heads)}
         ans = jev.ask(f"Website of {site['domain']}.", qs, key=key, log_dir=d)
         jobs = sorted(((round(jev.yes(ans[f"h{i}"]), 3), t, u) for i, (t, u) in enumerate(heads)), reverse=True)[:25]
-    brief = json.loads((d / "brief.json").read_text()) if (d / "brief.json").exists() else {}
+    brief = json.loads((d / "brief.json").read_text(encoding="utf-8")) if (d / "brief.json").exists() else {}
     out = [f"# {site['domain']}: {len(pages)} pages read", ""]
     if brief:
         out += ["## The brief (the user's answers; use-cases.md marks these [brief])", ""] + \
@@ -197,7 +197,7 @@ def cmd_pages(d):
         if p.get("media"):
             out.append("  media: " + " ".join(m.get("src") or m.get("from", "") for m in p["media"]))
         out.append("")
-    (d / "pages.md").write_text("\n".join(out))
+    (d / "pages.md").write_text("\n".join(out), encoding="utf-8")
     print(f"{d / 'pages.md'}: {len(pages)} pages" + (f", {len(jobs)} lines ranked by Jev" if jobs else ", no TypeSafe key: read it and rank the use cases yourself"))
 
 
@@ -260,7 +260,7 @@ def logo_of(site, d):
     if src and (Path(d) / src).exists():
         out["src"] = src
         if src.endswith(".svg"):
-            t = (Path(d) / src).read_text(errors="ignore")
+            t = (Path(d) / src).read_text(errors="ignore", encoding="utf-8")
             vb = re.search(r'viewBox="[\d.\-]+[ ,]+[\d.\-]+[ ,]+([\d.]+)[ ,]+([\d.]+)"', t)
             out["aspect"] = round(float(vb.group(1)) / float(vb.group(2)), 3) if vb else 1
         else:
@@ -379,7 +379,7 @@ def el_of(site, ref):
 def flow_ref(d, s, dur, tight=False):
     """A recording in a shot: the camera follows the cursor, Screen Studio style. Wide until the hand is about
     to act, then a push onto what it acts on (0.45 s early), out again when nothing happens for a while."""
-    meta = json.loads((Path(d) / "flows" / f"{s['flow']}.json").read_text())
+    meta = json.loads((Path(d) / "flows" / f"{s['flow']}.json").read_text(encoding="utf-8"))
     vw, vh = meta["viewport"]
     t0 = s.get("from", 0.0)
     # "wide": the framing between actions (a share of the viewport, centred on "wide_at" [x, y]); a sparse
@@ -810,7 +810,7 @@ def cmd_animatic(d, plan_name):
     from PIL import Image, ImageDraw, ImageFont
     d = Path(d).resolve()
     plan_path = d / plan_name
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan-"):]
     edit.sync_renderer()
     pub = public(d, plan, tag)
@@ -852,7 +852,7 @@ def cmd_stills(d, plan_name):
     import edit
     d = Path(d).resolve()
     plan_path = d / plan_name
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan-"):]
     edit.sync_renderer()
     pub = public(d, plan, tag)
@@ -869,7 +869,7 @@ def cmd_render(d, plan_name, draft=False, modal=False, use_lambda=False):
     if gates.need_approval(d, plan_name):
         sys.exit(f"ERROR: {gates.need_approval(d, plan_name)}")
     plan_path = d / plan_name
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan-"):]
     edit.sync_renderer()
     pub = public(d, plan, tag)
@@ -896,7 +896,7 @@ def cmd_check(d, plan_name):
     import ai_tells as at
     d = Path(d).resolve()
     plan_path = d / plan_name
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan-"):]
     video = d / f"render-{tag}.mp4"
     site = load(d, "site.json")
@@ -912,7 +912,7 @@ def cmd_check(d, plan_name):
         import journey
         for lvl, what, fix in journey.check_render(d, plan, video):
             add(lvl, what, fix)
-        (d / f"check-{tag}.json").write_text(json.dumps(found, indent=1))
+        (d / f"check-{tag}.json").write_text(json.dumps(found, indent=1), encoding="utf-8")
         for f in found:
             print(f"{f['level']:4}  {f['what']}" + (f"\n      fix: {f['fix']}" if f["fix"] else ""))
         print(f"{sum(f['level'] == 'FAIL' for f in found)} FAIL, {sum(f['level'] == 'WARN' for f in found)} WARN -> check-{tag}.json")
@@ -980,7 +980,7 @@ def cmd_check(d, plan_name):
             add("FAIL", f"true peak {peak:.1f} dBTP clips", "lower the music")
         if lufs is not None and not -23 <= lufs <= -9 and (plan["audio"].get("music") or plan["audio"].get("vo")):
             add("WARN", f"loudness {lufs:.1f} LUFS", "music volume in the plan")
-    (d / f"check-{tag}.json").write_text(json.dumps(found, indent=1))
+    (d / f"check-{tag}.json").write_text(json.dumps(found, indent=1), encoding="utf-8")
     for f in found:
         print(f"{f['level']:4}  {f['what']}" + (f"\n      fix: {f['fix']}" if f["fix"] else ""))
     print(f"{sum(f['level'] == 'FAIL' for f in found)} FAIL, {sum(f['level'] == 'WARN' for f in found)} WARN -> check-{tag}.json")
@@ -1072,10 +1072,10 @@ def cmd_share(d):
     shown = [f'"{s["text"]}"' if s.get("text") else s["kind"] for s in story["shots"] if s["kind"] != "end"]
     alt = (f"A product video of the {site['domain']} website, shown in its own colours and type: "
            + ", then ".join(shown) + f". It ends on the {site['domain']} logo and address.")
-    music = json.loads((d / "audio" / "music.json").read_text()) if (d / "audio" / "music.json").exists() else {}
+    music = json.loads((d / "audio" / "music.json").read_text(encoding="utf-8")) if (d / "audio" / "music.json").exists() else {}
     credit = f"\n\nMusic: {music['credit']}" if music.get("credit") else ""
-    (d / "share.txt").write_text(f"{cap}{credit}\n\n{site['url']}\n\nALT: {alt}\n")
-    print((d / "share.txt").read_text())
+    (d / "share.txt").write_text(f"{cap}{credit}\n\n{site['url']}\n\nALT: {alt}\n", encoding="utf-8")
+    print((d / "share.txt").read_text(encoding="utf-8"))
 
 
 RIGHTS = {"own": "It's my own track", "cc": "YouTube Audio Library or Creative Commons (credited)",
@@ -1128,10 +1128,10 @@ def cmd_music(d, url, start=None, end=None, rights=None, credit=None, cookies=No
     info = {"source": meta.get("webpage_url") or url, "title": meta.get("title"), "channel": chan, "license_field": lic or None,
             "looks_like_free_library": library, "rights": rights, "rights_answer": RIGHTS.get(rights), "credit": credit,
             "section": [start, end], "date": datetime.date.today().isoformat(), "file": "audio/track.wav"}
-    (d / "audio" / "music.json").write_text(json.dumps(info, indent=1))
+    (d / "audio" / "music.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
     (d / "audio" / "MUSIC-LICENSE.md").write_text(
         f"# Music licence\n\n| field | value |\n|---|---|\n" + "".join(f"| {k} | {v} |\n" for k, v in info.items()) +
-        "\nThe audio stays in this project folder; it is never bundled into any repo.\n")
+        "\nThe audio stays in this project folder; it is never bundled into any repo.\n", encoding="utf-8")
     print(json.dumps(info, indent=1))
     if rights == "unsure":
         print("WARNING: with the rights unknown, Instagram, TikTok and YouTube may mute the video or claim it. "
@@ -1190,7 +1190,7 @@ def demo():
     import tempfile as _t
     with _t.TemporaryDirectory() as td:
         (Path(td) / "flows").mkdir()
-        (Path(td) / "flows" / "a-m.json").write_text("{}")
+        (Path(td) / "flows" / "a-m.json").write_text("{}", encoding="utf-8")
         v = vertical_shot({"kind": "flow", "flow": "a", "from": 1, "vertical": {"from": 2}}, td)
         assert v == {"kind": "flow", "flow": "a-m", "from": 2}, v
     snap_plan = {"fps": 30, "variant": "linear", "shots": [{"kind": "page", "start": 0, "end": 1, "keys": [
@@ -1205,8 +1205,8 @@ def demo():
     assert mix("#000000", "#FFFFFF", 0.5) == "#808080"
     import tempfile
     with tempfile.TemporaryDirectory() as t:
-        (Path(t) / "site.json").write_text(json.dumps(site))
-        (Path(t) / "story.json").write_text(json.dumps(story))
+        (Path(t) / "site.json").write_text(json.dumps(site), encoding="utf-8")
+        (Path(t) / "story.json").write_text(json.dumps(story), encoding="utf-8")
         for v in ("apple", "linear"):
             p = build_plan(t, v, "9:16", 20, music="none", sfx="none")
             assert p["width"] == 1080 and abs(p["durationInFrames"] - 600) <= 2, p["durationInFrames"]
@@ -1215,7 +1215,7 @@ def demo():
             assert v == "apple" or p["shots"][1]["cut_in"] == "blur"
         # the crawl runs in the background during the brief: copy reads the home page as soon as crawl.mjs
         # writes it, pages waits for the inner pages
-        (Path(t) / "site.json").write_text(json.dumps({**site, "pages": [], "pages_pending": True}))
+        (Path(t) / "site.json").write_text(json.dumps({**site, "pages": [], "pages_pending": True}), encoding="utf-8")
         assert wait_site(t, timeout=0)["pages_pending"]
         try:
             wait_site(t, pages=True, timeout=0)
@@ -1293,7 +1293,7 @@ def main():
         tag = a.tag or tag_of(a.variant, a.aspect)
         plan = build_plan(a.a, a.variant, a.aspect, a.length, music, a.vo, "none" if a.no_sfx else a.sfx, own, a.story, tag, a.fps)
         out = Path(a.a) / f"plan-{tag}.json"
-        out.write_text(json.dumps(plan, indent=1))
+        out.write_text(json.dumps(plan, indent=1), encoding="utf-8")
         for lvl, msg in smoothness(plan):
             print(f"{lvl} {msg}")
         if plan.get("journey"):

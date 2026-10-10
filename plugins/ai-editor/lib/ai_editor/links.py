@@ -878,7 +878,9 @@ def _demo(home):
     assert [Path(f).name for f in g[0]["files"]] == ["b.mov", "A.mov"] and g[0]["name"] == "b", g
     assert "b.mov, A.mov, in the order you gave them" in g[0]["question"] and [i["kind"] for i in g[1:]] == ["product"], g
     # macOS Terminal drag and drop escapes spaces; a path that is not there is said, not guessed at
-    msg = "join My\\ Takes/IMG\\ 0002.MOV and " + home + "/My\\ Takes/IMG\\ 0001.MOV please"
+    # (shell escapes come from macOS/Linux terminals; a Windows drop arrives quoted)
+    second = (home + "/My\\ Takes/IMG\\ 0001.MOV") if os.name != "nt" else ("'" + home + "/My Takes/IMG 0001.MOV'")
+    msg = "join My\\ Takes/IMG\\ 0002.MOV and " + second + " please"
     assert extract(msg) == ["My Takes/IMG 0002.MOV", home + "/My Takes/IMG 0001.MOV"], extract(msg)
     g = group([classify(t) for t in extract(msg)])
     assert [Path(f).name for f in g[0]["files"]] == ["IMG 0002.MOV", "IMG 0001.MOV"], g
