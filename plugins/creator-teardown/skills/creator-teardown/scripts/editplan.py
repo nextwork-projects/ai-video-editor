@@ -135,12 +135,12 @@ def load_style(plan, plan_path):
         return None
     for p in (Path(plan["style"]), plan_path.parent / plan["style"]):
         if p.exists():
-            return json.loads(p.read_text())
+            return json.loads(p.read_text(encoding="utf-8"))
     return None
 
 
 def render(plan_path):
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     sty = load_style(plan, plan_path)
     errors, warnings = check(plan, sty)
     for w in warnings:
@@ -155,7 +155,7 @@ def render(plan_path):
     for i, c in enumerate(cards, 1):
         where = " · ".join(x for x in (c.get("entrance") and f"{c['entrance']} in", c.get("place")) if x)
         srt.append(f"{i}\n{tc_srt(c['in'])} --> {tc_srt(c['out'])}\n{c['show']}\n{where}\n")
-    (plan_path.parent / "plan.srt").write_text("\n".join(srt))
+    (plan_path.parent / "plan.srt").write_text("\n".join(srt), encoding="utf-8")
 
     dur = plan["duration"]
     head = [f"# Edit plan: {plan.get('video', plan_path.parent.name)}", ""]
@@ -169,7 +169,7 @@ def render(plan_path):
              "|---|---|---|---|---|---|---|"]
     rows = [f"| {i} | {tc(c['in'])} | {tc(c['out'])} | {c.get('word') or ''} | {c['show']} "
             f"| {c.get('entrance') or ''} | {c.get('place') or ''} |" for i, c in enumerate(cards, 1)]
-    (plan_path.parent / "plan.md").write_text("\n".join(head + rows) + "\n")
+    (plan_path.parent / "plan.md").write_text("\n".join(head + rows) + "\n", encoding="utf-8")
     print(f"{len(cards)} cards -> {plan_path.parent / 'plan.srt'} and plan.md")
 
 
@@ -265,7 +265,7 @@ def cmd_blend(a, root=None):
         p = root / h / "style.json"
         if not p.exists():
             sys.exit(f"no {p}. Run the teardown on @{h} first.")
-        styles[h] = json.loads(p.read_text())
+        styles[h] = json.loads(p.read_text(encoding="utf-8"))
     weights = {h: 1.0 for h in handles}
     for kv in (a.weights or "").split(","):
         if "=" in kv:
@@ -285,7 +285,7 @@ def cmd_blend(a, root=None):
     out["handle"] = a.name
     d = root / a.name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "style.json").write_text(json.dumps(out, indent=2))
+    (d / "style.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
     try:  # look.md, when the venv's numpy is here
         from look import write_summary
         print(write_summary(d))
@@ -321,7 +321,7 @@ def demo():
     with tempfile.TemporaryDirectory() as d:
         for h, s in (("a", a), ("b", b)):
             (Path(d) / h).mkdir()
-            (Path(d) / h / "style.json").write_text(json.dumps(s))
+            (Path(d) / h / "style.json").write_text(json.dumps(s), encoding="utf-8")
         t = take({"captions": {"size_pct": 4}, "pace": {"wpm": 200}, "sound": {"sfx_per_min": 3},
                   "graphics": {"kinds": {"chart": 100}, "entrances": [{"kind": "slide"}], "layout": {"zones_pct": {}}}},
                  ["captions", "entrances"])
@@ -336,7 +336,7 @@ def demo():
         args = argparse.Namespace(name="mix", sources="@A,b", weights="a=2", captions="b",
                                   pace=None, visuals=None, sound=None, take=None)
         out = cmd_blend(args, Path(d))
-        assert json.loads((Path(d) / "mix" / "style.json").read_text()) == out
+        assert json.loads((Path(d) / "mix" / "style.json").read_text(encoding="utf-8")) == out
         assert out["handle"] == "mix" and out["captions"]["color"] == "#FFE14D"
 
     doc = {"handle": "demo", "videos": [
@@ -362,9 +362,9 @@ def demo():
 
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "plan.json"
-        p.write_text(json.dumps(plan))
+        p.write_text(json.dumps(plan), encoding="utf-8")
         render(p)
-        srt = (Path(d) / "plan.srt").read_text()
+        srt = (Path(d) / "plan.srt").read_text(encoding="utf-8")
         assert "00:00:03,320 --> 00:00:05,600" in srt and "pop in · top band" in srt, srt
     print("ok")
 
@@ -389,11 +389,11 @@ def main():
 
     if a.cmd == "style":
         src = Path(a.events)
-        s = style(json.loads(src.read_text()))
+        s = style(json.loads(src.read_text(encoding="utf-8")))
         out = src.parent / "style.json"
         # Merge: visual.py writes pace/zoom/captions into the same file.
-        old = json.loads(out.read_text()) if out.exists() else {}
-        out.write_text(json.dumps({**old, **s, "videos": old.get("videos", s["videos"])}, indent=2))
+        old = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+        out.write_text(json.dumps({**old, **s, "videos": old.get("videos", s["videos"])}, indent=2), encoding="utf-8")
         print(describe(s))
         print(f"\n-> {src.parent / 'style.json'}")
     elif a.cmd == "render":

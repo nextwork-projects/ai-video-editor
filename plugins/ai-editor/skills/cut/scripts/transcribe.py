@@ -208,7 +208,7 @@ def main():
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(words, indent=1))
+    out.write_text(json.dumps(words, indent=1), encoding="utf-8")
     n = sum(1 for w in words if w["type"] == "word")
     print(f"{n} words -> {out}")
 

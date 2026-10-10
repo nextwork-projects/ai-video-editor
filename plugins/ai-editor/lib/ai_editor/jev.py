@@ -118,7 +118,7 @@ def ask(state, questions, key=None, log_dir=None, canned=None, model=MODEL):
     rec = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "model": used, "questions": len(questions),
            **usage, "cost_usd": round(usage["input_tokens"] * USD_PER_MTOK / 1e6, 6)}
     if log_dir:
-        with open(Path(log_dir) / "jev-usage.jsonl", "a") as f:
+        with open(Path(log_dir) / "jev-usage.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")
     ask.last_usage = rec
     return answers

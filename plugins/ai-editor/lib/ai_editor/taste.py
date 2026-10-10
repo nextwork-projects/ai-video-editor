@@ -74,12 +74,12 @@ def now():
 def read_json():
     """taste.json as it is on disk. No counting: for the CLI and for writes."""
     p = json_path()
-    return json.loads(p.read_text()) if p.exists() else {}
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
 def save_json(data):
     HOME.mkdir(parents=True, exist_ok=True)
-    json_path().write_text(json.dumps(data, indent=1))
+    json_path().write_text(json.dumps(data, indent=1), encoding="utf-8")
 
 
 def load_md():
@@ -87,7 +87,7 @@ def load_md():
     out = {s: [] for s in SECTIONS}
     cur = None
     p = md_path()
-    for line in (p.read_text().splitlines() if p.exists() else []):
+    for line in (p.read_text(encoding="utf-8").splitlines() if p.exists() else []):
         if line.startswith("## "):
             cur = line[3:].strip().title()
             out.setdefault(cur, [])
@@ -102,7 +102,7 @@ def save_md(md):
              "Rules I've given the AI video editor. It reads this before every edit.", ""]
     for s, rules in md.items():
         lines += [f"## {s}", ""] + [f"- {r}" for r in rules] + [""]
-    md_path().write_text("\n".join(lines))
+    md_path().write_text("\n".join(lines), encoding="utf-8")
 
 
 def similar(a, b):
@@ -176,7 +176,7 @@ def load_rules():
     """rules.json. Before the first one, taste.md's bullets are the rules (every video, never applied)."""
     p = rules_path()
     if p.exists():
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     md = [(s, r) for s, rs in load_md().items() for r in rs]
     return [new_rule(i, s, r, None, None, "all") for i, (s, r) in enumerate(md, 1)]
 
@@ -184,7 +184,7 @@ def load_rules():
 def save_rules(rules):
     HOME.mkdir(parents=True, exist_ok=True)
     tmp = rules_path().with_suffix(".tmp")
-    tmp.write_text(json.dumps(rules, indent=1))
+    tmp.write_text(json.dumps(rules, indent=1), encoding="utf-8")
     tmp.replace(rules_path())   # a crash mid-write never leaves half a file
 
 
@@ -305,7 +305,7 @@ def load_json(edit_dir=None, count=True):
 def show(edit=None):
     """taste.md and taste.json; with an edit, also that video's own rules, and the word rules count
     as applied to it (Claude follows them in that edit)."""
-    out = [md_path().read_text() if md_path().exists() else "(no taste.md yet)", json.dumps(read_json(), indent=1)]
+    out = [md_path().read_text(encoding="utf-8") if md_path().exists() else "(no taste.md yet)", json.dumps(read_json(), indent=1)]
     name = edit_name(edit)
     if name and (rules_path().exists() or md_path().exists()):
         rules = load_rules()
@@ -355,7 +355,7 @@ def profile_names():
     """Every name, domain and creator handle in the user's profile (profile.py's file), longest first."""
     p = HOME / "profile.json"
     try:
-        prof = json.loads(p.read_text()) if p.exists() else {}
+        prof = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     except (OSError, ValueError):
         prof = {}
     out = []
@@ -397,14 +397,14 @@ def suggest(what, rule, owner, example="", note=None):
     if note:
         row["note"] = note_key(note)
     HOME.mkdir(parents=True, exist_ok=True)
-    with open(suggestions_path(), "a") as f:
+    with open(suggestions_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
     return row
 
 
 def issue(yes=False):
     """The latest suggestion as a GitHub issue. Shows it unless yes; opens it with gh only when gh is logged in."""
-    rows = [json.loads(x) for x in suggestions_path().read_text().splitlines() if x.strip()] if suggestions_path().exists() else []
+    rows = [json.loads(x) for x in suggestions_path().read_text(encoding="utf-8").splitlines() if x.strip()] if suggestions_path().exists() else []
     if not rows:
         return "No suggestions yet."
     r = rows[-1]
@@ -490,7 +490,7 @@ def demo():
         assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** style-edit quality.py" in issue()
         # the profile's names, their domains and the creators' handles, and any bare domain, never leave
         (HOME / "profile.json").write_text(json.dumps({"names": ["Example Product", {"name": "Example Tool",
-                                                       "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}))
+                                                       "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}), encoding="utf-8")
         r = suggest("Example Product logo too big, like example-creator does", "Logos under the caption", "plan.py",
                     "example tool on example.com and example.org, see style.json")
         assert "Example" not in json.dumps(r) and "example-creator" not in r["what"], r

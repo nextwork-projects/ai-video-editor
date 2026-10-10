@@ -162,7 +162,7 @@ def chunks(d, size=180.0, overlap=30.0):
     L = paper_lines(toks, words, kept)
     r = Path(d) / "read"
     r.mkdir(exist_ok=True)
-    (r / "paper-cut.md").write_text(f"# Paper edit\n\n{HOW_TO_READ}\n\n{fmt(L)}\n")
+    (r / "paper-cut.md").write_text(f"# Paper edit\n\n{HOW_TO_READ}\n\n{fmt(L)}\n", encoding="utf-8")
     end = toks[kept[-1]]["end"] if kept else 0.0
     step = size - overlap
     n = max(1, int(-(-(end - overlap) // step)))
@@ -176,7 +176,7 @@ def chunks(d, size=180.0, overlap=30.0):
             skipped.append((k, s, min(end, s + size)))
             continue
         p.write_text(READER.format(how=HOW_TO_READ, span=f"{s:.0f}-{min(end, s + size):.0f} s of {end:.0f} s",
-                                   text=fmt(part)))
+                                   text=fmt(part)), encoding="utf-8")
         out.append(p)
     return out, skipped
 
@@ -187,7 +187,7 @@ def proposals(d):
     r = Path(d) / "read"
     F = []
     for p in sorted(r.glob("reader-*.json")):
-        o = extract_json(p.read_text(), "findings") or {}
+        o = extract_json(p.read_text(encoding="utf-8"), "findings") or {}
         for f in o.get("findings", []):
             f = {**f, "kind": str(f.get("kind", "")).strip()}
             try:
@@ -235,7 +235,7 @@ def verify(d, context=45.0):
     if gone:
         print(f"  missing {', '.join(gone)}: those readers wrote nothing, their chunks are unread")
     F = proposals(d)
-    (r / "proposed.json").write_text(json.dumps(F, indent=1))
+    (r / "proposed.json").write_text(json.dumps(F, indent=1), encoding="utf-8")
     out = []
     for n, f in enumerate(x for x in F if x["status"] == "proposed"):
         ctx = [l for l in L if f["raw"] - context <= l["t"] <= f["raw"] + context]
@@ -244,10 +244,10 @@ def verify(d, context=45.0):
         keeps = f'The copy the reader says stays: "{f["keeps"]}"' if f.get("keeps") else ""
         p = r / f"verify-{n}.md"
         p.write_text(VERIFIER.format(kind=f["kind"].replace("_", " "), how=HOW_TO_READ, quote=f["quote"],
-                                     why=f.get("why", ""), keeps=keeps, text=fmt(ctx, mark)))
+                                     why=f.get("why", ""), keeps=keeps, text=fmt(ctx, mark)), encoding="utf-8")
         f["prompt"] = p.name
         out.append(p)
-    (r / "proposed.json").write_text(json.dumps(F, indent=1))
+    (r / "proposed.json").write_text(json.dumps(F, indent=1), encoding="utf-8")
     for f in F:
         if f["status"] not in ("proposed", "dup"):
             print(f"  {f['status']:30s} {f['kind']:11s} raw {f['raw']:7.1f} {f.get('quote', '')!r}")
@@ -258,7 +258,7 @@ def merge(d):
     """Confirmed drops into spans.json. Returns (added, report lines)."""
     d = Path(d)
     r = d / "read"
-    F = json.loads((r / "proposed.json").read_text())
+    F = json.loads((r / "proposed.json").read_text(encoding="utf-8"))
     toks, spans = toks_of(d), spans_of(d)
     added, lines = [], []
     for f in F:
@@ -266,7 +266,7 @@ def merge(d):
             lines.append(f"FIX BY HAND {f['kind']:9s} raw {f['raw']:7.1f} {f['quote']!r}: {f.get('why', '')}")
         if f["status"] != "proposed":
             continue
-        v = extract_json((r / f["prompt"].replace(".md", ".json")).read_text(), "verdict") \
+        v = extract_json((r / f["prompt"].replace(".md", ".json")).read_text(encoding="utf-8"), "verdict") \
             if (r / f["prompt"].replace(".md", ".json")).exists() else None
         if not v or str(v.get("verdict", "")).lower() != "cut":
             lines.append(f"kept by verifier raw {f['raw']:7.1f} {f['quote']!r}: {(v or {}).get('why', 'no verdict')}")
@@ -285,7 +285,7 @@ def merge(d):
         added.append(sp)
         lines.append(f"CUT {sp['kind']:11s} raw {f['raw']:7.1f} {f['text']!r}: {f.get('why', '')}")
     if added:
-        (d / "spans.json").write_text(json.dumps(spans + added, indent=1))
+        (d / "spans.json").write_text(json.dumps(spans + added, indent=1), encoding="utf-8")
     return added, lines
 
 
@@ -297,41 +297,41 @@ def demo():
             + W("And it works well.", 400))
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
-        (d / "words.raw.json").write_text(json.dumps(toks))
-        (d / "spans.json").write_text(json.dumps([{"text": "then pick a model", "kind": "retake"}]))
+        (d / "words.raw.json").write_text(json.dumps(toks), encoding="utf-8")
+        (d / "spans.json").write_text(json.dumps([{"text": "then pick a model", "kind": "retake"}]), encoding="utf-8")
         ps, skipped = chunks(d)
         assert [p.name for p in ps] == ["reader-0.md", "reader-2.md"], ps   # 400 s, 150 s steps: three chunks,
         assert [k for k, _, _ in skipped] == [1]                              # the all-cut middle one unread
-        assert "~~(13 s) Then pick a model.~~" in ps[0].read_text()            # a cut line reaches its reader
-        assert "~~(380 s silence)~~" in ps[1].read_text() and "380 s" not in ps[0].read_text()
-        paper = (d / "read" / "paper-cut.md").read_text()
+        assert "~~(13 s) Then pick a model.~~" in ps[0].read_text(encoding="utf-8")            # a cut line reaches its reader
+        assert "~~(380 s silence)~~" in ps[1].read_text(encoding="utf-8") and "380 s" not in ps[0].read_text(encoding="utf-8")
+        paper = (d / "read" / "paper-cut.md").read_text(encoding="utf-8")
         assert "~~(13 s) Then pick a model.~~" in paper, paper
         assert "[raw 0.0] Open the settings page first." in paper
         # reader 0: the re-said line (a STOP between, new words), a hallucination, and a stitch
         (d / "read" / "reader-0.json").write_text(json.dumps({"findings": [
             {"kind": "repeat", "quote": "Open the settings page first.", "raw": 0, "keeps": "So you open settings", "why": "re-said"},
             {"kind": "repeat", "quote": "words nobody said", "raw": 2},
-            {"kind": "lost_word", "quote": "Then save it.", "raw": 19, "why": "needs 'and'"}]}))
+            {"kind": "lost_word", "quote": "Then save it.", "raw": 19, "why": "needs 'and'"}]}), encoding="utf-8")
         # reader 1 overlaps and finds the same line again: a dup, not a second span
-        (d / "read" / "reader-1.json").write_text('```json\n{"findings": [{"kind": "repeat", "quote": "the settings page", "raw": 0.4}]}\n```')
+        (d / "read" / "reader-1.json").write_text('```json\n{"findings": [{"kind": "repeat", "quote": "the settings page", "raw": 0.4}]}\n```', encoding="utf-8")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             vs = verify(d)
         assert "missing reader-2.json" in out.getvalue(), out.getvalue()
         assert [p.name for p in vs] == ["verify-0.md"], vs
-        assert "380 s" not in vs[0].read_text()          # context: the lines around the finding only
-        assert ">> [raw 0.0] Open the settings page first." in vs[0].read_text()
-        st = {f.get("quote"): f["status"] for f in json.loads((d / "read" / "proposed.json").read_text())}
+        assert "380 s" not in vs[0].read_text(encoding="utf-8")          # context: the lines around the finding only
+        assert ">> [raw 0.0] Open the settings page first." in vs[0].read_text(encoding="utf-8")
+        st = {f.get("quote"): f["status"] for f in json.loads((d / "read" / "proposed.json").read_text(encoding="utf-8"))}
         assert st["words nobody said"] == "quote not in kept text" and st["the settings page"] == "dup"
         assert st["Then save it."] == "report"
-        (d / "read" / "verify-0.json").write_text('{"verdict": "cut", "why": "same step twice"}')
+        (d / "read" / "verify-0.json").write_text('{"verdict": "cut", "why": "same step twice"}', encoding="utf-8")
         added, lines = merge(d)
         assert [s["text"] for s in added] == ["Open the settings page first."] and added[0]["kind"] == "retake"
         assert any(x.startswith("FIX BY HAND lost_word") for x in lines)
         assert len(spans_of(d)) == 2 and len(cuts_of(spans_of(d), toks)) == 2
         # a verifier that keeps it: nothing added
-        (d / "spans.json").write_text(json.dumps([{"text": "then pick a model", "kind": "retake"}]))
-        (d / "read" / "verify-0.json").write_text('{"verdict": "keep", "why": "builds on it"}')
+        (d / "spans.json").write_text(json.dumps([{"text": "then pick a model", "kind": "retake"}]), encoding="utf-8")
+        (d / "read" / "verify-0.json").write_text('{"verdict": "keep", "why": "builds on it"}', encoding="utf-8")
         assert merge(d)[0] == []
     print("demo ok")
 

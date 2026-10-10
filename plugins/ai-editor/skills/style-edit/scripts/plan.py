@@ -199,7 +199,7 @@ def audio_cover(edit_dir, words):
     """plan "cover" for an audio-only clip with artwork (clip.json from clips.py trim), else None. Pulses: sentence
     starts, never in the opening half second and at least a second apart."""
     cj = edit_dir and Path(edit_dir) / "clip.json"
-    meta = json.loads(cj.read_text()) if cj and cj.exists() else {}
+    meta = json.loads(cj.read_text(encoding="utf-8")) if cj and cj.exists() else {}
     if not (meta.get("audio_only") and meta.get("cover") and meta.get("cover_box")
             and (Path(edit_dir) / meta["cover"]).exists()):
         return None
@@ -220,7 +220,7 @@ def card_gap_s(style):
 def named_beats(edit_dir):
     """route.py's beats.json sentences that name one of the profile's things ([] when there is none)."""
     bj = edit_dir and Path(edit_dir) / "beats.json"
-    return [x for x in json.loads(bj.read_text()) if x.get("names")] if bj and bj.exists() else []
+    return [x for x in json.loads(bj.read_text(encoding="utf-8")) if x.get("names")] if bj and bj.exists() else []
 
 
 def card_gaps(cards, duration):
@@ -537,7 +537,7 @@ def anim_items(visuals, edit_dir=None, style=None):
             if not f or not f.exists():
                 print(f"warning: no images/post-{pid}.json for '{v.get('word')}', run capture.mjs first; skipped", file=sys.stderr)
                 continue
-            props = {k: x for k, x in json.loads(f.read_text()).items() if k != "url"}
+            props = {k: x for k, x in json.loads(f.read_text(encoding="utf-8")).items() if k != "url"}
             props.update(v.get("props") or {})
             v = {**v, "kind": "anim", "type": "social_post", "props": props}
         if v.get("kind") != "anim":
@@ -1490,7 +1490,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     chunks = mark_emph(chunk_captions(words, cap.get("words_per_caption") or 3, cap.get("case", "sentence"))) \
         if cap.get("present", True) else []
     fj = edit_dir and Path(edit_dir) / "face.json"
-    face = json.loads(fj.read_text()) if fj and fj.exists() else None
+    face = json.loads(fj.read_text(encoding="utf-8")) if fj and fj.exists() else None
     lay = {**SPLIT, **(style.get("layout") or {}), **(layout or {})}
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import profile as prof_mod
@@ -1778,18 +1778,18 @@ def contrast_floors(edit_dir, out):
     read under CONTRAST_TARGET get one treatment past the one that render drew (the plan at `out`). Kept in
     contrast.json, so every later plan keeps them; each check is read once. This is what "plan again" does."""
     f, ck = edit_dir / "contrast.json", edit_dir / f"check{out.stem[len('plan'):]}.json"
-    doc = json.loads(f.read_text()) if f.exists() else {"pages": {}, "read": []}
-    low = ((json.loads(ck.read_text()).get("render") or {}).get("caption_contrast") or {}).get("low_at") \
+    doc = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {"pages": {}, "read": []}
+    low = ((json.loads(ck.read_text(encoding="utf-8")).get("render") or {}).get("caption_contrast") or {}).get("low_at") \
         if ck.exists() else None
     stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
     if low and out.exists() and stamp not in doc["read"]:
-        for c in json.loads(out.read_text())["captions"]["chunks"]:
+        for c in json.loads(out.read_text(encoding="utf-8"))["captions"]["chunks"]:
             if any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in low):
                 key, nxt = f"{c['start']:.2f}", STEPS[min(len(STEPS) - 1, STEPS.index(c.get("treat")) + 1)]
                 if STEPS.index(nxt) > STEPS.index(doc["pages"].get(key)):
                     doc["pages"][key] = nxt
         doc["read"].append(stamp)
-        f.write_text(json.dumps(doc, indent=1))
+        f.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     return doc["pages"]
 
 
@@ -1799,7 +1799,7 @@ def cut_points(edit_dir):
     if not p.exists():
         return []
     t, out = 0.0, []
-    for span in json.loads(p.read_text())[:-1]:
+    for span in json.loads(p.read_text(encoding="utf-8"))[:-1]:
         t += span["end"] - span["start"]
         out.append(round(t, 3))
     return out
@@ -2034,7 +2034,7 @@ def demo():
     assert place_sfx(sp, sw, kit, {"sfx_per_min": 0}) == []
     assert all("whoosh" not in c["src"] for c in place_sfx(sp, sw, kit, {"kinds": {"impact": 100}}))
     # one lead model for plan, renderer and check: motion.ts carries the same two numbers
-    ts = (Path(__file__).resolve().parents[3] / "remotion" / "src" / "motion.ts").read_text()
+    ts = (Path(__file__).resolve().parents[3] / "remotion" / "src" / "motion.ts").read_text(encoding="utf-8")
     assert f"CARD_LEAD_S = {CARD_LEAD_S};" in ts and f"OVERLAY_LEAD_S = {OVERLAY_LEAD_S};" in ts, "motion.ts lead drifted"
     # the default style (no creator) on a 47 s cut whose sentences run 2-7 s: a zoom change at least every 5 s,
     # so check.py render never finds 6 s with nothing moving (the editorial {} planned 0 zooms here)
@@ -2064,7 +2064,7 @@ def demo():
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
         assert audio_cover(td, words) is None
         (Path(td) / "cover.png").write_bytes(b"")
-        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}))
+        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}), encoding="utf-8")
         cv = audio_cover(td, words)
         assert cv["src"] == "cover.png" and cv["push"] > 1 and cv["pulses"] and cv["pulses"][0] >= 0.5, cv
         assert all(b - a >= 1 for a, b in zip(cv["pulses"], cv["pulses"][1:])), cv["pulses"]
@@ -2101,8 +2101,8 @@ def demo_contrast():
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
         (d / "plan.json").write_text(json.dumps({"captions": {"chunks": [{"start": 1.0, "end": 2.0, "treat": "shadow"},
-                                                                          {"start": 2.0, "end": 3.0}]}}))
-        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5]}}}))
+                                                                          {"start": 2.0, "end": 3.0}]}}), encoding="utf-8")
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5]}}}), encoding="utf-8")
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
         pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
@@ -2132,11 +2132,11 @@ def demo_contrast():
             assert got == want, (colour, pl["captions"]["chunks"])
         # no style.json (the no-creator path): a note and the default style, never a traceback
         import os
-        (Path(d) / "captions.json").write_text(json.dumps(words))
+        (Path(d) / "captions.json").write_text(json.dumps(words), encoding="utf-8")
         r = subprocess.run([sys.executable, __file__, f"{d}/style.json", f"{d}/captions.json"], capture_output=True,
                            text=True, env={**os.environ, "AI_EDITOR_HOME": d})
         assert r.returncode == 0 and "default style" in r.stderr, r.stderr
-        assert json.loads((Path(d) / "plan.json").read_text())["zooms"], r.stdout
+        assert json.loads((Path(d) / "plan.json").read_text(encoding="utf-8"))["zooms"], r.stdout
 
 
 # One beat at a time, for the overlays skill: which beat made a card, and a change to just that beat.
@@ -2340,22 +2340,22 @@ def main():
     if not video.exists():
         sys.exit(f"ERROR: no cut.mp4 in {edit_dir}. Run the cut skill first.")
     img = Path(a.images) if a.images else edit_dir / "images.json"
-    images = json.loads(img.read_text()) if img.exists() else []
+    images = json.loads(img.read_text(encoding="utf-8")) if img.exists() else []
     vis = edit_dir / "visuals.json"
-    visuals = json.loads(vis.read_text()) if vis.exists() else []
+    visuals = json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else []
     # The user's own settings (taste skill) win over the creator's measured style.
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import taste, profile
     prof = profile.load()   # the start skill's answers: brand kit, what to avoid, sound
     sp = Path(a.style)
-    style = json.loads(sp.read_text() or "{}") if sp.is_file() else None
+    style = json.loads(sp.read_text(encoding="utf-8") or "{}") if sp.is_file() else None
     if not style:
         print(f"note: {sp} {'is empty' if style == {} else 'not found'}; planning with the default style. To keep it "
               f"with the edit: python3 {Path(profile.__file__)} style {edit_dir}", file=sys.stderr)
         style = profile.default_style(prof)
     style = profile.fill_transitions(taste.merge(style, taste.load_json()),
                                      lambda m: print(f"note: {m}", file=sys.stderr))
-    plan = build(style, json.loads(Path(a.words).read_text()),
+    plan = build(style, json.loads(Path(a.words).read_text(encoding="utf-8")),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
     out = Path(a.out) if a.out else edit_dir / "plan.json"

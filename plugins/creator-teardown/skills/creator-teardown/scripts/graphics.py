@@ -1150,9 +1150,9 @@ def save_heatmap(grid, path, still=None):
 
 
 def merge(outdir):
-    rows = [json.loads(p.read_text()) for p in sorted((outdir / "video").glob("*.graphics.json"))]
+    rows = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((outdir / "video").glob("*.graphics.json"))]
     sp = outdir / "style.json"
-    style = json.loads(sp.read_text()) if sp.exists() else {"handle": outdir.name}
+    style = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"handle": outdir.name}
     portrait = not rows or rows[0]["height"] >= rows[0]["width"]
     grid = heatmap(rows, portrait)
     s = summarise(rows, style.get("face"))
@@ -1175,7 +1175,7 @@ def merge(outdir):
         style["layout"] = split
     elif (style.get("layout") or {}).get("source") == "graphics.py":
         style.pop("layout")
-    sp.write_text(json.dumps(style, indent=2))
+    sp.write_text(json.dumps(style, indent=2), encoding="utf-8")
     return gfx
 
 
@@ -1215,15 +1215,15 @@ def measure_one(job):
     """One video's graphics.json (worker process)."""
     p, crop_dir = job
     look_p, vis_p = p.with_suffix(".look.json"), p.with_suffix(".visual.json")
-    look = json.loads(look_p.read_text()) if look_p.exists() else None
-    vis = json.loads(vis_p.read_text()) if vis_p.exists() else None
+    look = json.loads(look_p.read_text(encoding="utf-8")) if look_p.exists() else None
+    vis = json.loads(vis_p.read_text(encoding="utf-8")) if vis_p.exists() else None
     if not look:
         print(f"  {p.stem}: no look.json (run look.py measure first): no speaker mask", file=sys.stderr)
     cap = (look or {}).get("captions") or {}
     band = ((cap["y_pct"] - 4) / 100, (cap["y_pct"] + 4) / 100) if cap.get("y_pct") else None
     print(f"{p.stem} measuring", file=sys.stderr)
     r = measure_video(p, look, vis, band, crop_dir)
-    p.with_suffix(".graphics.json").write_text(json.dumps(r, indent=1))
+    p.with_suffix(".graphics.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
     print(f"  {p.stem}: {len(r['graphics'])} graphics: " + ", ".join(
         f"{g['t_in']}s {g['kind']} {(g['entrance'] or {}).get('kind')}/{(g['entrance'] or {}).get('ease')}"
         for g in r["graphics"][:6]), file=sys.stderr)

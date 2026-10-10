@@ -25,7 +25,7 @@ HYPE = {"unlock", "leverage", "seamless", "elevate", "empower", "delve",
 
 
 def load(p):
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     return d, [w for w in d["words"] if w.get("type") == "word"]
 
 
@@ -99,7 +99,7 @@ def main():
     a = ap.parse_args()
 
     outdir = OUT_ROOT / a.handle
-    meta = json.loads((outdir / "videos.json").read_text())
+    meta = json.loads((outdir / "videos.json").read_text(encoding="utf-8"))
     by_id = {v["id"]: v for v in meta["videos"]}
     tdir = outdir / "transcripts"
 
@@ -115,7 +115,7 @@ def main():
         rows.append(video_metrics(d, words, by_id[p.stem]))
 
     rows.sort(key=lambda r: -(r["views"] or 0))
-    (outdir / "metrics.json").write_text(json.dumps(rows, indent=2))
+    (outdir / "metrics.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
     hdr = f"{'views':>10} {'sec':>5} {'wpm':>4} {'thirds':>14} {'hook@':>6} {'sent':>5} {'paus/m':>7} {'fill':>5} {'you%':>5}  id"
     print(hdr)

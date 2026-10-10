@@ -140,7 +140,7 @@ def pair_by_time(a, b, tol=0.25):
 def load_words(path):
     """A transcript file as a list of tokens. Accepts the contract's plain list
     or a {"words": [...]} payload."""
-    d = json.load(open(path))
+    d = json.load(open(path, encoding="utf-8"))
     return d["words"] if isinstance(d, dict) else d
 
 

@@ -109,19 +109,19 @@ def demo():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
-        (d / "words.json").write_text(json.dumps(W + [{"text": " ", "start": 61.4, "end": 61.5, "type": "spacing"}]))
+        (d / "words.json").write_text(json.dumps(W + [{"text": " ", "start": 61.4, "end": 61.5, "type": "spacing"}]), encoding="utf-8")
         words = load_words(d)
         assert len(words) == 6
         text, p = write(d, words, [["Hi", "Intro"], ["So firstly", "What it is"], ["now here's", "When not to"]], 90, "A plain intro.")
         assert text == "0:00 Intro\n0:30 What it is\n1:01 When not to\n" and p == []
-        assert (d / "description.txt").read_text() == "A plain intro.\n\n" + text
+        assert (d / "description.txt").read_text(encoding="utf-8") == "A plain intro.\n\n" + text
         assert round(duration(d, words), 2) == 61.4, "no cut.mp4: the last word's end"
         # a passing run without --intro removes the old description.txt (its chapters would be stale)
         write(d, words, [["Hi", "Intro"], ["So firstly", "Start"], ["now here's", "End"]], 90)
-        assert (d / "chapters.txt").read_text().endswith("1:01 End\n") and not (d / "description.txt").exists()
+        assert (d / "chapters.txt").read_text(encoding="utf-8").endswith("1:01 End\n") and not (d / "description.txt").exists()
         # a failed check writes nothing: the last good chapters.txt stays, no description.txt appears
         _, p = write(d, words, [["Hi", "Intro"], ["So firstly", "Too short"]], 90, "intro")
-        assert p and (d / "chapters.txt").read_text().endswith("1:01 End\n") and not (d / "description.txt").exists()
+        assert p and (d / "chapters.txt").read_text(encoding="utf-8").endswith("1:01 End\n") and not (d / "description.txt").exists()
     print("demo ok")
 
 
