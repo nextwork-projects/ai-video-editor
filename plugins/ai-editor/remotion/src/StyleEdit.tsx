@@ -22,7 +22,7 @@ import { Look, Texture, resolveLook, useFonts } from "./look";
 import { Motion, ease, pickMotion, prog, punchAt } from "./motion";
 import { Sfx } from "./Sfx";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
-import { groundCovers } from "./ground";
+import { captionFade, groundCovers } from "./ground";
 import { Ground, onGround } from "./look";
 
 // Shapes follow skills/style-edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
@@ -312,8 +312,11 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   const fonts = useFonts(look);
   const split = layout?.mode === "split";
   const grounds = sceneGrounds(cards);
-  const capStyle = sceneCaptions(captions.style, captions.chunks, cards, t, look, grounds, m, width, height,
+  const capAt = (tt: number) => sceneCaptions(captions.style, captions.chunks, cards, tt, look, grounds, m, width, height,
     split && layout ? layout.caption_full_y : captions.style.y_pct ?? 70, split);
+  const capStyle = capAt(t);
+  // captions a scene hides fade out and back in (ground.ts captionFade), never gone in one frame
+  const capFade = cards.some((c) => c.layout === "scene") ? captionFade((tt) => capAt(tt).present === false, t) : 1;
   const up = fonts.ready ? slots(cards, split).filter((s) => t >= s.from && t < s.to) : [];
   const view = (s: Slot) => (
     <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next} covered={s.covered}
@@ -345,7 +348,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         ))}
         {cardViews}
         {sceneViews}
-        <Captions style={capStyle} chunks={captions.chunks} t={t} m={m} />
+        <AbsoluteFill style={{ opacity: capFade }}><Captions style={capStyle} chunks={captions.chunks} t={t} m={m} /></AbsoluteFill>
         <Sfx />
       </AbsoluteFill>
     );
@@ -371,7 +374,9 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         </div>
       </div>
       {sceneViews}
-      <Captions style={{ ...capStyle, y_pct: sceneUp(cards, t) ? layout.caption_full_y : capY }} chunks={captions.chunks} t={t} m={m} />
+      <AbsoluteFill style={{ opacity: capFade }}>
+        <Captions style={{ ...capStyle, y_pct: sceneUp(cards, t) ? layout.caption_full_y : capY }} chunks={captions.chunks} t={t} m={m} />
+      </AbsoluteFill>
       <Sfx />
     </AbsoluteFill>
   );

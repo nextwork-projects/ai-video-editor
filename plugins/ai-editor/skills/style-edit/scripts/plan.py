@@ -1137,7 +1137,9 @@ def place_sfx(plan, words, kit, sound=None):
                 and all(abs(t - k) >= SFX_GAP_S for k, _ in kept):
             kept.append((t, name))
     kept = [k for i, k in enumerate(sorted(kept)) if i == 0 or k[1] != sorted(kept)[i - 1][1]]   # never the same cue twice running
-    return [{"t": round(max(0.0, t - kit["cues"][n]["attack_s"]), 3), "src": f".sfx/{n}.wav", "event": round(t, 3)}
+    # on the frame Sfx.tsx starts it on (round(t x fps)): the plan's t is when the cue really plays
+    fps = plan["fps"]
+    return [{"t": round(round(max(0.0, t - kit["cues"][n]["attack_s"]) * fps) / fps, 4), "src": f".sfx/{n}.wav", "event": round(t, 3)}
             for t, n in kept]
 
 
@@ -1245,15 +1247,14 @@ def frame_of(card, aspect):
     """"scene", "split" or "box" for one card (references/motion.md "Layout per template"). A visuals.json
     beat's "layout" wins, except that an explaining card on vertical is never a box over the face.
     Captures: split on vertical (a screen needs the room), a box on wide. Split is vertical only."""
-    # Overlay first: every card floats over the footage beside or above the head. A full-frame scene when a
-    # beat asks for one ("layout": "scene", a chapter title) or for a flow on vertical; the split panel when
-    # asked, or for an icon_burst on vertical.
+    # Overlay first: every card floats over the footage beside or above the head, the speaker stays on screen.
+    # A full-frame scene only when the beat asks for one ("layout": "scene"); the split panel when asked, or
+    # for an icon_burst on vertical when the split layout is on (lay_out keeps it a box otherwise).
     want = card.get("layout")
     got = want if want in LAYOUTS else "box"
     t = (card.get("anim") or {}).get("type")
-    if aspect == "9:16" and got == "box" and t in SCENES + SPLIT_FIRST:
-        # SKILL.md step 3: on vertical an explaining card is a full-frame scene or sits in the split panel
-        got = "split" if t in SPLIT_FIRST else "scene"
+    if aspect == "9:16" and got == "box" and not want and t in SPLIT_FIRST:
+        got = "split"
     return "box" if got == "split" and aspect != "9:16" else got
 
 
@@ -1368,7 +1369,7 @@ def lay_out(cards, aspect, face, style, split_ok):
     for c in sorted(cards, key=lambda c: c["start"]):
         f = frame_of(c, aspect)
         if f == "split" and not split_ok:
-            f = "scene"        # no panel in overlay: a full-frame cut-away instead
+            f = "scene" if c.get("layout") == "split" else "box"   # no panel in overlay: a box, unless the beat asked for the panel
         c["_f"] = f
         if f == "scene":
             cyc = scene_cycle(style)
@@ -1902,7 +1903,11 @@ def demo():
     cues = place_sfx(sp, sw, kit)
     ev = [(c["event"], c["src"]) for c in cues]
     assert ev == [(1.1, ".sfx/whoosh-in.wav"), (2.5, ".sfx/hit.wav")], ev   # 10 s: two cues, the highest ranked
-    assert all(abs(c["t"] - (c["event"] - 0.2)) < 1e-6 for c in cues)   # started early by the attack
+    assert all(abs(c["t"] - (c["event"] - 0.2)) < 0.5 / sp["fps"] for c in cues)   # started early by the attack
+    # on a frame: Sfx.tsx starts a cue on frame round(t x fps); a t between frames played up to half a frame
+    # early, and check.py's cue check (from t on) missed most of a short pop (the 12.9 s pop of the real run)
+    ntsc = 30000 / 1001
+    assert all(abs(c["t"] * ntsc - round(c["t"] * ntsc)) < 0.01 for c in place_sfx({**sp, "fps": ntsc}, sw, kit))
     assert all(b["event"] - a["event"] >= SFX_GAP_S for a, b in zip(cues, cues[1:]))   # 1.25 zoom and 1.6 pop lost
     sp["durationInFrames"] = 90   # 3 s: room for one cue, the highest ranked
     assert [c["src"] for c in place_sfx(sp, sw, kit)] == [".sfx/hit.wav"]
@@ -1917,11 +1922,12 @@ def demo():
                        {"word": "d", "kind": "anim", "type": "arrow_callout", "props": {"text": "ship it \U0001F680"}}], None, quiet.append)
     assert [v["word"] for v in ag] == ["c", "d"] and ag[1]["props"]["text"] == "ship it" and len(quiet) == 3, (ag, quiet)
     assert ANIMS[:len(TEMPLATES)] == TEMPLATES and all(t in ANIMS for t in LEGACY + OVERLAYS) and not set(ANIMS) & set(TYPE_ONLY)
-    # layouts: overlay first; a scene or the split panel when a beat asks, and always for an explaining card on
-    # vertical (SKILL.md step 3: the sample's flow in a box rendered small and off centre)
+    # layouts: overlay first; a scene or the split panel only when a beat asks (an icon_burst on vertical goes in
+    # the split panel when the split layout is on)
     fr = lambda t, a="9:16", **k: frame_of({"anim": {"type": t}, "trigger_word": "x", **k}, a)
+    # a diagram is an overlay over the footage unless the beat asks for a scene (the speaker stays on screen)
     assert (fr("shot"), fr("flow"), fr("icon_burst"), fr("logo_sting"), fr("flow", layout="split"), fr("flow", layout="scene"),
-            fr("flow", layout="box"), fr("flow", "16:9")) == ("box", "scene", "split", "box", "split", "scene", "scene", "box")
+            fr("flow", layout="box"), fr("flow", "16:9")) == ("box", "box", "split", "box", "split", "scene", "box", "box")
     assert frame_of({"src": "images/c.png", "trigger_word": "x"}, "9:16") == "box"
     assert (fr("chat", "16:9"), fr("icon_burst", "16:9", layout="split"), fr("arrow_callout", "16:9")) == ("box", "box", "box")
     # type cards are gone: an old visuals.json naming one is skipped

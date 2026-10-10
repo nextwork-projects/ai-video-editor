@@ -86,6 +86,19 @@ console.log("deny list ok");
   console.log("scene ink until the ground leaves ok");
 }
 
+// Captions hidden under a scene (its type is the caption) fade out and back in, never vanish in one frame
+{
+  const { captionFade } = await import(pathToFileURL(path.join(ROOT, "plugins/ai-editor/remotion/src/ground.ts")).href);
+  const hidden = (t) => t >= 14.18 && t < 14.6;
+  assert.equal(captionFade(hidden, 14.3), 0, "hidden while the scene shows the words");
+  assert.equal(captionFade(hidden, 13.5), 1, "untouched well before");
+  const step = 1 / 30;
+  for (let t = 13.8; t < 15; t += step) {
+    assert.ok(Math.abs(captionFade(hidden, t + step) - captionFade(hidden, t)) <= 0.21, `a jump at ${t.toFixed(2)} s`);
+  }
+  console.log("captions fade under a scene ok");
+}
+
 // login.mjs finds Chrome off its fixed paths too: PATH on Linux (snap, a distro chromium), Edge on Windows
 {
   const { chromeBinary } = await import(pathToFileURL(path.join(SCRIPTS, "product-video/scripts/login.mjs")).href);
