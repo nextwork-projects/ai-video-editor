@@ -140,7 +140,7 @@ Only answered keys are stored; `profile.py missing` lists the rest and `load()` 
 ```
 
 - `platform`: `tiktok` | `reels` | `shorts` | `youtube`; `aspect` follows it (`9:16`, or `16:9` for youtube).
-- `brand`: `{"use_creator": true}` or colours, font and logo. `captions.style`: `creator` | `bold` | `karaoke` | `minimal`.
+- `brand`: `{"use_creator": true}` or colours, font and logo. `captions.style`: `creator` | `plain` | `bold` | `karaoke` | `minimal`.
 - `goal` and `names` belong to one video and are re-confirmed on later videos.
 - Look order in plan.py: the profile's brand kit, then the creators' measured style.json, then the `editorial` preset.
 
@@ -195,7 +195,7 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 - `anim`: `type` an overlay format (visuals.md), `logo` (`src`, `label`), or a template in motion.md.
   Type cards (`counter`, `steps`, `versus`, `keyword`, `slam`, `title`, charts) were removed; plan.py
   skips them with a warning. plan.py reads these straight from visuals.json.
-  The diagram, `flow` (Diagrams.tsx; a full-frame scene on vertical, an overlay box on wide; a beat's `"layout"` overrides, visuals.md "Where each card sits"):
+  The diagram, `flow` (Diagrams.tsx; an overlay box beside or above the head; a beat's `"layout"` overrides, visuals.md "Where each card sits"):
   `nodes` (1-6 Parts, a chain; 4+ wrap to two rows), optional `split` (2-4 branch Parts off the last
   node), `tasks` (`[{"text", "word", "heavy"?}]`: chips that pop left of the source on their word),
   `accent` (`#hex`: ring, hot wire and chosen name; the destination's brand colour), `tag` (`{"text", "word"}`).
@@ -239,11 +239,12 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 }
 ```
 
-A caption chunk may carry `treat` (`"shadow"` | `"stroke"` | `"backing"`) and `treat_color`: plan.py measured the
+A caption chunk may carry `treat` (`"shadow"` | `"glow"` | `"stroke"` | `"backing"`) and `treat_color`: plan.py measured the
 cut behind that page (at the caption box, through the zooms) and the creator's look would read under 3:1 there,
 so it adds the first step that reaches 3:1. Each step keeps the one before. The colour is the darkest of the
 creator's palette that stands 4.5:1 off the fill, else near-black (near-white for dark text). A style with its
-own stroke or box gets none.
+own stroke or box gets none. Plain captions (`captions.style: "plain"`) step shadow, glow (a wide feathered
+shadow, no edge), and keep the glow while it reads at 3.3:1; only under that do they get the stroke, then the backing.
 
 A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. Optional per card:
 `lane` (`"logo"` for the logo tiles' lane), `size` and `highlight` (from images.json, for an image), and:

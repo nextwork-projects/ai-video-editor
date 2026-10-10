@@ -125,6 +125,7 @@ and `creator-teardowns/<handle>/`.
 | `creator-teardown` | "break down @creator", "tear down @creator" | a TikTok, YouTube or Instagram profile, or single video links |
 | `cut` | "cut my video", "remove my mistakes" | a video file path |
 | `style-edit` | "style it", "add captions and zooms", "render the edit", "export to Final Cut" (or Premiere, Resolve, CapCut) | |
+| `overlays` | after a render: "add an animation here", "make a diagram of how this works", "this card is wrong", "swap the logo", "show the real page instead", "fewer cards" | |
 | `taste` | "captions too small", "fewer zooms" | |
 | `clips` | "clip this video", "make shorts from my podcast" | a long video, a YouTube link, a podcast episode (Apple Podcasts, RSS, YouTube) |
 | `product-video` | "make a launch video for my site" | a website URL |

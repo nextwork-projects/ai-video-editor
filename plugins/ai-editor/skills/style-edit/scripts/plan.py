@@ -3,6 +3,9 @@
 
     python3 plan.py <style.json> <edits/NAME/captions.json> [--images images.json (default: next to it)]
                     [--aspect auto|9:16|16:9] [--layout overlay|split] [--out edits/NAME/plan.json]
+    python3 plan.py cards edits/NAME [--plan plan.json]   every card, its time, box and the beat it came from
+    python3 plan.py beat  edits/NAME card:3|0:15|word@2 key=value ... | --drop   change one beat (visuals.json, images.json)
+    python3 plan.py beat  edits/NAME --add beats.json   new beats into visuals.json in spoken order
     python3 plan.py demo      self-check
 
 cut.mp4 is read from the words' folder (ffprobe gives its size, fps and length). A missing or empty
@@ -89,7 +92,7 @@ BOX_OK = ("logo", "logo_sting", "arrow_callout", "caption_page")
 SPLIT_FIRST = ("icon_burst",)    # scene or split: split keeps the speaker in shot
 LAYOUTS = ("scene", "split", "box")
 SCENE_BOX = [0, 0, 100, 100]            # "use the scene box" (the renderer's, clear of the app's UI)
-SCENE_TYPE_BOX = {True: [6, 13, 88, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
+SCENE_TYPE_BOX = {True: [14, 14, 72, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
 TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
 # A scene's transition in takes about 0.62 s x the personality's k (Scene.tsx). The scene starts this
 # much earlier than a box card, so the ground has mostly grown by the word. A "cut" in has nothing to grow:
@@ -1134,7 +1137,9 @@ def place_sfx(plan, words, kit, sound=None):
                 and all(abs(t - k) >= SFX_GAP_S for k, _ in kept):
             kept.append((t, name))
     kept = [k for i, k in enumerate(sorted(kept)) if i == 0 or k[1] != sorted(kept)[i - 1][1]]   # never the same cue twice running
-    return [{"t": round(max(0.0, t - kit["cues"][n]["attack_s"]), 3), "src": f".sfx/{n}.wav", "event": round(t, 3)}
+    # on the frame Sfx.tsx starts it on (round(t x fps)): the plan's t is when the cue really plays
+    fps = plan["fps"]
+    return [{"t": round(round(max(0.0, t - kit["cues"][n]["attack_s"]) * fps) / fps, 4), "src": f".sfx/{n}.wav", "event": round(t, 3)}
             for t, n in kept]
 
 
@@ -1242,15 +1247,14 @@ def frame_of(card, aspect):
     """"scene", "split" or "box" for one card (references/motion.md "Layout per template"). A visuals.json
     beat's "layout" wins, except that an explaining card on vertical is never a box over the face.
     Captures: split on vertical (a screen needs the room), a box on wide. Split is vertical only."""
-    # Overlay first: every card floats over the footage beside or above the head. A full-frame scene when a
-    # beat asks for one ("layout": "scene", a chapter title) or for a flow on vertical; the split panel when
-    # asked, or for an icon_burst on vertical.
+    # Overlay first: every card floats over the footage beside or above the head, the speaker stays on screen.
+    # A full-frame scene only when the beat asks for one ("layout": "scene"); the split panel when asked, or
+    # for an icon_burst on vertical when the split layout is on (lay_out keeps it a box otherwise).
     want = card.get("layout")
     got = want if want in LAYOUTS else "box"
     t = (card.get("anim") or {}).get("type")
-    if aspect == "9:16" and got == "box" and t in SCENES + SPLIT_FIRST:
-        # SKILL.md step 3: on vertical an explaining card is a full-frame scene or sits in the split panel
-        got = "split" if t in SPLIT_FIRST else "scene"
+    if aspect == "9:16" and got == "box" and not want and t in SPLIT_FIRST:
+        got = "split"
     return "box" if got == "split" and aspect != "9:16" else got
 
 
@@ -1365,7 +1369,7 @@ def lay_out(cards, aspect, face, style, split_ok):
     for c in sorted(cards, key=lambda c: c["start"]):
         f = frame_of(c, aspect)
         if f == "split" and not split_ok:
-            f = "scene"        # no panel in overlay: a full-frame cut-away instead
+            f = "scene" if c.get("layout") == "split" else "box"   # no panel in overlay: a box, unless the beat asked for the panel
         c["_f"] = f
         if f == "scene":
             cyc = scene_cycle(style)
@@ -1543,8 +1547,11 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         out = {**head, "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
                                   "speaker": speaker_frame(face, seam), "caption_full_y": full_y}}
     else:
-        rest = [c for c in rest if c.get("lane") != "logo"
-                or not any(sc["start"] - 0.5 < c["end"] and c["start"] < sc["end"] + 0.5 for sc in scenes)]
+        near = lambda c: c.get("lane") == "logo" and any(sc["start"] - 0.5 < c["end"] and c["start"] < sc["end"] + 0.5 for sc in scenes)
+        for c in filter(near, rest):
+            print(f"warning: the '{c['trigger_word']}' logo is within 0.5 s of a scene, dropped: end the scene sooner "
+                  "(hold_s) or move the logo", file=sys.stderr)
+        rest = [c for c in rest if not near(c)]
         # the head as it is drawn: grown by the zooms (and moved by the pans), as check.py plan measures it
         from check import on_screen
         moved = {"zooms": zooms, "pans": place_pans((style.get("camera") or {}) if took(style, "pace") else {}, duration)}
@@ -1622,8 +1629,14 @@ CONTRAST_TARGET = 4.7
 # quality.py's contrast check sees it: fitted to renders of white captions on a bright (#E6E1D8) and a
 # grey (#9A9A9A) desk, which agree to 0.04, rounded down. The renderer's default soft shadow, the
 # treatment's denser shadow, that plus a 0.1 em stroke, and all of it on a 0.45 backing (Captions.tsx).
-PULL = {"plain": 0.07, "shadow": 0.12, "stroke": 0.45, "backing": 0.7}
+# glow: plain captions' step after the shadow (Captions.tsx), fitted the same way at TikTok Sans 600, 4.2%: 0.29 / 0.31.
+PULL = {"plain": 0.07, "shadow": 0.12, "glow": 0.28, "stroke": 0.45, "backing": 0.7}
 TREATS = ("shadow", "stroke", "backing")
+# Plain captions (profile.py PLAIN_CAPTIONS) take a shadow, then a glow, and keep the glow while it reads at
+# PLAIN_MIN or better (the render check may WARN there, it does not FAIL). Only under that, where the page would
+# actually fail, do they get the stroke and then the backing.
+PLAIN_TREATS = ("shadow", "glow")
+PLAIN_MIN = CONTRAST_MIN + 0.3
 LUM = [((v / 255) / 12.92 if v / 255 <= 0.04045 else ((v / 255 + 0.055) / 1.055) ** 2.4) for v in range(256)]
 
 
@@ -1668,7 +1681,10 @@ def pick_treat(pixels, style):
         got = treat_for(pixels, fill, 0.0, tc)
     if got >= CONTRAST_TARGET:
         return None, hexc, got
-    for t in TREATS:
+    plain = style.get("style") == "plain"
+    for t in PLAIN_TREATS + TREATS[1:] if plain else TREATS:
+        if plain and t == "stroke" and got >= PLAIN_MIN:
+            return "glow", hexc, got
         got = treat_for(pixels, fill, PULL[t], tc)
         if got >= CONTRAST_TARGET:
             break
@@ -1747,7 +1763,12 @@ def treat_captions(plan, edit_dir, meta, floors=None):
     return sorted(done.values())
 
 
-STEPS = (None,) + TREATS
+STEPS = (None, "shadow", "glow", "stroke", "backing")   # every treatment, least visible first
+
+
+def steps_of(cs):
+    """The treatments a page of this caption style steps through: plain captions have the glow, others skip it."""
+    return STEPS if cs.get("style") == "plain" else (None,) + TREATS
 
 
 def contrast_summary(changed, chunks, worst=3):
@@ -1776,9 +1797,14 @@ def contrast_floors(edit_dir, out):
         if ck.exists() else None
     stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
     if low and out.exists() and stamp not in doc["read"]:
-        for c in json.loads(out.read_text(encoding="utf-8"))["captions"]["chunks"]:
-            if any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in low):
-                key, nxt = f"{c['start']:.2f}", STEPS[min(len(STEPS) - 1, STEPS.index(c.get("treat")) + 1)]
+        # a plain page keeps its glow unless the render read it under CONTRAST_MIN (fail_at): a WARN is its look
+        fail = ((json.loads(ck.read_text(encoding="utf-8")).get("render") or {}).get("caption_contrast") or {}).get("fail_at") or []
+        cap = json.loads(out.read_text(encoding="utf-8"))["captions"]
+        order = steps_of(cap.get("style") or {})
+        for c in cap["chunks"]:
+            hit = lambda ts: any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in ts)
+            if hit(low) and not (c.get("treat") == "glow" and not hit(fail)):
+                key, nxt = f"{c['start']:.2f}", order[min(len(order) - 1, order.index(c.get("treat")) + 1)]
                 if STEPS.index(nxt) > STEPS.index(doc["pages"].get(key)):
                     doc["pages"][key] = nxt
         doc["read"].append(stamp)
@@ -1896,7 +1922,11 @@ def demo():
     cues = place_sfx(sp, sw, kit)
     ev = [(c["event"], c["src"]) for c in cues]
     assert ev == [(1.1, ".sfx/whoosh-in.wav"), (2.5, ".sfx/hit.wav")], ev   # 10 s: two cues, the highest ranked
-    assert all(abs(c["t"] - (c["event"] - 0.2)) < 1e-6 for c in cues)   # started early by the attack
+    assert all(abs(c["t"] - (c["event"] - 0.2)) < 0.5 / sp["fps"] for c in cues)   # started early by the attack
+    # on a frame: Sfx.tsx starts a cue on frame round(t x fps); a t between frames played up to half a frame
+    # early, and check.py's cue check (from t on) missed most of a short pop (the 12.9 s pop of the real run)
+    ntsc = 30000 / 1001
+    assert all(abs(c["t"] * ntsc - round(c["t"] * ntsc)) < 0.01 for c in place_sfx({**sp, "fps": ntsc}, sw, kit))
     assert all(b["event"] - a["event"] >= SFX_GAP_S for a, b in zip(cues, cues[1:]))   # 1.25 zoom and 1.6 pop lost
     sp["durationInFrames"] = 90   # 3 s: room for one cue, the highest ranked
     assert [c["src"] for c in place_sfx(sp, sw, kit)] == [".sfx/hit.wav"]
@@ -1911,11 +1941,12 @@ def demo():
                        {"word": "d", "kind": "anim", "type": "arrow_callout", "props": {"text": "ship it \U0001F680"}}], None, quiet.append)
     assert [v["word"] for v in ag] == ["c", "d"] and ag[1]["props"]["text"] == "ship it" and len(quiet) == 3, (ag, quiet)
     assert ANIMS[:len(TEMPLATES)] == TEMPLATES and all(t in ANIMS for t in LEGACY + OVERLAYS) and not set(ANIMS) & set(TYPE_ONLY)
-    # layouts: overlay first; a scene or the split panel when a beat asks, and always for an explaining card on
-    # vertical (SKILL.md step 3: the sample's flow in a box rendered small and off centre)
+    # layouts: overlay first; a scene or the split panel only when a beat asks (an icon_burst on vertical goes in
+    # the split panel when the split layout is on)
     fr = lambda t, a="9:16", **k: frame_of({"anim": {"type": t}, "trigger_word": "x", **k}, a)
+    # a diagram is an overlay over the footage unless the beat asks for a scene (the speaker stays on screen)
     assert (fr("shot"), fr("flow"), fr("icon_burst"), fr("logo_sting"), fr("flow", layout="split"), fr("flow", layout="scene"),
-            fr("flow", layout="box"), fr("flow", "16:9")) == ("box", "scene", "split", "box", "split", "scene", "scene", "box")
+            fr("flow", layout="box"), fr("flow", "16:9")) == ("box", "box", "split", "box", "split", "scene", "box", "box")
     assert frame_of({"src": "images/c.png", "trigger_word": "x"}, "9:16") == "box"
     assert (fr("chat", "16:9"), fr("icon_burst", "16:9", layout="split"), fr("arrow_callout", "16:9")) == ("box", "box", "box")
     # type cards are gone: an old visuals.json naming one is skipped
@@ -2068,6 +2099,7 @@ def demo():
     assert card_gaps([{"start": 1, "end": 3}, {"start": 2, "end": 4}, {"start": 9, "end": 10}], 12) == [(0.0, 1), (4, 9), (10, 12)]
     assert card_gap_s({}) == GAP_S and card_gap_s({"graphics": {"per_min": 5.0}}) == 24.0
     demo_contrast()
+    demo_beats()
     print("demo ok")
 
 
@@ -2101,6 +2133,18 @@ def demo_contrast():
     assert "5.0:1 'w8'" in got and "'w5'" not in got and "1 from the last render check" in got, got
     assert contrast_summary([], ch) == ""
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
+    # plain captions (the default): a glow where the shadow is not enough, never a stroke while the glow reads at
+    # PLAIN_MIN; under that (a page that would FAIL) the stroke, then the backing
+    plain = {"color": "#FFFFFF", "shadow": False, "style": "plain"}
+    assert pick_treat([(160, 160, 160)] * 9, plain)[0] == "glow" and pick_treat([(160, 160, 160)] * 9, white)[0] == "stroke"
+    assert pick_treat([(126, 126, 126)] * 9, plain)[0] == "shadow"
+    assert pick_treat([(190, 190, 190)] * 9, plain)[0] in ("stroke", "backing")
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "plan.json").write_text(json.dumps({"captions": {"style": plain, "chunks": [
+            {"start": 1.0, "end": 2.0, "treat": "glow"}, {"start": 2.0, "end": 3.0, "treat": "glow"}, {"start": 3.0, "end": 4.0, "treat": "shadow"}]}}), encoding="utf-8")
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5, 2.5, 3.5], "fail_at": [2.5]}}}), encoding="utf-8")
+        assert contrast_floors(d, d / "plan.json") == {"2.00": "stroke", "3.00": "glow"}   # a WARN keeps the glow
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
     assert pick_treat([(20, 20, 20)] * 9, {"color": "#111111"})[:2] == ("backing", "#F5F5F5")     # dark text
@@ -2126,9 +2170,191 @@ def demo_contrast():
         assert json.loads((Path(d) / "plan.json").read_text(encoding="utf-8"))["zooms"], r.stdout
 
 
+# One beat at a time, for the overlays skill: which beat made a card, and a change to just that beat.
+BEAT_FILES = ("visuals.json", "images.json")
+
+
+def said(words, word):
+    """Start times of each time `word` is said."""
+    w = clean(word).lower()
+    return [x["start"] for x in words if x.get("type", "word") == "word" and clean(x["text"]).lower() == w]
+
+
+def card_sources(plan, words, sources):
+    """Per plan card: (nth, word time, [(file, index)]): which time its word is said and the beats that made it.
+    A card starts before its word, so its word is the first time it is said from the card's start on."""
+    out = []
+    for c in plan["cards"]:
+        w = c.get("trigger_word") or ""
+        ts = said(words, w)
+        nth = next((k + 1 for k, t in enumerate(ts) if t >= c["start"] - 0.01), None)
+        hits = [(name, i) for name, items in sources for i, b in enumerate(items)
+                if clean(b.get("word") or "").lower() == clean(w).lower() and b.get("nth", nth) == nth]
+        out.append((nth, ts[nth - 1] if nth else None, hits))
+    return out
+
+
+def find_beats(ref, plan, words, sources):
+    """'card:3' (plan.cards[3], as the review page names it), '0:15' / '15.4s' (the card up then), or
+    'word' / 'word@2' -> [(file, index)] of the beats it means."""
+    m = re.fullmatch(r"card:?(\d+)", ref)
+    if m:
+        i = int(m.group(1))
+        return card_sources(plan, words, sources)[i][2] if i < len(plan["cards"]) else []
+    if re.fullmatch(r"(\d+:)?\d+(\.\d+)?s?", ref):
+        mm, _, sec = ref.rstrip("s").rpartition(":")
+        t = (int(mm) * 60 if mm else 0) + float(sec)
+        cs = plan["cards"]
+        up = sorted((i for i, c in enumerate(cs) if c["start"] <= t < c["end"]), key=lambda i: cs[i].get("lane") == "logo")
+        near = up or sorted((i for i, c in enumerate(cs) if min(abs(c["start"] - t), abs(c["end"] - t)) < 1.5),
+                            key=lambda i: abs(cs[i]["start"] - t))
+        return card_sources(plan, words, sources)[near[0]][2] if near else []
+    word, _, nth = ref.partition("@")
+    return [(name, i) for name, items in sources for i, b in enumerate(items)
+            if clean(b.get("word") or "").lower() == clean(word).lower() and (not nth or b.get("nth", 1) == int(nth))]
+
+
+def set_key(d, key, value):
+    """'props.label' = value inside d; None removes the key."""
+    *head, last = key.split(".")
+    for k in head:
+        d = d.setdefault(k, {})
+    if value is None:
+        d.pop(last, None)
+    else:
+        d[last] = value
+
+
+def keep_rendered(out):
+    """Before a re-plan overwrites out: a plan no newer than its render is the plan that render came from.
+    Kept as render.plan.json (edit.py render writes it too), which edit.py patch diffs against."""
+    rendered = out.parent / f"render{out.stem[len('plan'):]}.mp4"
+    snap = rendered.with_suffix(".plan.json")
+    if rendered.exists() and out.exists() and not snap.exists() and out.stat().st_mtime <= rendered.stat().st_mtime:
+        snap.write_bytes(out.read_bytes())
+
+
+def demo_beats():
+    """plan.py cards / beat: a card traced to its beat, one beat changed, beats added in spoken order."""
+    import contextlib, io, os
+    words = [{"text": t, "start": s, "end": s + 0.3, "type": "word"} for t, s in
+             [("This", 14.9), ("is", 15.1), ("the", 15.2), ("Duolingo", 15.42), ("one.", 15.8), ("reference", 13.2), ("Duolingo.", 17.0)]]
+    words.sort(key=lambda w: w["start"])
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        (d / "captions.json").write_text(json.dumps(words), encoding="utf-8")
+        (d / "visuals.json").write_text(json.dumps([{"word": "Duolingo", "nth": 1, "kind": "logo", "brand": "Duolingo"},
+                                                    {"word": "Duolingo", "nth": 2, "kind": "logo", "brand": "Duolingo"}]), encoding="utf-8")
+        (d / "plan.json").write_text(json.dumps({"cards": [
+            {"anim": {"type": "logo"}, "lane": "logo", "start": 15.32, "end": 16.3, "trigger_word": "Duolingo", "box": [40, 50, 20, 11]},
+            {"anim": {"type": "logo"}, "lane": "logo", "start": 16.9, "end": 17.9, "trigger_word": "Duolingo", "box": [40, 50, 20, 11]}]}), encoding="utf-8")
+
+        def run(*a):
+            o = io.StringIO()
+            with contextlib.redirect_stdout(o):
+                beat_cmd(list(a))
+            return o.getvalue()
+        out = run("cards", t)
+        assert "card:0  15.32-16.30 s  logo  'Duolingo'@1  box 40,50,20,11  <- visuals.json[0]" in out, out
+        assert "'Duolingo'@2" in out and "visuals.json[1]" in out, out
+        run("beat", t, "0:15", "box=[40,17,20,11]", "props.label=Duolingo")   # 0.32 s before the card: the card it means
+        vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
+        assert vis[0]["box"] == [40, 17, 20, 11] and vis[0]["props"] == {"label": "Duolingo"} and "box" not in vis[1], vis
+        run("beat", t, "card:1", "hold_s=2.5")
+        run("beat", t, "Duolingo@1", "props=null")
+        vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
+        assert vis[1]["hold_s"] == 2.5 and "props" not in vis[0], vis
+        (d / "fill.json").write_text(json.dumps([{"word": "reference", "nth": 1, "kind": "anim", "type": "flow", "props": {}}]), encoding="utf-8")
+        run("beat", t, "--add", str(d / "fill.json"))
+        assert [b["word"] for b in json.loads((d / "visuals.json").read_text(encoding="utf-8"))] == ["reference", "Duolingo", "Duolingo"]
+        run("beat", t, "card:1", "--drop")
+        assert [b.get("nth") for b in json.loads((d / "visuals.json").read_text(encoding="utf-8"))] == [1, 1]
+        try:
+            run("beat", t, "9:00", "box=[1,1,1,1]")
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            assert "plan.py cards" in str(e.code)
+        # the rendered plan is kept before a re-plan overwrites it, once
+        (d / "render.mp4").write_bytes(b"x")
+        os.utime(d / "plan.json", (1, 1))
+        keep_rendered(d / "plan.json")
+        assert (d / "render.plan.json").read_bytes() == (d / "plan.json").read_bytes()
+        (d / "plan.json").write_text("{}", encoding="utf-8")
+        keep_rendered(d / "plan.json")
+        assert (d / "render.plan.json").read_bytes() != b"{}"
+
+
+def beat_cmd(argv):
+    ap = argparse.ArgumentParser(prog="plan.py cards|beat")
+    ap.add_argument("cmd", choices=["cards", "beat"])
+    ap.add_argument("edit")
+    ap.add_argument("ref", nargs="?", help="card:3, 0:15 or 15.4s, word or word@2")
+    ap.add_argument("sets", nargs="*", help="key=value (JSON, or plain text); props.label=x sets inside; key=null removes")
+    ap.add_argument("--drop", action="store_true", help="remove the beat")
+    ap.add_argument("--add", nargs="+", metavar="FILE", help="beats (a JSON list, e.g. a template-filler's) into visuals.json in spoken order")
+    ap.add_argument("--plan", default="plan.json")
+    a = ap.parse_args(argv)
+    edit = Path(a.edit).resolve()
+    rd = lambda n, d: json.loads((edit / n).read_text(encoding="utf-8")) if (edit / n).exists() else d
+    words = rd("captions.json", None) or rd("words.json", [])
+    plan = rd(a.plan, {"cards": []})
+    sources = [(n, rd(n, [])) for n in BEAT_FILES]
+    if a.cmd == "cards":
+        sys.path.insert(0, str(Path(__file__).parent))
+        from sheet import kind
+        for i, (c, (nth, t, hits)) in enumerate(zip(plan["cards"], card_sources(plan, words, sources))):
+            box = ",".join(f"{v:g}" for v in (round(x, 1) for x in c.get("box") or []))
+            print(f"card:{i}  {c['start']:.2f}-{c['end']:.2f} s  {kind(c)}  '{c.get('trigger_word', '')}'@{nth}  box {box}"
+                  + (f"  {c['layer']}" if c.get("layer") else "") + "  <- " + (", ".join(f"{n}[{j}]" for n, j in hits) or "no beat found"))
+        print(f"{len(plan['cards'])} cards in {a.plan}. The stills sheet's 'card N' is card:N-1.")
+        return
+    changed = []
+    if a.add:
+        vis = dict(sources)["visuals.json"]
+        at = lambda b: (said(words, b.get("word") or "")[b.get("nth", 1) - 1:] or [math.inf])[0]
+        for f in a.add:
+            for b in json.loads(Path(f).read_text(encoding="utf-8")):
+                if at(b) == math.inf:
+                    print(f"warning: '{b.get('word')}' (time {b.get('nth', 1)}) is never said in this cut; added anyway, plan.py will skip it",
+                          file=sys.stderr)
+                k = next((i for i, x in enumerate(vis) if at(x) > at(b)), len(vis))
+                vis.insert(k, b)
+                changed.append(f"added {b.get('kind')} {b.get('type') or b.get('brand') or ''} on '{b.get('word')}'".replace("  ", " "))
+        (edit / "visuals.json").write_text(json.dumps(vis, indent=1), encoding="utf-8")
+    elif a.ref:
+        hits = find_beats(a.ref, plan, words, sources)
+        if not hits:
+            sys.exit(f"no beat matches {a.ref!r}: plan.py cards {edit} lists every card and the beat it came from")
+        for name, i in sorted(hits, reverse=True):
+            items = dict(sources)[name]
+            if a.drop:
+                changed.append(f"dropped {name}[{i}] '{items[i].get('word')}'")
+                items.pop(i)
+                continue
+            for kv in a.sets:
+                k, _, v = kv.partition("=")
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    pass
+                set_key(items[i], k, v)
+            changed.append(f"{name}[{i}] '{items[i].get('word')}': " + json.dumps(items[i]))
+        for name, items in sources:
+            if any(n == name for n, _ in hits):
+                (edit / name).write_text(json.dumps(items, indent=1), encoding="utf-8")
+    else:
+        sys.exit("give a beat (card:3, 0:15, word@2) with key=value or --drop, or --add FILE")
+    for line in changed:
+        print(line)
+    if changed:
+        print("next: a new or changed capture, logo or post needs capture.mjs first; then plan.py again (style-edit step 4)")
+
+
 def main():
     if sys.argv[1:] == ["demo"]:
         return demo()
+    if sys.argv[1:2] in (["cards"], ["beat"]):
+        return beat_cmd(sys.argv[1:])
     ap = argparse.ArgumentParser()
     ap.add_argument("style")
     ap.add_argument("words")
@@ -2184,6 +2410,7 @@ def main():
         if len(plan["cutouts"]) < len(matte.behind_ranges(plan)):
             print(f"behind cards: run matte.py {edit_dir}" + (f" --plan {out.name}" if out.name != "plan.json" else "")
                   + " (it cuts only the frames not cut yet)", file=sys.stderr)
+    keep_rendered(out)
     out.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     from ai_tells import check_plan as ai_tells, for_brand   # the AI-made look (references/ai-tells.md)
     for f in for_brand(ai_tells(plan, visuals), prof.get("brand")):

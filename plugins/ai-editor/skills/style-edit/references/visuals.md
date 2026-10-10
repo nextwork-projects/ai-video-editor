@@ -85,17 +85,16 @@ around the head, never over it (face.json). `plan.py` (`place_overlays`) puts ea
 its picture fills best: above the head (wide pictures: a page, a chat, a post), or beside it (tall
 ones: a phone screenshot, a toast stack, a cropped sticker) on vertical; left or right of the head
 on wide. A `logo_cluster` takes the whole frame; on vertical its logos are 20% of the width each,
-spread over a band from 17% to 83% above the head, on wide they sit round the head. On vertical a
-`flow` is always a full-frame scene and an `icon_burst` sits in the split panel. A beat with its own
-`box` keeps it.
+spread over a band from 17% to 83% above the head, on wide they sit round the head. A `flow` is an
+overlay in the band beside or above the head: the speaker stays on screen. An `icon_burst` on vertical
+sits in the split panel when the layout is split, else a box. A beat with its own `box` keeps it.
 
 | card | where |
 |---|---|
-| captures (`shot`, `browser`, `sticker`), `chat`, `terminal`, `toasts`, `social_post`, `side_by_side`, `video_card`, `flow` (wide only) | the free region around the head it fills best |
+| captures (`shot`, `browser`, `sticker`), `chat`, `terminal`, `toasts`, `social_post`, `side_by_side`, `video_card`, `flow` | the free region around the head it fills best |
 | `logo_cluster` | the whole frame; vertical: big logos in a centred band above the head; wide: round the head |
-| `flow` on vertical | a full-frame scene (the split panel when the layout is split) |
 | `logo` / `logo_sting`, `arrow_callout`, `caption_page` | their own small box |
-| `flow`, `icon_burst` with `"layout": "scene"` | a full-frame cut-away |
+| `flow`, `icon_burst` with `"layout": "scene"` | a full-frame cut-away, only when the user asked for one (`check.py plan` FAILs a scene no beat asked for) |
 
 `"layout": "split"` (vertical only) puts a card in the split layout's top panel; `--layout split`
 does it for the whole edit. Neither is the default any more.

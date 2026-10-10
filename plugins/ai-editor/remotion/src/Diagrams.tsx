@@ -43,7 +43,7 @@ export const Diagram: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const U = Math.min(FW, FH) / 100, s = U / 10.8, u = Math.min(w, h) / 100;
   const LAB = 40 * s;
   // a full-frame scene sits on the look's own ground: no veil, ink wires (overlay boxes are never this big)
-  const scene = w > FW * 0.8 && h > FH * 0.45; // the smallest label, px: reads on a phone at 1080 wide
+  const scene = w > FW * 0.65 && h > FH * 0.45; // the vertical scene box is 72% wide (Scene.tsx sceneBox)
   const chain: Part[] = (p.nodes ?? []).slice(0, 6);
   const branches: Part[] = (p.split ?? []).slice(0, Math.max(0, Math.min(4, 6 - chain.length)));
   const tasks: Task[] = (p.tasks ?? []).filter((x: Task) => x?.text).slice(0, 4);

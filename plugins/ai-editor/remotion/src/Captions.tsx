@@ -9,8 +9,9 @@ import { loadFamily } from "./look";
 
 export type Word = { text: string; start: number; end: number; emph?: boolean };
 /** treat: what plan.py added to this page because the footage behind it would drop the creator's look under
- *  3:1 (a stronger soft shadow; then a thin stroke; then a subtle backing), in treat_color. */
-export type Chunk = { text: string; start: number; end: number; words: Word[]; treat?: "shadow" | "stroke" | "backing"; treat_color?: string };
+ *  3:1 (a stronger soft shadow; then a thin stroke; then a subtle backing), in treat_color. Plain captions
+ *  never get a stroke or backing: their step after the shadow is a glow, a wide feathered shadow with no edge. */
+export type Chunk = { text: string; start: number; end: number; words: Word[]; treat?: "shadow" | "glow" | "stroke" | "backing"; treat_color?: string };
 export type CaptionStyle = {
   present?: boolean;
   y_pct?: number;
@@ -90,7 +91,8 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
     const tr = style.flat ? undefined : chunk.treat;
     const tc = chunk.treat_color ?? "#111111";
     const boxed = style.box || tr === "backing";
-    const shadow = tr ? `0 0 ${size * 0.02}px ${rgba(tc, 1)}, 0 0 ${size * 0.06}px ${rgba(tc, 0.9)}, 0 ${size * 0.04}px ${size * 0.18}px ${rgba(tc, 0.6)}`
+    const shadow = tr === "glow" ? [0.05, 0.1, 0.15, 0.2, 0.3].map((r) => `0 0 ${size * r}px ${rgba(tc, 1)}`).join(", ") + `, 0 0 ${size * 0.6}px ${rgba(tc, 0.5)}`
+      : tr ? `0 0 ${size * 0.02}px ${rgba(tc, 1)}, 0 0 ${size * 0.06}px ${rgba(tc, 0.9)}, 0 ${size * 0.04}px ${size * 0.18}px ${rgba(tc, 0.6)}`
       : style.flat || style.shadow === false || style.box || style.stroke ? undefined : `0 ${size * 0.04}px ${size * 0.18}px rgba(0,0,0,0.5)`;
     return (
       <div style={{ transform: pageT, opacity: pageO, textAlign: "center", fontFamily: family, fontWeight: weight, fontSize: size,

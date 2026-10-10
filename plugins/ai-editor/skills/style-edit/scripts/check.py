@@ -37,6 +37,7 @@ from plan import GAP_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, OVERLA
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
+OVERLAY_FILL = 0.7     # share of its own box an overlay diagram must draw across
 WORD_S = 1.2           # a caption up longer than this per word is a misheard word held on screen
 TAIL_S = 0.3           # a caption held longer than this past its last word
 STATIC_S = 6.0         # nothing changes on screen for longer than this (no style pace given)
@@ -52,8 +53,8 @@ ZOOM_ORIGIN = (50, 30)  # remotion/src/StyleEdit.tsx ZOOM_ORIGIN
 
 
 # Where an explaining card's size and place come from: the plan, never the renderer's source.
-PLAN_FIX = ("plan again (plan.py makes a vertical flow a full-frame scene and centres a logo_cluster's logos); "
-            "drop a \"layout\": \"box\", a \"box\" or a \"band\" set on that beat in visuals.json; "
+PLAN_FIX = ("plan again (plan.py fits a flow in the band beside or above the head and centres a logo_cluster's logos); "
+            "fewer nodes or shorter labels; drop a \"box\" or a \"band\" set on that beat in visuals.json; "
             "a flow of one node or a cluster of one logo is a logo card instead")
 
 
@@ -167,8 +168,9 @@ def text_sizes(anim, w, h):
     return out
 
 
-def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=(), edit="edits/<name>"):
-    """named: [(t, name)] the profile's things said (route.py beats.json)."""
+def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=(), edit="edits/<name>", beats=None):
+    """named: [(t, name)] the profile's things said (route.py beats.json). beats: visuals.json + images.json, to
+    tell a full-frame scene the user asked for ("layout": "scene" on its beat) from one nobody did."""
     out = []
     aspect = aspect_of(plan)
     l, top, r, bottom = SAFE[aspect]
@@ -182,6 +184,12 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
+        word = re.sub(r"[^\w'-]+", "", c["trigger_word"]).lower()
+        if c.get("layout") == "scene" and beats is not None and not any(
+                b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
+            out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
+                               "make it an overlay: plan again with no \"layout\": \"scene\" on that beat (a scene only when "
+                               "the user asks for one)"))
         if c.get("format") == "sticker" and c.get("lines") and c.get("size"):
             cut = cut_lines(sticker_crop(c), c["lines"])
             if cut:
@@ -213,9 +221,15 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                                    "reusing every frame already cut)"))
             continue
         ink = aspect == "9:16" and explain_ink(c, W, H)
-        if ink and (ink[1] - ink[0] < INK_MIN_W or abs((ink[0] + ink[1]) / 2 - 50) > CENTRE_INK):
-            out.append(finding("FAIL", c["start"], f"{name} draws {ink[0]:.0f}-{ink[1]:.0f}% of the width "
-                               f"(under {INK_MIN_W}% wide or off centre): small and lopsided on a phone", PLAN_FIX))
+        if ink:
+            # wide and centred on the frame, or (an overlay diagram in its own box beside the head) filling that box, centred in it
+            frame_ok = ink[1] - ink[0] >= INK_MIN_W and abs((ink[0] + ink[1]) / 2 - 50) <= CENTRE_INK
+            bx, _, bw, _ = c["box"] if c.get("layout") != "scene" and c.get("box") else (0, 0, 0, 0)
+            box_ok = bw > 0 and ink[1] - ink[0] >= OVERLAY_FILL * bw and abs((ink[0] + ink[1]) / 2 - (bx + bw / 2)) <= CENTRE_INK
+            if not (frame_ok or box_ok):
+                out.append(finding("FAIL", c["start"], f"{name} draws {ink[0]:.0f}-{ink[1]:.0f}% of the width "
+                                   f"(under {INK_MIN_W}% wide or off centre" + (f", and under {OVERLAY_FILL:.0%} of its box at "
+                                   f"{bx:.0f}-{bx + bw:.0f}%" if bw else "") + "): small and lopsided on a phone", PLAN_FIX))
         if c.get("layout") == "scene" or spread(c):
             continue    # a full-frame cut-away, or logos laid round the head: the renderer keeps them clear
         cl, ct, cr = l, top, r
@@ -589,6 +603,26 @@ def check_audio(edit, words):
     return out, {"noise_db": round(noise, 1), "threshold": how}
 
 
+def google_fonts(remotion=None):
+    """The families the installed @remotion/google-fonts can load (look.tsx loadFamily), or None when it is not installed."""
+    if remotion is None:
+        from edit import REMOTION as remotion
+    idx = Path(remotion) / "node_modules/@remotion/google-fonts/dist/esm/index.mjs"
+    return set(re.findall(r"fontFamily: '([^']+)'", idx.read_text(encoding="utf-8"))) if idx.exists() else None
+
+
+def font_findings(plan, fonts):
+    """A caption or look font Google Fonts does not have: the renderer draws Inter in its place (look.tsx FALLBACK)."""
+    if fonts is None:
+        return []
+    lk, cs = plan.get("look") or {}, (plan.get("captions") or {}).get("style") or {}
+    named = {(cs.get("font_match") or "").strip(): "captions font_match"} if (plan.get("captions") or {}).get("chunks") else {}
+    named.update({(lk.get(k) or "").strip(): f"look {k}" for k in ("font", "font_display", "font_serif") if lk.get(k)})
+    return [finding("WARN", None, f"{where} '{f}' is not on Google Fonts: the render draws Inter in its place",
+                    "name a Google Fonts family (fonts.google.com) in style.json captions.font_match or the brand kit, then plan again")
+            for f, where in named.items() if f and f not in fonts]
+
+
 def report(found, mode):
     order = {"FAIL": 0, "WARN": 1, "LOOK": 2}
     found.sort(key=lambda f: (order[f["level"]], f["t"] if f["t"] is not None else -1))
@@ -619,6 +653,12 @@ def demo():
                             "g = check.stream(sys.argv[2], 'null', 64, 64); next(g); g.close()", str(Path(__file__).parent),
                             str(v)], capture_output=True, text=True)
         assert r.returncode == 0 and "Broken pipe" not in r.stderr and not r.stderr.strip(), r.stderr
+    fp = {"captions": {"style": {"font_match": "TikTok Sans"}, "chunks": [{}]}, "look": {"font": "Proxima Nova"}}
+    got = font_findings(fp, {"TikTok Sans", "Inter"})
+    assert len(got) == 1 and got[0]["what"].startswith("look font 'Proxima Nova'"), got
+    assert len(font_findings(fp, {"Inter"})) == 2 and font_findings(fp, None) == []
+    gf = google_fonts()
+    assert gf is None or {"TikTok Sans", "Inter", "IBM Plex Sans", "Newsreader"} <= gf, "the default fonts load"
     assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
     assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}
@@ -694,6 +734,10 @@ def demo():
     assert bad and "% of the width" in bad[0]["what"] and bad[0]["fix"].startswith("plan again") and ".tsx" not in bad[0]["fix"], bad
     fl["cards"][0].update(box=[0, 0, 100, 100], layout="scene")
     assert not any(f["level"] == "FAIL" and "'task'" in f["what"] for f in check_plan(fl, face)), check_plan(fl, face)
+    # a full-frame scene the user did not ask for FAILs: the speaker leaves the frame (the real run's diagram)
+    unasked = [f for f in check_plan(fl, face, beats=[{"word": "task", "kind": "anim", "type": "flow"}]) if "nobody asked" in f["what"]]
+    assert unasked and unasked[0]["level"] == "FAIL" and "overlay" in unasked[0]["fix"], unasked
+    assert not any("nobody asked" in f["what"] for f in check_plan(fl, face, beats=[{"word": "Task.", "layout": "scene"}]))
     # logo_cluster: logos laid round the head (no band) FAIL on vertical; plan.py's centred band passes, one logo does not
     lc = {**plan, "cards": [{"anim": {"type": "logo_cluster", "props": {"logos": [{"src": "a"}, {"src": "b"}]}}, "start": 0.5,
                              "end": 2, "trigger_word": "l", "box": [0, 0, 100, 100]}]}
@@ -828,13 +872,16 @@ def main():
             print("note: no face.json, the head check is skipped (run face.py)")
         named = [(x["start"], n) for x in rd("beats.json") or [] for n in x.get("names") or []]
         found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named,
-                           f"{edit}" + (f" --plan {a.plan}" if a.plan != "plan.json" else ""))
+                           f"{edit}" + (f" --plan {a.plan}" if a.plan != "plan.json" else ""),
+                           (rd("visuals.json") or []) + (rd("images.json") or []))
         extra = {"static_s": static_s}
+        found += font_findings(plan, google_fonts())
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():
             sys.exit(f"ERROR: {video} missing; render first")
         found, extra["cards"] = check_render(edit, plan, video)
+        found += font_findings(plan, google_fonts())
         import quality   # every frame, the settled cards, the audio, the files: quality.py
         style = json.loads(Path(a.style).read_text(encoding="utf-8")) if a.style else None
         if style_note(a.style, style):

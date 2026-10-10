@@ -26,3 +26,14 @@ export const groundCovers = (kind: Kind, leaving: boolean, p: number, ph: number
   if (kind === "cut") return true; // whole until its last frame (cutPhase)
   return p >= 0.5; // fade: the ground is the stronger half
 };
+
+/** Captions over a scene hide while the words said are the scene's own type. Hidden in one frame, a whole
+ *  caption page vanished (check.py render: "the picture jumps in one frame"). This is how much of the captions
+ *  shows at t: 0 while hidden, ramping to 1 over `fade` seconds either side of every hidden stretch. */
+export const captionFade = (hiddenAt: (t: number) => boolean, t: number, fade = 0.24, steps = 6): number => {
+  let o = 1;
+  for (let k = 0; k <= steps; k++) {
+    if (hiddenAt(t + (k * fade) / steps) || hiddenAt(t - (k * fade) / steps)) o = Math.min(o, k / steps);
+  }
+  return o;
+};

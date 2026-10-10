@@ -19,6 +19,55 @@ What changed for every user, newest first.
   cut** hands the dropped video to start and links the review page. `start` and `setup` offer the
   page first. Test: `home.py demo`.
 - `fetch.py list` keeps one thumbnail URL per video in `videos.json`.
+- New `overlays` skill: change the visuals of an edit after it is rendered, one beat at a time. Move,
+  resize, swap, drop or add a card, logo, real page or animated diagram at the moment you name. It
+  re-plans, makes stills of just those moments, checks them, re-renders only the frames that
+  changed and opens the next round on the review page. New: `plan.py cards` (each card and the beat
+  it came from), `plan.py beat` (change, drop or add one beat by card, time or word),
+  `edit.py stills --at` (stills of chosen moments), `edit.py patch` (re-render what changed since
+  the last render and splice it in; `render.plan.json` records the plan each render came from).
+  `template-filler` fills `flow` diagrams; `stills-critic` adds a blind read of each card.
+  Tests: `plan.py demo`, `edit.py demo`, `sheet.py demo`, eval `move-card-off-caption`.
+- Fixes from the first real run of `overlays`:
+  - A vertical full-frame scene (a `flow` diagram, a scene capture) drew out to 94% of the width,
+    under the app's like and comment buttons. The scene box is now x 14-86%, y 14-66%
+    (`Scene.tsx`, `plan.py`), and a diagram in it still draws on the scene's own ground.
+  - A logo within 0.5 s of a scene was dropped without a word. plan.py now warns and says to end the
+    scene sooner.
+- A `flow` diagram is now an overlay in the band beside or above the head on vertical too, so the
+  speaker stays on screen. It was a full-frame white board. A full-frame scene comes only from a beat
+  with `"layout": "scene"`, and `check.py plan` FAILs a scene no beat asked for. Tests: `plan.py demo`,
+  `check.py demo`.
+- In a scene the user asked for, captions that the board already shows fade out and back in over
+  0.24 s. They vanished in one frame (`check.py render`: "the picture jumps in one frame").
+  Test: `tests/test_record.mjs` (`captionFade`).
+- Sound cues start on the frame the renderer plays them. A cue between frames played up to half a
+  frame early, so the cue check missed most of a short pop ("pop cue -28 dB: not heard"). Test:
+  `plan.py demo`.
+- Out of the box, captions are plain white TikTok Sans: weight 600, 4.2% of the frame's long side (was
+  5.5% at 800), case as spoken, no stroke, box, shadow, highlight or pop. It is the default with no
+  creator and a new `plain` captions answer (`profile.py` `PLAIN_CAPTIONS`); a creator's measured
+  captions and your taste still win. Where the footage is too bright, a page gets a soft shadow, then a
+  feathered glow, and a stroke or backing only where it would read under 3.3:1. `check.py` warns on a
+  caption or look font Google Fonts does not have (the render would draw Inter), and a font that fails
+  to load now stops the render with its name. Tests: `profile.py demo`, `plan.py demo`, `check.py demo`.
+- The review page is redesigned (direction B): a light stone page with a stage switch and a quiet
+  status line; on the cut, the transcript beside the video with cut words and pauses struck and the
+  line playing now highlighted; notes as bubbles with the frame, time and words, Claude's answers
+  and its work steps under them; a composer whose clock follows the playhead; a timeline split at
+  cut points or chapters with numbered note pins, and Cards / Zooms / Captions tracks on the edit;
+  Compare plays two rounds side by side; Stop while Claude works; a bottom sheet on phones.
+  `review.py` writes `review/data-<stage><round>.json` for it. Test: `review.py demo`.
+- Notes keep working while Claude works on a round: they are queued for the next round and open on
+  it when it lands, moved to where their words are said on the new cut, with a new frame still.
+  `wait` never returns on them; Stop puts them back into the reopened round. The note's time is
+  always the playhead, read at save: scrubbing, a transcript word, a pin or a key moves it, typing
+  or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
+- The review page has a dark mode. It follows the system setting until you pick light or dark with
+  the switch in the header, and remembers the pick in that browser.
+- Review notes can be edited in place while they are unsent or queued for the next round: the text
+  (click it, Enter saves, Esc cancels), the moment (move to playhead: new frame still and words), which
+  versions it is for, and its images. Once Claude has the round they are read-only. Test: `review.py demo`.
 
 ## ai-editor 2.2.0 (2026-10-09)
 
