@@ -72,8 +72,14 @@ def inside(t, c):
     return c["start"] <= (t["start"] + t["end"]) / 2 <= c["end"]
 
 
+def flat(text):
+    """Normalised words with the `<<n>>` join markers dropped: the paper and every quote both go through it."""
+    return " ".join(nwords(re.sub(r"<<[\d,]+>>", " ", text)))
+
+
 def paper(spans, toks):
-    """paper-edit.md's text from spans alone (pauses ignored: the judge reads words, not timing)."""
+    """paper-edit.md's text from spans alone (pauses ignored: the judge reads words, not timing).
+    Its lengths are words only; the real cut with pauses is in report.json."""
     cuts = cuts_of(spans, toks)
     dur = max((t["end"] for t in toks), default=0.0)
     kept, at = [], 0.0
@@ -84,7 +90,7 @@ def paper(spans, toks):
     if at < dur:
         kept.append({"start": at, "end": dur})
     final = sum(k["end"] - k["start"] for k in kept)
-    return paper_edit(label(toks, cuts, kept), cuts, dur, final), cuts
+    return paper_edit(label(toks, cuts, kept), cuts, dur, final, words_only=True), cuts
 
 
 def taste_cut_rules():
@@ -105,6 +111,13 @@ def build_prompt(d, script=None):
                   "Corrections this user gave before. They outrank your sense of what an edit should keep. "
                   "Do not raise a blocker against a cut one of these asks for, unless the removed take carries "
                   "a detail that survives nowhere else.", "", rules]
+    built, rep = Path(d) / "paper-edit.md", Path(d) / "report.json"   # spans alone cannot show the pauses
+    extra = [x + " (last build)" for x in (built.read_text().splitlines() if built.exists() else []) if "CLIPPED" in x]
+    if rep.exists():
+        r = json.loads(rep.read_text())
+        extra.insert(0, f"- last build, pauses cut: source {r['duration']:.1f}s, cut {r['final_s']:.1f}s")
+    if extra:
+        md = md.replace("\n## What plays", "\n" + "\n".join(extra) + "\n\n## What plays", 1)
     parts += ["", "# PAPER EDIT TO GRADE", "", md]
     if script:
         parts += ["", "# SCRIPT (TIEBREAKER ONLY)", "", "Context for choosing between takes of one line. "
@@ -129,7 +142,7 @@ def validate(obj, cuts, paper_md):
     """(findings, dropped). Drops findings that fail the rubric's own bar; B3 on a `redundant` cut
     becomes a W5 spot-check (a redundant cut removes content that survives nowhere, by design)."""
     good, dropped = [], []
-    flat = " ".join(nwords(re.sub(r"<<[\d,]+>>", " ", paper_md)))
+    paper_flat = flat(paper_md)
     for f in obj.get("findings", []):
         chk = str(f.get("check", "")).upper()
         fix = f.get("fix") or {}
@@ -151,7 +164,7 @@ def validate(obj, cuts, paper_md):
             why = "trim needs keep_words"
         elif act == "add" and not str(fix.get("evidence", "")).strip():
             why = "add needs evidence"
-        elif " ".join(nwords(quote)) not in flat:
+        elif flat(quote) not in paper_flat:
             why = "quote is not in the paper edit"
         if why:
             dropped.append({**f, "_dropped": why})
@@ -358,6 +371,15 @@ def demo():
             {"check": "B1", "cut": None, "quote": "never said", "fix": {"action": "add", "evidence": "x"}},
             {"check": "B2", "cut": 9, "quote": "the price", "fix": {"action": "restore"}}]}, cuts, md)
         assert len(f) == 1 and len(dr) == 2 and f[0]["severity"] == "blocker"
+        # a quote across a join keeps its <<n>> marker (every broken-splice finding, the rubric's example)
+        j, _ = validate({"findings": [{"check": "B2", "cut": 1, "quote": "first thing is <<1>> the price",
+                                       "fix": {"action": "none"}}]}, cuts, md)
+        assert len(j) == 1, j
+        assert flat("x he ended up <<7>> he ended up being the y").find(flat("he ended up <<7>> he ended up being the")) > 0
+        assert "words only, pauses not counted" in md and "removed" not in md.split("## What plays")[0], md
+        (d / "paper-edit.md").write_text("# Paper edit\n\n- **CLIPPED by a pause cut, not asked for:** if\n")
+        assert "CLIPPED by a pause cut, not asked for:** if (last build)" in build_prompt(d)
+        (d / "paper-edit.md").unlink()
         rc = [dict(c, kind="redundant") for c in cuts]
         g, _ = validate({"findings": [{"check": "B3", "cut": 1, "quote": "the price", "fix": {"action": "restore"}}]}, rc, md)
         assert g[0]["check"] == "W5" and g[0]["fix"]["action"] == "none"

@@ -39,7 +39,7 @@ def label(toks, cuts, spans):
     return out
 
 
-def paper_edit(lab, cuts, dur, final):
+def paper_edit(lab, cuts, dur, final, words_only=False):
     kept, prev = [], None
     for t, ci, gone in lab:
         if gone:
@@ -51,7 +51,8 @@ def paper_edit(lab, cuts, dur, final):
             prev = None
     clipped = [t["text"] for t, ci, gone in lab if gone and ci is None]
     lines = ["# Paper edit", "",
-             f"- source {dur:.1f}s, cut {final:.1f}s, {dur - final:.1f}s removed",
+             (f"- words only, pauses not counted: source {dur:.1f}s, cut {final:.1f}s" if words_only
+              else f"- source {dur:.1f}s, cut {final:.1f}s, {dur - final:.1f}s removed"),
              f"- {len(cuts)} cuts from spans.json", ""]
     if clipped:
         lines += [f"- **CLIPPED by a pause cut, not asked for:** {' '.join(clipped)}", ""]
