@@ -35,7 +35,7 @@ const EASE: Record<Transition, string> = { match: "expo.inOut", iris: "power3.in
 export const TR_S = 0.62; // seconds a transition takes at k = 1
 
 /** Where a scene's type lives, % of the frame: clear of the app's top bar and the captions under it. */
-export const sceneBox = (w: number, h: number): [number, number, number, number] => (h > w ? [6, 13, 88, 52] : [6, 9, 88, 70]);
+export const sceneBox = (w: number, h: number): [number, number, number, number] => (h > w ? [14, 14, 72, 52] : [6, 9, 88, 70]);   // vertical: inside the app's buttons (plan.py SAFE)
 
 export const phases = (c: SceneCard, t: number, m: Motion) => {
   const T = TR_S * m.k;

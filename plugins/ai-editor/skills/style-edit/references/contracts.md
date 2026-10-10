@@ -195,7 +195,7 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 - `anim`: `type` an overlay format (visuals.md), `logo` (`src`, `label`), or a template in motion.md.
   Type cards (`counter`, `steps`, `versus`, `keyword`, `slam`, `title`, charts) were removed; plan.py
   skips them with a warning. plan.py reads these straight from visuals.json.
-  The diagram, `flow` (Diagrams.tsx; a full-frame scene on vertical, an overlay box on wide; a beat's `"layout"` overrides, visuals.md "Where each card sits"):
+  The diagram, `flow` (Diagrams.tsx; an overlay box beside or above the head; a beat's `"layout"` overrides, visuals.md "Where each card sits"):
   `nodes` (1-6 Parts, a chain; 4+ wrap to two rows), optional `split` (2-4 branch Parts off the last
   node), `tasks` (`[{"text", "word", "heavy"?}]`: chips that pop left of the source on their word),
   `accent` (`#hex`: ring, hot wire and chosen name; the destination's brand colour), `tag` (`{"text", "word"}`).

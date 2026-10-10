@@ -93,8 +93,8 @@ Overlay first. plan.py (`place_overlays`) gives each overlay card the free regio
 pictures, beside it for tall ones; left or right of the head on 16:9. A card leads its word by
 `OVERLAY_LEAD_S` (0.3 s) x the personality's duration multiplier, so the entrance has landed on the
 word. `logo_cluster` takes `[0, 0, 100, 100]` and the head box, plus on vertical `band` [17, 83] and
-`size` 20 (% of the width). A beat's own `box` wins. On vertical a `flow` is a scene and an `icon_burst`
-sits in the split panel whatever the beat says: in a box they render small and off centre.
+`size` 20 (% of the width). A beat's own `box` wins. A `flow` is an overlay box like the rest (keep it to 2-4
+short nodes so it reads at 60% of the width or more); a scene only when its beat says `"layout": "scene"`.
 
 ### Behind the speaker
 
@@ -131,7 +131,7 @@ A scene card in plan.json:
 ```
 
 - `layout`: `"scene"` (full frame) or `"box"` (default: the card's `box` over the footage, as before).
-- `box` on a scene: `[0, 0, 100, 100]` means "use the scene box": `[6, 13, 88, 52]` vertical (clear of the
+- `box` on a scene: `[0, 0, 100, 100]` means "use the scene box": `[14, 14, 72, 52]` vertical (clear of the
   app's top bar, captions under it), `[6, 9, 88, 70]` wide. check.py skips its safe-zone, centre and
   head checks for this shape. Any other box is used as given.
 - `focus`: `[x, y]` % of the frame where `match` and `iris` open from and close to. plan.py passes the

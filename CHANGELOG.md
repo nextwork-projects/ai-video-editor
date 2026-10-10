@@ -4,6 +4,31 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- New `overlays` skill: change the visuals of an edit after it is rendered, one beat at a time. Move,
+  resize, swap, drop or add a card, logo, real page or animated diagram at the moment you name. It
+  re-plans, makes stills of just those moments, checks them, re-renders only the frames that
+  changed and opens the next round on the review page. New: `plan.py cards` (each card and the beat
+  it came from), `plan.py beat` (change, drop or add one beat by card, time or word),
+  `edit.py stills --at` (stills of chosen moments), `edit.py patch` (re-render what changed since
+  the last render and splice it in; `render.plan.json` records the plan each render came from).
+  `template-filler` fills `flow` diagrams; `stills-critic` adds a blind read of each card.
+  Tests: `plan.py demo`, `edit.py demo`, `sheet.py demo`, eval `move-card-off-caption`.
+- Fixes from the first real run of `overlays`:
+  - A vertical full-frame scene (a `flow` diagram, a scene capture) drew out to 94% of the width,
+    under the app's like and comment buttons. The scene box is now x 14-86%, y 14-66%
+    (`Scene.tsx`, `plan.py`), and a diagram in it still draws on the scene's own ground.
+  - A logo within 0.5 s of a scene was dropped without a word. plan.py now warns and says to end the
+    scene sooner.
+- A `flow` diagram is now an overlay in the band beside or above the head on vertical too, so the
+  speaker stays on screen. It was a full-frame white board. A full-frame scene comes only from a beat
+  with `"layout": "scene"`, and `check.py plan` FAILs a scene no beat asked for. Tests: `plan.py demo`,
+  `check.py demo`.
+- In a scene the user asked for, captions that the board already shows fade out and back in over
+  0.24 s. They vanished in one frame (`check.py render`: "the picture jumps in one frame").
+  Test: `tests/test_record.mjs` (`captionFade`).
+- Sound cues start on the frame the renderer plays them. A cue between frames played up to half a
+  frame early, so the cue check missed most of a short pop ("pop cue -28 dB: not heard"). Test:
+  `plan.py demo`.
 - Out of the box, captions are plain white TikTok Sans: weight 600, 4.2% of the frame's long side (was
   5.5% at 800), case as spoken, no stroke, box, shadow, highlight or pop. It is the default with no
   creator and a new `plain` captions answer (`profile.py` `PLAIN_CAPTIONS`); a creator's measured

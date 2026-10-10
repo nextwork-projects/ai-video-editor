@@ -132,7 +132,7 @@ python3 "$S/edit.py" stills edits/<name>
 
 The first run installs the renderer (a few minutes, once; say so first). Writes one still per beat and
 `stills/sheet.png`, one numbered stills sheet labelled with beat, time and card kind (about 1,600
-tokens). Review the sheet; open a single still only to zoom in on a problem it shows.
+tokens). Review the sheet; open a single still only to zoom in on a problem.
 Fix before showing: a box on the face, a zoom cutting the head, a capture showing the wrong part,
 text too small for a phone, anything that looks like a default AI edit (icon tiles, emoji, dark
 glass with neon). The `stills-critic` agent can check a sheet.
@@ -206,9 +206,9 @@ Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/rende
 
 ## 8. Hand over
 
-Hand over on the review page (`references/review.md`), then `serve` and `wait` in the background:
+Hand over on the review page (`references/review.md`), `serve` and `wait` in the background:
 `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --video edits/<name>/render.mp4`
-(no page yet: `start`, same flags). Card, caption, zoom notes: plan, stills, render, `round`; cut notes: the cut skill.
+(no page: `start`, same flags). Card and visual changes later: overlays skill; caption, zoom: plan, stills, render, `round`; cut: cut skill.
 
 ## 9. Export to another editor
 
@@ -246,5 +246,5 @@ so). Tell the user which file to open and how: `references/render.md` "Export to
   cutout, `sfx.py` sound, `check.py` + `quality.py` checks, `sheet.py` stills sheet, `edit.py` stills,
   estimate and render, `preview.py` live preview, `export_nle.py` export, `chapters.py` chapters. Each has a `demo` self-check.
 - `${CLAUDE_PLUGIN_ROOT}/agents/template-filler.md` (haiku), `stills-critic.md` (sonnet): the helpers.
-- `${CLAUDE_PLUGIN_ROOT}/remotion/`: the renderer, copied to `~/.ai-video-editor/remotion` and refreshed
-  on every run. `tests/golden.py` at the repo root: golden frames; `--update` after an intended look change.
+- `${CLAUDE_PLUGIN_ROOT}/remotion/`: the renderer, copied to `~/.ai-video-editor/remotion` on
+  every run. `tests/golden.py` at the repo root: golden frames; `--update` after an intended look change.

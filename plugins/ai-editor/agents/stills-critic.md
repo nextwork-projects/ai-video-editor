@@ -19,11 +19,13 @@ Check each item and mark it `pass` or `fail`:
 6. Text on a card is large enough to read on a phone.
 7. No card shows a figure or word the speaker did not say.
 8. No blank, black or broken frame.
+9. Read blind: say in a few words what each card shows (`reads_as`), before reading any label or
+   plan.json. The caller compares it with what the beat should show.
 
 Return only this JSON:
 
 ```json
-{"image": "<path>", "result": "pass|fail",
+{"image": "<path>", "result": "pass|fail", "reads_as": ["tile 1: a GitHub logo wired to a YouTube logo"],
  "items": [{"n": 1, "status": "pass|fail", "where": "top-left card", "fix": "one line, empty on pass"}]}
 ```
 
