@@ -68,6 +68,17 @@ def named(text, names):
 
 
 NOT_NAMES = {"i", "i'm", "i'll", "i've", "i'd", "ai", "ok"}
+# Common words a transcriber capitalises where it heard a new sentence but wrote no full stop ("every day,
+# This is", "hard Can you"). ponytail: a fixed stopword list; a name that is also a common word ("Notion",
+# "Linear") is still found, a common word missing here still shows up.
+COMMON = set("""a about after again all also am an and any are as at back be because been before being both but by
+can can't could did didn't do does doesn't don't down each even every first for from get go going gonna got had has
+have he her here hey him his how if in into is isn't it it's its just know let let's like look make maybe me more
+most my new next no not now of oh okay on once one only or other our out over really right said say says see she
+should so some still such sure take than thank thanks that that's the their them then there there's these they
+they're thing things think this those though through to today too try two um uh up us use very want was way we
+we're well were what what's when where which while who why will with would yeah yes yet you you'll you're your
+check""".split())
 
 
 def found_names(beats):
@@ -79,7 +90,7 @@ def found_names(beats):
     for b in beats:
         for w in re.findall(r"[A-Za-z][\w'-]*", b["text"])[1:]:
             w = w.strip("'-")
-            if w[:1].isupper() and w.lower() not in NOT_NAMES and w not in out:
+            if w[:1].isupper() and w.lower() not in NOT_NAMES | COMMON and w not in out:
                 out.append(w)
     return out
 
@@ -175,6 +186,12 @@ def demo():
         "I built a router with Jev that picks my Claude model. Jev is good at different things. If it's a small "
         "task, it'll automatically use the Haiku model. If it's harder, it'll use Opus. I'm sure AI helps.".split())])
     assert found_names(sample) == ["Jev", "Claude", "Haiku", "Opus"], found_names(sample)
+    # the real-footage test: Whisper capitalised sentence starts it wrote no full stop before, and every one
+    # read as a name ("YouTube, This, Can, It, And, You, Just, So")
+    run_on = sentences([{"text": t, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, t in enumerate(
+        "I edit my YouTube videos. So because it is open source, This is a new view and be like Oh, I don't like "
+        "it Can you change it and It saves and You can just see it So you can add reels. And Just send it to Claude".split())])
+    assert found_names(run_on) == ["YouTube", "Claude"], found_names(run_on)
     assert named(sample[1]["text"], [{"name": n} for n in found_names(sample)]) == ["Jev"]
     canned = {"s0": {"type": "choice", "probabilities": {"none": 0.1, "capture:shot": 0.8, "logo": 0.1}},
               "s1": {"type": "choice", "probabilities": {"none": 0.2, "capture:sticker": 0.7}},
