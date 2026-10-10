@@ -1,13 +1,12 @@
 # Principles
 
-The rules every skill follows, for every user and video. Each names where it is enforced; the
-tests that prove them: `docs/feedback-matrix.md`.
+The rules every skill follows. Each names where it is enforced; tests: `docs/feedback-matrix.md`.
 
 ## Asking
 
 - Every question goes in the question box (AskUserQuestion), recommended option first, free text
-  always allowed. Pages show evidence and take notes, never answers. (every SKILL.md;
-  where to render has none)
+  always allowed. Pages show evidence and take notes, never answers; the home page
+  alone takes a creator, its parts, keys. (every SKILL.md; where to render has none)
 - Ask what the video must cover before building it: a short brief first. (start, product-video)
 - Taste is asked once at setup and saved; each video asks only what belongs to that video.
   (setup, `lib/ai_editor/profile.py`)
@@ -52,8 +51,8 @@ tests that prove them: `docs/feedback-matrix.md`.
 - Never cover the speaker's face; cards may tuck behind the head only when the cutout is on.
   (plan.py, check.py)
 - Default length is short: about 40 s for a product film with five use cases, scaled to the
-  count, never shortened past the smoothness bar. (product.py,
-  `journey.py` SPEED_BAR)
+  count, never shortened past the smoothness bar. (product.py, `journey.py`
+  SPEED_BAR)
 
 ## Safety and privacy
 

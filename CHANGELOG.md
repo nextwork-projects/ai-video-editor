@@ -4,6 +4,21 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The home page: first run in the browser. `home.py serve` opens it (127.0.0.1 only, a random token
+  and a SameSite cookie, as on the review page). Five steps: setup (doctor's tool checks and the
+  optional keys), pick a creator, study their videos, your skill, your video. Keys typed on the page
+  go through `keys.py`: the prefix check, one free test request, then the key file. A key is never
+  written to the page's state, a job or a log, and never shown back. Pasting a handle or profile
+  link names the platform (`links.py classify`) and lists their top 5 and 2 median videos with
+  thumbnails (`fetch.py list`, free). **Study their videos** queues a job; `home.py wait` hands it
+  to Claude as one line (`JOB teardown @handle platform=youtube take=captions,pace`), Claude runs
+  creator-teardown's quick mode and reports each step with `home.py status`. Every number on the
+  page is read from the teardown's own `style.json` and `videos.json`; a part not measured shows as
+  empty. **Build my skill** runs the skill-handoff gate and shows the skill, five prompts to copy
+  and the tools that would help, or "no separate format yet: your style is saved". **Start the
+  cut** hands the dropped video to start and links the review page. `start` and `setup` offer the
+  page first. Test: `home.py demo`.
+- `fetch.py list` keeps one thumbnail URL per video in `videos.json`.
 - New `overlays` skill: change the visuals of an edit after it is rendered, one beat at a time. Move,
   resize, swap, drop or add a card, logo, real page or animated diagram at the moment you name. It
   re-plans, makes stills of just those moments, checks them, re-renders only the frames that

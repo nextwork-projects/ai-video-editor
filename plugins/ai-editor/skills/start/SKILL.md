@@ -51,8 +51,9 @@ re-edit.
 
 ## 1. The video
 
-If the user has not given a video path (or a link step 0 fetched), ask for it in the question box:
-**I'll give the path (Recommended)** / **Use the sample take** (the cut skill's "No video yet?").
+No video path, link or creator yet (a first run, a bare "edit my video"): ask in the question box
+**Open the home page (Recommended)** (they pick a creator and drop the video there; follow
+`references/home.md`) / **I'll give the path** / **Use the sample take** (cut's "No video yet?").
 Name the edit folder after the file (`IMG_1234.MOV` -> `edits/img-1234`).
 
 ## 2. Intake: only what is missing
@@ -99,8 +100,3 @@ can do itself.
 The render is handed over on the review page (style-edit step 8): the user leaves notes on it. Corrections go to the taste skill so they
 are never needed again; a change of brand, creators or platform goes back into the profile with
 `python3 "$P" set ...`.
-
-## Files
-
-`../../lib/ai_editor/links.py` (`route`, `fetch`) and `../../lib/ai_editor/profile.py` (the profile, the
-blend); each has a `demo` self-check.
