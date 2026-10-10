@@ -403,6 +403,8 @@ def make_handler(folder, token):
             path = urlsplit(self.path).path
             if path == "/comment":
                 return self.comment(body)
+            if path == "/edit":
+                return self.edit(body)
             if path == "/scope":   # a saved note: all versions ("*") or one version (a name, None = main)
                 def sc(d):
                     for c in d["comments"]:
@@ -468,20 +470,7 @@ def make_handler(folder, token):
             cid = max([c["id"] for c in d["comments"]] + [0]) + 1
             frame = f"r{d['stage']}{d['round']}-c{cid}.jpg"
             grab(src["video"], t, folder / "review" / frame)
-            images = []   # pasted or dropped pictures: only these types, under 15 MB each, at most 6
-            for i, im in enumerate(imgs[:6]):
-                m = re.match(r"data:image/(png|jpeg|gif|webp);base64,(.+)", im if isinstance(im, str) else "", re.S)
-                if not m:
-                    continue
-                try:
-                    raw = base64.b64decode(m[2])
-                except ValueError:
-                    continue
-                if len(raw) > MAX_IMAGE:
-                    continue
-                name = f"r{d['stage']}{d['round']}-c{cid}-img{i + 1}.{'jpg' if m[1] == 'jpeg' else m[1]}"
-                (folder / "review" / name).write_bytes(raw)
-                images.append(name)
+            images = save_images(folder, imgs, f"r{d['stage']}{d['round']}-c{cid}")
             c = {"id": cid, "round": d["round"] + queued, "stage": d["stage"], "t": round(t, 2), "alt": alt,
                  "t_end": round(te, 2) if te is not None else None, "text": text,
                  "words": words_at(src.get("transcript"), t, te if te is not None else t),
@@ -491,7 +480,81 @@ def make_handler(folder, token):
                 c["queued"] = True
             update(rj, lambda d: d["comments"].append(c))
             return self.send(200, c)
+
+        def edit(self, body):
+            """A note changed in place: its text, its time (moved to the playhead: new frame still and words),
+            its version scope, its images (kept names plus new data urls). Same id; refused once Claude has it."""
+            d = load(rj)
+            c = next((x for x in d["comments"] if x["id"] == body.get("id")), None)
+            if not c:
+                return self.send(404, {"error": "no such note"})
+            if not editable(d, c):
+                return self.send(409, {"error": "this round is with Claude" if d.get("sent") else "this note is from an earlier round"})
+            new = dict(c)
+            if "text" in body:
+                new["text"] = str(body["text"] or "").strip()
+            if "alt" in body:
+                new["alt"] = body["alt"] or None
+            if "images" in body:
+                new["images"] = save_images(folder, body["images"] or [], f"r{c['stage']}{c['round']}-c{c['id']}",
+                                            keep=c.get("images") or [])
+            if not new["text"] and not new["images"]:
+                return self.send(400, {"error": "empty"})
+            src = alt_of(d, new["alt"] if new["alt"] != "*" else None)
+            if "t" in body:
+                try:
+                    t = round(float(body["t"]), 2)
+                except (TypeError, ValueError):
+                    return self.send(400, {"error": "no time"})
+                if c["t_end"] is not None:
+                    new["t_end"] = round(t + c["t_end"] - c["t"], 2)
+                new["t"], new["frame"] = t, f"r{c['stage']}{c['round']}-c{c['id']}-{int(time.time() * 1000) % 10 ** 8}.jpg"
+                grab(src["video"], t, folder / "review" / new["frame"])
+                new["card"] = card_at(d.get("plan"), t) if c["stage"] == "edit" else None
+            if "t" in body or "alt" in body:
+                new["words"] = words_at(src.get("transcript"), new["t"], new["t_end"] if new["t_end"] is not None else new["t"])
+            new["edited"] = now()
+
+            def put(d):   # again under the lock: the round may have gone to Claude meanwhile
+                for i, x in enumerate(d["comments"]):
+                    if x["id"] == new["id"]:
+                        if not editable(d, x):
+                            return False
+                        d["comments"][i] = {**new, "round": x["round"], **({"queued": True} if x.get("queued") else {})}
+                        return True
+                return False
+            if not update(rj, put):
+                return self.send(409, {"error": "this round is with Claude"})
+            return self.send(200, new)
     return H
+
+
+def save_images(folder, imgs, prefix, keep=()):
+    """A note's pictures: names it already has (kept) and pasted or dropped data urls (saved). Only these types,
+    under 15 MB each, at most 6."""
+    out = []
+    for im in imgs:
+        if len(out) == 6 or not isinstance(im, str):
+            continue
+        if im in keep:
+            out.append(im)
+            continue
+        m = re.match(r"data:image/(png|jpeg|gif|webp);base64,(.+)", im, re.S)
+        if not m:
+            continue
+        try:
+            raw = base64.b64decode(m[2])
+        except ValueError:
+            continue
+        if len(raw) > MAX_IMAGE:
+            continue
+        k = 1
+        while any((folder / "review" / f"{prefix}-img{k}.{x}").exists() for x in ("jpg", "png", "gif", "webp")):
+            k += 1
+        name = f"{prefix}-img{k}.{'jpg' if m[1] == 'jpeg' else m[1]}"
+        (folder / "review" / name).write_bytes(raw)
+        out.append(name)
+    return out
 
 
 def running(folder):
@@ -794,6 +857,22 @@ def demo():
     assert c["words"] == "hello world" and c["card"] is None and (folder / "review" / c["frame"]).stat().st_size > 0
     png = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJ"
            "RU5ErkJggg==")
+    # edit in place, same id: the text; an image added then removed; moved to the playhead and back
+    e = post("/edit", {"id": c["id"], "text": "cut the hello, please"})
+    assert e["id"] == c["id"] and e["text"] == "cut the hello, please" and e["edited"] and e["t"] == 1.2, e
+    e = post("/edit", {"id": c["id"], "images": [png]})
+    assert e["images"] == [f"rcut1-c{c['id']}-img1.png"] and e["text"] == "cut the hello, please", e
+    assert post("/edit", {"id": c["id"], "images": []})["images"] == []
+    e = post("/edit", {"id": c["id"], "t": 5.1})
+    assert e["t"] == 5.1 and e["words"] == "later" and e["frame"] != c["frame"] and (folder / "review" / e["frame"]).stat().st_size > 0, e
+    c = post("/edit", {"id": c["id"], "t": 1.2})
+    assert c["words"] == "hello world" and [x["text"] for x in load(folder / "review.json")["comments"]] == ["cut the hello, please"]
+    for bad in ({"id": c["id"], "text": ""}, {"id": 999, "text": "x"}):
+        try:
+            post("/edit", bad)
+            raise AssertionError(f"edit {bad}")
+        except urllib.error.HTTPError as err:
+            assert err.code in (400, 404), err.code
     ci = post("/comment", {"t": 1.5, "text": "", "images": [png, "data:text/html;base64,PGI+"]})
     assert ci["images"] == [f"rcut1-c{ci['id']}-img1.png"]
     assert get("/frames/" + ci["images"][0]).headers["Content-Type"] == "image/png"
@@ -840,11 +919,19 @@ def demo():
     out = waited()
     assert out.startswith("SEND: demo the cut, round 1, 1 note.") and "#1 0:01.2" in out and 'said: "hello world"' in out, out
     assert str(folder / "review" / c["frame"]) in out and not (folder / "review" / ".listening").exists()
+    assert "): cut the hello, please" in out, out   # wait hands over the final text
+    try:   # Claude has this round: its notes are read-only
+        post("/edit", {"id": c["id"], "text": "too late"})
+        raise AssertionError("edit after pick-up")
+    except urllib.error.HTTPError as err:
+        assert err.code == 409
     # a note while Claude works: queued for the next round, deletable, never in what `wait` hands over
     cx = post("/comment", {"t": 5.2, "text": "delete me"})
     post("/delete", {"id": cx["id"]})
-    cn = post("/comment", {"t": 1.2, "text": "and the pause after it"})
+    cn = post("/comment", {"t": 1.2, "text": "and the pause"})
     assert cn["queued"] and cn["round"] == 2 and cn["words"] == "hello world", cn
+    cn = post("/edit", {"id": cn["id"], "text": "and the pause after it"})   # a queued note stays editable, and queued
+    assert next(x for x in load(folder / "review.json")["comments"] if x["id"] == cn["id"])["queued"]
     assert [x["id"] for x in load(folder / "review.json")["comments"]] == [c["id"], cn["id"]]
     assert all(e["handled"] for e in load(folder / "review.json")["events"])   # nothing for `wait` to return on
     assert "LEARN:" in out.splitlines()[-2] and f"{folder} learn --scope style|video|everyone" in out, out
@@ -883,6 +970,7 @@ def demo():
     post("/scope", {"id": c3["id"], "alt": "*"})
     assert next(x for x in load(folder / "review.json")["comments"] if x["id"] == c3["id"])["alt"] == "*"
     post("/scope", {"id": c3["id"], "alt": "wide"})
+    assert post("/edit", {"id": c3["id"], "alt": "*"})["alt"] == "*" and post("/edit", {"id": c3["id"], "alt": "wide"})["alt"] == "wide"
     # live progress from a render log
     lg = tmp / "r.log"
     lg.write_text("Rendered 10/40\nRendered 30/40\n", encoding="utf-8")

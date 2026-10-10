@@ -186,6 +186,15 @@ aside{width:400px;flex-shrink:0;background:var(--panel);border:1px solid var(--l
 .att a{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12px;line-height:16px;color:var(--body);text-decoration:none}
 .att img{width:28px;height:28px;border-radius:6px;object-fit:cover}
 .nmeta{font-size:12px;line-height:16px;color:var(--muted)}
+/* a note being edited: its text in a box, its images removable, Save and Cancel */
+.nb p.ed{cursor:text}
+.edta{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 10px;font-size:14px;line-height:20px;color:var(--strong);resize:vertical;outline:none;min-height:60px}
+.edta:focus{border-color:var(--ink)}
+.att .rm{position:relative}.att .rm button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:9px;background:var(--ink);color:var(--onink);font-size:11px;line-height:18px}
+.erow{display:flex;gap:8px;align-items:center}
+.erow .grow{flex:1}
+.erow button{height:30px;padding:0 12px;border-radius:10px;font-size:13px;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--strong)}
+.erow button.go{background:var(--ink);border-color:var(--ink);color:var(--onink);font-weight:600}
 .reply{align-self:stretch;display:flex;gap:8px;padding:2px 24px 0 0}
 .reply .ic{color:var(--ink);width:16px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .reply .ic i{width:9px;height:1.6px;border-radius:1px;background:var(--muted)}
@@ -335,6 +344,7 @@ aside{width:400px;flex-shrink:0;background:var(--panel);border:1px solid var(--l
  <div class="pfoot">
   <div id="box"><textarea id="ta" rows="1" aria-label="note"></textarea><div id="pics"></div>
    <input type="file" id="picin" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+   <input type="file" id="editpic" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
    <div class="crow"><button id="clock" title="the note is saved at the playhead. i and o mark a range; click to clear it."><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 4v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="boxat" class="num">0:00.0</span></button>
     <button id="picbtn" aria-label="attach an image" title="attach an image (or paste or drop one)"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M13 7.5l-5.3 5.3a3.2 3.2 0 01-4.5-4.5l5.6-5.6a2.1 2.1 0 013 3l-5.5 5.5a1 1 0 01-1.5-1.5L9.9 4.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
     <select id="scope" aria-label="which videos the note is for"></select>
@@ -350,6 +360,7 @@ const KEYS=[['Play or pause','space'],['Back or forward 5 s','j l'],['Back or fo
  ['Write a note','c'],['Mark a range','i o'],['Save note','enter'],['Cancel','esc'],['Full screen','f'],['Mute','m'],['Safe zone (vertical)','z'],['This help','?']];
 $('keys').innerHTML=KEYS.map(([a,k])=>`<div><span>${a}</span><span>${k.split(' ').map(x=>'<kbd>'+x+'</kbd>').join('&nbsp;&nbsp;')}</span></div>`).join('');
 const TICK='<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+let editing=null;   // the note being edited in place: {id, text, images: kept names and new data urls}
 let S=null,view=null,alt='',cmp=null,mode='watch',loaded2='',inT=null,outT=null,loaded='',dragging=false,showChecked=false,tab='notes';
 const DATA={};   // round key -> its transcript, segments and tracks (review.py round_data)
 let speed=1;try{speed=+localStorage.getItem('review-speed')||1}catch(e){}
@@ -525,15 +536,22 @@ function tickTx(){
 }
 function noteHtml(c){
   const old=c.round!==view.round&&!c.queued,t=here(c),live=isCur()&&(!pending()||!!c.queued),nv=(viewRound().alts||[]).length;
+  const canEdit=!old&&live&&c.status==='open',ed=canEdit&&editing&&editing.id===c.id;   // review.py editable(): open round or queued
+  const why=canEdit?'':old?`From round ${c.round}. Leave a new note to change it.`:isCur()&&pending()==='send'?'Claude has this round. Leave a new note for the next one.':pending()==='approve'?'This round is approved.':'An older round, read only.';
   const tm=c.t_end!=null&&!old?fmtx(c.t)+'–'+fmtx(c.t_end):fmtx(t);
   const thumb=old?'':`<img class="thumb${S.vertical?'':' wide'}" src="/frames/${encodeURIComponent(c.frame)}" alt="" loading="lazy">`;
   const imgs=(c.images||[]).length?`<div class="att">${c.images.map((x,i)=>`<a href="/frames/${encodeURIComponent(x)}" target="_blank" rel="noopener"><img src="/frames/${encodeURIComponent(x)}" alt="">Image ${i+1}</a>`).join('')}</div>`:'';
   const card=c.card?`<span class="cardm">Card ${c.card.i+1}${c.card.trigger_word?' on "'+esc(c.card.trigger_word)+'"':''}</span>`:'';
   const moved=old&&c.new_t!=null&&fmt(c.new_t)!==fmt(c.t)?` (${fmt(c.t)} in round ${c.round})`:'';
-  let h=`<div class="note${old?' old':''}" data-t="${t}" data-old="${old?1:0}"><div class="bub">${thumb}<div class="nb"><div class="nh"><span class="tchip num">${tm}</span>${c.words?`<span class="q">"${esc(c.words)}"</span>`:''}</div>
-    ${c.text?`<p>${esc(c.text)}</p>`:''}${card}${imgs}</div></div>`;
+  const body=ed?`<textarea class="edta" aria-label="edit note">${esc(editing.text)}</textarea>
+    ${editing.images.length?`<div class="att">${editing.images.map((x,i)=>`<span class="rm"><a><img src="${x.startsWith('data:')?x:'/frames/'+encodeURIComponent(x)}" alt="">Image ${i+1}</a><button data-rmimg="${i}" aria-label="remove image">×</button></span>`).join('')}</div>`:''}
+    <div class="erow"><button data-addimg>+ Image</button><span class="grow"></span><button data-cancel>Cancel</button><button class="go" data-save>Save</button></div>`
+    :`${c.text?`<p${canEdit?` class="ed" data-edit="${c.id}" title="click to edit"`:''}>${esc(c.text)}</p>`:''}${card}${imgs}`;
+  let h=`<div class="note${old?' old':''}${ed?' editing':''}" data-t="${t}" data-old="${old?1:0}"${why?` title="${esc(why)}"`:''}><div class="bub">${thumb}<div class="nb"><div class="nh"><span class="tchip num">${tm}</span>${c.words?`<span class="q">"${esc(c.words)}"</span>`:''}</div>
+    ${body}</div></div>`;
   if(c.moved&&!old)h+=`<span class="nmeta">${c.moved==='words'?`Moved from ${fmtx(c.t_was)} to where the same words are said`:`Same time as in the last round. The cut changed, so check it`}</span>`;
-  if(nv)h+=`<span class="nmeta">${c.alt==='*'?(nv===1?'Both':'All')+' versions':esc(c.alt||mainName(viewRound()))+' only'}</span>`;
+  const meta=[nv?(c.alt==='*'?(nv===1?'Both':'All')+' versions':esc(c.alt||mainName(viewRound()))+' only'):'',c.edited&&!old?'Edited':''].filter(Boolean);
+  if(meta.length)h+=`<span class="nmeta">${meta.join(' · ')}</span>`;
   if(old||c.reply){
     const st=c.status,ic=st==='fixed'?TICK:st==='wontfix'?'<i></i>':'<u></u>';
     const lead=st==='fixed'?`Fixed in round ${view.stage===c.stage&&old?view.round:c.round+1}`:st==='wontfix'?'Left as is':'Still open';
@@ -543,8 +561,9 @@ function noteHtml(c){
   }
   const acts=[];
   if(old&&live&&!c.checked&&c.status!=='open')acts.push(`<button data-good="${c.id}">Got it</button>`);
-  if(!old&&live&&nv)acts.push(`<button data-scope="${c.id}">${c.alt==='*'?'Make it this video only':'Apply to all versions'}</button>`);
-  if(!old&&live)acts.push(`<button data-del="${c.id}">Delete</button>`);
+  if(canEdit&&!ed)acts.push(`<button data-edit="${c.id}">Edit</button>`,`<button data-move="${c.id}" title="the note's moment, frame and words move to the playhead">Move to playhead</button>`);
+  if(canEdit&&nv)acts.push(`<button data-scope="${c.id}">${c.alt==='*'?'Make it this video only':'Apply to all versions'}</button>`);
+  if(canEdit)acts.push(`<button data-del="${c.id}">Delete</button>`);
   if(acts.length)h+=`<div class="acts">${acts.join('')}</div>`;
   return h+'</div>';
 }
@@ -589,7 +608,13 @@ function renderList(){
   const queued=isCur()?S.comments.filter(c=>c.queued&&c.stage===S.stage&&onAlt(c)).sort((a,b)=>a.t-b.t):[];
   if(queued.length)h+=`<p class="sub">For the next round</p>`+queued.map(noteHtml).join('');
   if(isCur()&&!p&&mine.length)h+=`<span class="unsent">${plural(mine.length,'note')}, not sent yet</span>`;
-  const keepScroll=$('list').scrollTop;$('list').innerHTML=h;$('list').scrollTop=isCur()&&p?$('list').scrollHeight:keepScroll;
+  const keepScroll=$('list').scrollTop,hadFocus=document.activeElement&&document.activeElement.classList.contains('edta');
+  $('list').innerHTML=h;$('list').scrollTop=isCur()&&p&&!editing?$('list').scrollHeight:keepScroll;
+  const ea=$('list').querySelector('.edta');
+  if(ea){ea.oninput=()=>editing.text=ea.value;ea.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();saveEdit()}if(ev.key==='Escape'){ev.preventDefault();editing=null;renderList()}};
+    ea.onpaste=ev=>{const fs=[...(ev.clipboardData?.files||[])];if(fs.length){ev.preventDefault();editFiles(fs)}};
+    if(hadFocus||editing.focus){editing.focus=false;ea.focus();ea.setSelectionRange(ea.value.length,ea.value.length)}}
+  else if(editing&&!S.comments.some(c=>c.id===editing.id))editing=null;
 }
 setInterval(()=>{document.querySelectorAll('[data-since]').forEach(e=>e.textContent='Working for '+dur((Date.now()-new Date(e.dataset.since))/1000))},1000);
 async function post(u,b){const r=await fetch(u,{method:'POST',body:JSON.stringify(b)});return r.ok?r.json():{}}
@@ -602,7 +627,25 @@ $('stages').addEventListener('click',e=>{
 $('ptabs').onclick=e=>{const b=e.target.closest('button');if(b){tab=b.dataset.tab;render()}};
 $('wc').onclick=e=>{const b=e.target.closest('button');if(!b)return;mode=b.dataset.m;setVideo();render()};
 $('ver2').onchange=e=>{cmp=cmpOptions()[+e.target.value];setVideo();render();e.target.blur()};
+async function saveEdit(){const c=S.comments.find(c=>c.id===editing.id);if(!c){editing=null;return renderList()}
+  const text=editing.text.trim();if(!text&&!editing.images.length)return;
+  const r=await fetch('/edit',{method:'POST',body:JSON.stringify({id:c.id,text,images:editing.images})});
+  editing=null;if(!r.ok)alert((await r.json().catch(()=>({}))).error||'Could not save the note');await load(true)}
+function editFiles(fs){[...fs].filter(f=>/^image\/(png|jpeg|gif|webp)$/.test(f.type)).slice(0,6-editing.images.length).forEach(f=>{const r=new FileReader();r.onload=()=>{if(editing){editing.images.push(r.result);renderList()}};r.readAsDataURL(f)})}
+$('editpic').onchange=e=>{if(editing)editFiles(e.target.files);e.target.value=''};
 $('list').addEventListener('click',async e=>{
+  if(e.target.closest('.editing')){
+    if(e.target.closest('[data-save]'))return saveEdit();
+    if(e.target.closest('[data-cancel]')){editing=null;return renderList()}
+    if(e.target.closest('[data-addimg]'))return $('editpic').click();
+    const ri=e.target.closest('[data-rmimg]');if(ri){editing.images.splice(+ri.dataset.rmimg,1);return renderList()}
+    if(!e.target.closest('.acts'))return;
+  }
+  const ed=e.target.closest('[data-edit]');
+  if(ed){e.stopPropagation();const c=S.comments.find(c=>c.id===+ed.dataset.edit);editing={id:c.id,text:c.text,images:[...(c.images||[])],focus:true};v.pause();return renderList()}
+  const mv=e.target.closest('[data-move]');
+  if(mv){e.stopPropagation();const r=await fetch('/edit',{method:'POST',body:JSON.stringify({id:+mv.dataset.move,t:v.currentTime})});
+    if(!r.ok)alert((await r.json().catch(()=>({}))).error||'Could not move the note');return load(true)}
   const r=e.target.closest('.rnd');if(r){const[stage,n]=r.dataset.k.split('-');view={stage,round:+n};tab='notes';inT=outT=null;setVideo();render();return}
   const sc=e.target.closest('[data-scope]');
   if(sc){e.stopPropagation();const c=S.comments.find(c=>c.id===+sc.dataset.scope);

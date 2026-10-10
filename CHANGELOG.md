@@ -18,6 +18,9 @@ What changed for every user, newest first.
   or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
 - The review page has a dark mode. It follows the system setting until you pick light or dark with
   the switch in the header, and remembers the pick in that browser.
+- Review notes can be edited in place while they are unsent or queued for the next round: the text
+  (click it, Enter saves, Esc cancels), the moment (move to playhead: new frame still and words), which
+  versions it is for, and its images. Once Claude has the round they are read-only. Test: `review.py demo`.
 
 ## ai-editor 2.2.0 (2026-10-09)
 

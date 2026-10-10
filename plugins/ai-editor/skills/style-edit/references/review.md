@@ -79,6 +79,11 @@ words are said on the new cut when both rounds have the cut's transcript (`"move
 in `t_was`), else it keeps its time (`"moved": "time"` when the length changed: check it), with a new
 frame still and the words said there. The next `wait` hands them over like any note.
 
+The user can edit any note they wrote while it is unsent or queued: its text, its moment (moved to the
+playhead with a new frame still and words), its version scope and its images. Same note id, with an
+`edited` time; `wait` prints the final text. Once Claude has the round its notes are read-only (`/edit`
+answers 409); a change then is a new note or **fix it anyway**.
+
 The page has a **Stop** button while Claude works. When the user presses it, the round's notes open
 again (queued notes join them) and the next `status` exits 3 with `STOPPED`: stop the work, say so in one line, run `wait`.
 
