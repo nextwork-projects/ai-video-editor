@@ -310,9 +310,10 @@ The footage's zooms (plan.json `zooms`, StyleEdit.tsx `zoomAt`) move like a came
   took `pace`, else `sine.inOut`. Never linear.
 - Transforms are not rounded (sub-pixel).
 
-check.py render (quality.py `zoom_moves`) measures every zoom on the render, frame to frame in the face band
-(ORB + a similarity fit), and WARNs a snap (one frame carries over 60% of the change) or jerk (the speed
-reverses or surges a second time mid-move).
+check.py render (quality.py `zoom_moves`) measures every zoom on the render against the cut behind it, frame
+by frame in the face band (ORB + a similarity fit), so handheld footage's own movement cancels out. It WARNs
+when the drawn zoom leaves the planned curve by half the move: a snap (one frame carries over 60% of it) or
+a jerk (any other departure). Frames next to a jump cut are not measured.
 
 ## Personalities
 
