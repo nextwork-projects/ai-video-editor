@@ -282,6 +282,24 @@ def test_remap_follows_the_words_through_a_recut():
         assert once == kept == json.loads((d / "visuals.json").read_text()), once
 
 
+
+def test_remap_follows_a_retake_of_the_word():
+    """The real-footage test: the cut kept the second take of a line, so the first "notion" was cut but the
+    same word is said again in that sentence. The beat follows it instead of being dropped; a word cut with
+    no retake in its sentence is still dropped."""
+    raw = take("so i use notion | i use notion for notes. | then figma | done")   # a pause before the retake
+    spans_old = [{"start": 0.0, "end": 100.0}]
+    spans_new = [{"start": raw[3]["end"] + 0.05, "end": raw[10]["start"] - 0.05}, {"start": raw[10]["end"] + 0.05, "end": 100.0}]
+    beats = [{"word": "notion", "nth": 1, "kind": "logo"}, {"word": "figma", "nth": 1, "kind": "logo"}]
+    kept, dropped = R.remap_beats(raw, spans_old, spans_new, beats)
+    assert kept == [{"word": "notion", "nth": 1, "kind": "logo"}], kept
+    assert [b["word"] for b in dropped] == ["figma"], dropped
+    # the same word in another sentence is a different beat: still dropped
+    raw = take("i use notion. | notion is great")
+    spans_new = [{"start": raw[2]["end"] + 0.05, "end": 100.0}]
+    assert R.remap_beats(raw, spans_old, spans_new, [{"word": "notion", "nth": 1}])[0] == []
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

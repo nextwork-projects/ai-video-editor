@@ -660,11 +660,16 @@ def captions(d):
 
 def remap_beats(raw, old_spans, new_spans, beats):
     """beats keyed to (word, nth) on the old cut -> (kept, dropped) on the new one. A beat with no nth is
-    kept as is (plan.py takes the next time the word is said). raw: the source words."""
+    kept as is (plan.py takes the next time the word is said). A beat whose word was cut follows the same
+    word said again in the same sentence (the retake kept); with none it is dropped. raw: the source words."""
     from build_timeline import is_kept
     key = lambda t: re.sub(r"[^\w'’-]+", "", t).lower()      # plan.py clean().lower()
     old = [i for i, w in enumerate(raw) if is_kept(w, old_spans)]
     new = {i for i, w in enumerate(raw) if is_kept(w, new_spans)}
+    sentence, n = [], 0      # a sentence ends at . ? ! (a false start before a retake has none, so it joins it)
+    for w in raw:
+        sentence.append(n)
+        n += w["text"].rstrip().endswith((".", "?", "!"))
     kept, dropped = [], []
     for b in beats:
         if not b.get("word") or not b.get("nth"):
@@ -676,9 +681,12 @@ def remap_beats(raw, old_spans, new_spans, beats):
             kept.append(b)
             continue
         i = hits[b["nth"] - 1]
-        if i not in new:
-            dropped.append(b)
-            continue
+        if i not in new:     # the word was cut: the same word said again in its sentence (a retake) carries it
+            again = [j for j in new if key(raw[j]["text"]) == key(b["word"]) and sentence[j] == sentence[i]]
+            if not again:
+                dropped.append(b)
+                continue
+            i = min(again, key=lambda j: abs(j - i))
         kept.append({**b, "nth": sum(1 for j in new if j <= i and key(raw[j]["text"]) == key(b["word"]))})
     return kept, dropped
 
