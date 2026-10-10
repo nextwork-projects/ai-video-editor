@@ -148,7 +148,7 @@ def aws_env():
     """AWS keys saved by `setup.py awskey`, layered over the real environment."""
     env, f = dict(os.environ), HOME / "aws.env"
     if f.exists():
-        for line in f.read_text().splitlines():
+        for line in f.read_text(encoding="utf-8").splitlines():
             k, _, v = line.partition("=")
             if k.strip() and v.strip():
                 env.setdefault(k.strip(), v.strip())
@@ -156,9 +156,75 @@ def aws_env():
 
 
 def node(*args):
-    return subprocess.run(["node", str(REMOTION / "render.mjs"), *map(str, args)], cwd=REMOTION,
-                          check=True, capture_output=args[0] in ("bench", "lambda-estimate", "bundle"), text=True,
-                          env=aws_env())
+    try:
+        return subprocess.run(["node", str(REMOTION / "render.mjs"), *map(str, args)], cwd=REMOTION,
+                              check=True, capture_output=args[0] in ("bench", "lambda-estimate", "bundle"), text=True,
+                              env=aws_env())
+    except subprocess.CalledProcessError as e:     # a short message, never a traceback (render.md "If a render stops")
+        last = [x for x in (e.stderr or "").splitlines() if x.strip() and not x.lstrip().startswith("at ")][-1:]
+        sys.exit(f"ERROR: render.mjs {args[0]} failed (exit {e.returncode})" + (f": {last[0].strip()}" if last else
+                 " (its output is above)") + ". Run the same command again once; if it stops the same way, see "
+                 "style-edit references/render.md \"If a render stops\".")
+
+
+# The stall watchdog. A laptop render once sat at 0% CPU for 25 min after Remotion restarted a crashed
+# browser ("Made new browser"), printing nothing. No new "Rendered N/M" line for this long = stalled:
+# Remotion's own per-frame deadline (render.mjs TIMEOUT_MS, 120 s) plus a margin, or 200 frames' time
+# on a slow machine. Before the first frame: bundling and Chrome's start, STALL_START_S more.
+STALL_MIN_S, STALL_FRAMES, STALL_START_S = 180, 200, 120
+CHUNK_FRAMES = 200        # the fallback: pieces this long, each its own Chrome (the path that finished the
+                          # stalled render in the real-footage test)
+STALLED = "stalled"
+
+
+def stall_s(s_per_frame):
+    return max(STALL_MIN_S, STALL_FRAMES * s_per_frame)
+
+
+def watch(cmd, log, stall, start=STALL_START_S, cwd=None, env=None, echo=True):
+    """Run cmd with its output into log (and its progress and errors onto stdout). Returns its exit code,
+    or STALLED after killing it (and Chrome under it) when no new "Rendered N/M" came for `stall` seconds."""
+    import threading
+    log = Path(log)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    seen = {"t": time.time() + start, "n": None}
+    with open(log, "a", encoding="utf-8") as f:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=cwd, env=env,
+                             start_new_session=os.name != "nt")
+
+        def read():
+            for line in p.stdout:
+                f.write(line)
+                f.flush()
+                m = re.match(r"Rendered (\d+)/", line)
+                if m and m.group(1) != seen["n"]:
+                    seen.update(t=time.time(), n=m.group(1))
+                if echo and not line.lstrip().startswith("at "):
+                    print(line, end="", flush=True)
+        th = threading.Thread(target=read, daemon=True)
+        th.start()
+        while p.poll() is None:
+            if time.time() - seen["t"] > stall:
+                if os.name != "nt":
+                    os.killpg(p.pid, 9)
+                else:
+                    p.kill()
+                p.wait()
+                th.join(5)
+                f.write(f"\n[edit.py: no new frame for {stall:.0f} s, stopped]\n")
+                return STALLED
+            time.sleep(0.5)
+        th.join(5)
+        return p.returncode
+
+
+def render_failed(code, log, edit):
+    """A failed render: one short message with the log and the next step, never a traceback."""
+    lines = [x.strip() for x in Path(log).read_text(errors="replace", encoding="utf-8").splitlines()
+             if x.strip() and not x.lstrip().startswith("at ")] if Path(log).exists() else []
+    sys.exit(f"ERROR: the laptop render failed (exit {code}). The renderer's log: {log}"
+             + (f"\n  its last line: {lines[-1][:200]}" if lines else "")
+             + f"\nNext: render again once (edit.py render {edit}); if it fails the same way, offer --draft or --modal.")
 
 
 # Laptop speed: benchmarked once (2 s of the first video), then replaced by every full laptop render.
@@ -167,11 +233,11 @@ LAPTOP_JSON = HOME / "laptop.json"
 
 def laptop_speed(plan_path, pub):
     try:
-        return json.loads(LAPTOP_JSON.read_text())
+        return json.loads(LAPTOP_JSON.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
         m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "start_s": b.get("start_s", 0), "source": "benchmark"}
-        LAPTOP_JSON.write_text(json.dumps(m))
+        LAPTOP_JSON.write_text(json.dumps(m), encoding="utf-8")
         return m
 
 
@@ -183,7 +249,7 @@ def laptop_s(lap, frames):
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 # Modal (modal.com): one container per chunk, all at once. Rates from modal.com/pricing, read
@@ -238,7 +304,7 @@ def modal_cost(container_s, containers):
 def modal_speed():
     """(speeds, measured?): the last Modal render's measurements over the sample take's."""
     try:
-        m = json.loads(MODAL_JSON.read_text())
+        m = json.loads(MODAL_JSON.read_text(encoding="utf-8"))
         return {**MODAL_MEASURED, **{k: m[k] for k in MODAL_MEASURED if k in m}}, "straggle" in m
     except (OSError, ValueError):
         return dict(MODAL_MEASURED), False
@@ -246,13 +312,27 @@ def modal_speed():
 
 def modal_estimate(frames, media_bytes, m=None):
     """(wall s, usd, containers, measured?): upload + start + the render on n containers, slowed by the
-    straggle factor + the tail. The upload is counted in full; footage Modal already holds is skipped by
-    hash and goes up in about a second."""
+    straggle factor + the tail. media_bytes is what goes up: modal_upload_bytes leaves out footage Modal
+    already holds."""
     m, measured = (m, True) if m else modal_speed()
     work = frames * m["s_per_frame"]
     n, _ = modal_plan(frames, m["s_per_frame"])
     wall = media_bytes / m["up_bytes_s"] + m["start_s"] + work / n * m["straggle"] + m["tail_s"]
     return wall, modal_cost(work, n), n, measured
+
+
+def modal_upload_bytes(pub, media, run=subprocess.run, ready=None):
+    """Footage bytes a Modal render will upload. Modal skips a file it already holds by its hash (a
+    re-render's upload takes 3-4 s); modal_render.py held asks by hash and sends nothing. Modal not set
+    up, or no answer in 30 s: all of it."""
+    if not (ready or modal_ready)():
+        return media
+    try:
+        r = run([venv_python(), str(Path(__file__).parent / "modal_render.py"), "held", str(pub)],
+                capture_output=True, text=True, timeout=30)
+        return json.loads(r.stdout.strip().splitlines()[-1])["to_upload"]
+    except Exception:
+        return media
 
 
 def venv_python():
@@ -296,15 +376,61 @@ def render_modal(edit, plan_path, pub, out):
     save_json(MODAL_JSON, {**modal_speed()[0], **m})    # an upload Modal skipped keeps the last uplink speed
 
 
-def render_laptop(edit, plan_path, pub, out, draft):
+def render_chunks(edit, plan_path, pub, out, draft, log, stall, run=None, bundle_to=None):
+    """The fallback after a stall: bundle once, render CHUNK_FRAMES-frame pieces (each its own Chrome, each
+    retried once if it stalls), then the GitHub workflow's JOIN puts them together."""
+    run = run or watch
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    tmp = edit / f".render-chunks{out.stem[len('render'):]}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    (tmp / "chunks").mkdir(parents=True)
+    bundle = tmp / "bundle"
+    (bundle_to or (lambda a, b: node("bundle", a, b)))(pub, bundle)
+    frames = plan["durationInFrames"]
+    pieces = [{"i": f"{i:03d}", "from": a, "to": min(frames, a + CHUNK_FRAMES) - 1}
+              for i, a in enumerate(range(0, frames, CHUNK_FRAMES))]
+    for c in pieces:
+        cmd = ["node", str(REMOTION / "render.mjs"), "chunk", str(bundle), str(plan_path),
+               str(tmp / "chunks" / f"chunk-{c['i']}.mkv"), str(c["from"]), str(c["to"]), *(["--draft"] if draft else [])]
+        r = run(cmd, log, stall, cwd=REMOTION, env=aws_env())
+        if r == STALLED:
+            print(f"frames {c['from']}-{c['to']} stalled too; once more")
+            r = run(cmd, log, stall, cwd=REMOTION, env=aws_env())
+        if r:
+            render_failed("stalled" if r == STALLED else r, log, edit)
+    j = subprocess.run([sys.executable, "-c", JOIN], cwd=tmp, capture_output=True, text=True,
+                       env={**os.environ, "FPS": str(plan["fps"]), "CHUNKS": json.dumps(pieces)})
+    if j.returncode:
+        Path(log).open("a").write(j.stderr)
+        render_failed(j.returncode, log, edit)
+    shutil.move(str(tmp / "out" / "render.mp4"), out)
+    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"rendered {out} in {len(pieces)} pieces")
+
+
+def render_laptop(edit, plan_path, pub, out, draft, run=None, chunks=None):
     t0 = time.time()
-    node("local", pub, plan_path, out, *(["--draft"] if draft else []))
-    frames = json.loads(plan_path.read_text())["durationInFrames"]
+    frames = json.loads(plan_path.read_text(encoding="utf-8"))["durationInFrames"]
+    try:
+        spf = json.loads(LAPTOP_JSON.read_text(encoding="utf-8"))["s_per_frame"]
+    except (OSError, ValueError, KeyError):
+        spf = 0.3
+    stall, log = stall_s(spf), out.parent / f"{out.stem}.renderer.log"
+    log.unlink(missing_ok=True)
+    r = (run or watch)(["node", str(REMOTION / "render.mjs"), "local", str(pub), str(plan_path), str(out),
+                        *(["--draft"] if draft else [])], log, stall, cwd=REMOTION, env=aws_env())
+    if r == STALLED:
+        print(f"\nthe render stalled: no new frame for {stall:.0f} s. Stopped it; rendering again in "
+              f"{CHUNK_FRAMES}-frame pieces (log: {log})", flush=True)
+        (chunks or render_chunks)(edit, plan_path, pub, out, draft, log, stall)
+        return
+    if r:
+        render_failed(r, log, edit)
     # The next estimate uses this video's real speed. ponytail: a clip under 10 s is mostly Chrome
     # starting up, so it would overstate the speed of a long video; those are skipped.
     if not draft and frames >= 300:
         try:
-            bundle_s = json.loads(LAPTOP_JSON.read_text())["bundle_s"]
+            bundle_s = json.loads(LAPTOP_JSON.read_text(encoding="utf-8"))["bundle_s"]
         except (OSError, ValueError, KeyError):
             bundle_s = 3.0
         save_json(LAPTOP_JSON, {"s_per_frame": max(0.001, (time.time() - t0 - bundle_s) / frames),
@@ -344,14 +470,24 @@ def minutes(s):
     return f"{s:.0f} s" if s < 90 else f"{s / 60:.1f} min"
 
 
+def speed_note(lap, name):
+    """Where the laptop speed comes from, and how far to trust it."""
+    src = lap.get("source", "")
+    if src == "benchmark":
+        return "speed from a 2 s benchmark: a rough guess"
+    if src == f"render of {name}":
+        return "speed from this video's last render"
+    other = src[len("render of "):] if src.startswith("render of ") else src
+    return f"speed from the last render of another video ({other}): a rough guess, cards and length change it"
+
+
 def estimate(plan_path, pub):
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     frames = plan["durationInFrames"]
     media = sum(f.stat().st_size for f in pub.rglob("*") if f.is_file())
     lap = laptop_speed(plan_path, pub)
-    print(f"Laptop: about {minutes(laptop_s(lap, frames))} ({frames} frames, speed from "
-          f"the last {'benchmark' if lap['source'] == 'benchmark' else lap['source']}). Free.")
-    wall, usd, n, measured = modal_estimate(frames, media)
+    print(f"Laptop: about {minutes(laptop_s(lap, frames))} ({frames} frames, {speed_note(lap, plan_path.parent.name)}). Free.")
+    wall, usd, n, measured = modal_estimate(frames, modal_upload_bytes(pub, media))
     print(f"Modal: about {minutes(wall)} on {n} machine{'s' * (n > 1)}, about ${usd:.2f} "
           f"({'speed measured on the last Modal render' if measured else 'a guess until the first Modal render'}; "
           f"the Starter plan includes $30 of free credit a month)." +
@@ -516,11 +652,11 @@ def package_github(edit, plan_path, pub, tag):
     if lock.exists():
         shutil.copy2(lock, repo / "package-lock.json")
     shutil.copy2(plan_path, repo / "plan.json")
-    (repo / ".gitignore").write_text("node_modules/\nout/\npublic/\n*.mp4\n*.zip\n")
-    (repo / "README.md").write_text(README.format(name=edit.name, zip=zip_path.name))
+    (repo / ".gitignore").write_text("node_modules/\nout/\npublic/\n*.mp4\n*.zip\n", encoding="utf-8")
+    (repo / "README.md").write_text(README.format(name=edit.name, zip=zip_path.name), encoding="utf-8")
     wf = repo / ".github" / "workflows" / "render.yml"
     wf.parent.mkdir(parents=True, exist_ok=True)
-    wf.write_text(workflow(zip_path.name))
+    wf.write_text(workflow(zip_path.name), encoding="utf-8")
     for f in media_files(zip_path):
         f.unlink(missing_ok=True)
     shutil.make_archive(str(zip_path.with_suffix("")), "zip", pub)
@@ -616,14 +752,14 @@ def github_push(edit, repo_name, tag):
             break
         time.sleep(3)
     # github-fetch downloads the run started here, never an older one.
-    (edit / f"github{tag}.json").write_text(json.dumps({"repo": full, "started": started}))
+    (edit / f"github{tag}.json").write_text(json.dumps({"repo": full, "started": started}), encoding="utf-8")
     print(f"render started: {info['url']}/actions/workflows/render.yml")
 
 
 def github_fetch(edit, repo_name, tag):
     need_gh()
     meta = edit / f"github{tag}.json"
-    since = json.loads(meta.read_text())["started"] if meta.exists() else ""
+    since = json.loads(meta.read_text(encoding="utf-8"))["started"] if meta.exists() else ""
     runs = []
     for _ in range(20):                            # the run triggered by github-push can take a moment to appear
         runs = [r for r in json.loads(gh("run", "list", "-R", repo_name, "--workflow", "render.yml", "-L", "5",
@@ -673,7 +809,7 @@ def demo():
     with tempfile.TemporaryDirectory() as d:
         assert not aws_ready({}, d) and aws_ready({"AWS_PROFILE": "x"}, d)
         (Path(d) / ".aws").mkdir()
-        (Path(d) / ".aws" / "credentials").write_text("")
+        (Path(d) / ".aws" / "credentials").write_text("", encoding="utf-8")
         assert aws_ready({}, d)
     assert not_set_up(True, "x") == "" and "Lambda section" in not_set_up(False, "Lambda section")
     plan = {"fps": 30, "durationInFrames": 900,
@@ -693,7 +829,7 @@ def demo():
         (pub / "images").mkdir(parents=True)
         (pub / "cut.mp4").write_bytes(b"x" * 100)
         (pub / "images" / "a.png").write_bytes(b"png")
-        (edit / "plan.json").write_text('{"video": "cut.mp4"}')
+        (edit / "plan.json").write_text('{"video": "cut.mp4"}', encoding="utf-8")
         repo, z = package_github(edit, edit / "plan.json", pub, "")
         for f in (".github/workflows/render.yml", "plan.json", "package.json", "render.mjs", "src/index.ts"):
             assert (repo / f).exists(), f
@@ -701,27 +837,27 @@ def demo():
         assert set(zipfile.ZipFile(z).namelist()) >= {"cut.mp4", "images/a.png"}, zipfile.ZipFile(z).namelist()
         # an unchanged renderer file is never rewritten (parallel stills bundle it); a changed one is
         a, b = Path(t) / "a.ts", Path(t) / "b.ts"
-        a.write_text("same"), b.write_text("same")
+        a.write_text("same", encoding="utf-8"), b.write_text("same", encoding="utf-8")
         ino = b.stat().st_ino
         copy_changed(a, b)
         assert b.stat().st_ino == ino, "an unchanged file was rewritten"
-        a.write_text("new")
+        a.write_text("new", encoding="utf-8")
         copy_changed(a, b)
-        assert b.read_text() == "new" and not list(Path(t).glob("b.ts.*.tmp"))
+        assert b.read_text(encoding="utf-8") == "new" and not list(Path(t).glob("b.ts.*.tmp"))
         # the renderer copy is exact: a component deleted upstream leaves the user's copy too
         up, mine = Path(t) / "up", Path(t) / "mine"
         (up / "keep").mkdir(parents=True), (mine / "old").mkdir(parents=True)
-        (up / "keep" / "A.tsx").write_text("a"), (mine / "Gone.tsx").write_text("x"), (mine / "old" / "B.tsx").write_text("b")
-        (Path(t) / "outside.txt").write_text("user")
+        (up / "keep" / "A.tsx").write_text("a", encoding="utf-8"), (mine / "Gone.tsx").write_text("x", encoding="utf-8"), (mine / "old" / "B.tsx").write_text("b", encoding="utf-8")
+        (Path(t) / "outside.txt").write_text("user", encoding="utf-8")
         mirror(up, mine)
         assert sorted(p.relative_to(mine).as_posix() for p in mine.rglob("*")) == ["keep", "keep/A.tsx"], list(mine.rglob("*"))
         assert (Path(t) / "outside.txt").exists()
-        wf = (repo / ".github/workflows/render.yml").read_text()
+        wf = (repo / ".github/workflows/render.yml").read_text(encoding="utf-8")
         assert "-p 'github-render-media.zip*'" in wf
         for job in ("  plan:", "  render:", "  join:", "name: render\n", "render.mjs chunk", '"concat"'):
             assert job in wf, job
         # the plan job's own script gives the same chunks as chunk_ranges
-        (repo / "plan.json").write_text('{"durationInFrames": 72000, "fps": 30}')
+        (repo / "plan.json").write_text('{"durationInFrames": 72000, "fps": 30}', encoding="utf-8")
         py = re.search(r"<<'EOF' >> \"\$GITHUB_OUTPUT\"\n(.*?)\n\s*EOF", wf, re.S).group(1)
         out = subprocess.run([sys.executable, "-c", textwrap.dedent(py)], cwd=repo, capture_output=True, text=True, check=True).stdout
         got = json.loads(out.splitlines()[0].partition("=")[2])
@@ -767,6 +903,62 @@ def demo():
     m = {"s_per_frame": 0.3, "start_s": 10, "straggle": 1.5, "tail_s": 20, "up_bytes_s": 4e6}
     wall, usd, n, _ = modal_estimate(6000, 140e6, m)
     assert n == 15 and abs(wall - (35 + 10 + 1800 / 15 * 1.5 + 20)) < 1e-6 and abs(usd - modal_cost(1800, 15)) < 1e-9, (wall, n)
+    # footage Modal already holds (asked by hash, nothing sent) is not counted as upload time
+    said = lambda out: lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out)
+    assert modal_upload_bytes("pub", 140e6, run=said('{"to_upload": 0}\n'), ready=lambda: True) == 0
+    assert modal_upload_bytes("pub", 140e6, run=said('{"to_upload": 5}\n'), ready=lambda: True) == 5
+    assert modal_upload_bytes("pub", 140e6, run=said(""), ready=lambda: True) == 140e6, "no answer: all of it"
+    assert modal_upload_bytes("pub", 140e6, run=None, ready=lambda: False) == 140e6, "Modal not set up"
+    # the estimate says when its speed is another video's (the real-footage test read "speed from the last
+    # render of pod-clip1" as if it were this video's)
+    assert "another video (pod-clip1)" in speed_note({"source": "render of pod-clip1"}, "raw-take")
+    assert speed_note({"source": "render of raw-take"}, "raw-take") == "speed from this video's last render"
+    assert "rough guess" in speed_note({"source": "benchmark"}, "x")
+    # the stall watchdog: a renderer that prints one frame and then hangs (the 25 min hang at 0% CPU) is
+    # stopped after `stall` seconds with no new frame; one that keeps printing frames is left alone
+    with tempfile.TemporaryDirectory() as t:
+        log = Path(t) / "r.log"
+        hang = [sys.executable, "-c", "import time; print('Rendered 1/10', flush=True); time.sleep(60)"]
+        t0 = time.time()
+        assert watch(hang, log, 1.0, start=0, echo=False) == STALLED and time.time() - t0 < 10
+        assert "Rendered 1/10" in log.read_text(encoding="utf-8") and "stopped" in log.read_text(encoding="utf-8")
+        steady = [sys.executable, "-c", "import time\nfor i in range(6): print(f'Rendered {i}/6', flush=True); time.sleep(0.4)"]
+        assert watch(steady, log, 1.0, start=0, echo=False) == 0
+        assert watch([sys.executable, "-c", "import sys; sys.exit(3)"], log, 5, echo=False) == 3
+        assert stall_s(0.03) == STALL_MIN_S and stall_s(2.0) == 400
+        # a stall goes to the 200-frame pieces; a failure is one short message naming the log, not a traceback
+        (Path(t) / "plan.json").write_text('{"durationInFrames": 450, "fps": 30}', encoding="utf-8")
+        went = []
+        render_laptop(Path(t), Path(t) / "plan.json", Path(t), Path(t) / "render.mp4", False,
+                      run=lambda *a, **k: STALLED, chunks=lambda *a: went.append(a))
+        assert went and went[0][-1] >= STALL_MIN_S, went
+        Path(t, "render.renderer.log").write_text("Rendered 3/450\nError: Request closed\n    at x (y.js:1)\n", encoding="utf-8")
+        try:
+            render_failed(1, Path(t) / "render.renderer.log", Path(t))
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            msg = str(e.code)
+        assert "render.renderer.log" in msg and "Error: Request closed" in msg and "Next:" in msg and "at x" not in msg, msg
+        # the fallback, end to end with a fake renderer: 450 frames in pieces 0-199, 200-399, 400-449 (each
+        # piece's first try stalls, its retry works), joined by JOIN into one file of every frame
+        tries = []
+
+        def fake(cmd, log, stall, **k):
+            a, b = int(cmd[-2]), int(cmd[-1])
+            tries.append((a, b))
+            if tries.count((a, b)) == 1:
+                return STALLED
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=s=64x36:r=30:d={(b - a + 1) / 30}",
+                            "-f", "lavfi", "-i", f"sine=d={(b - a + 1) / 30 + 0.01}:r=48000", "-c:v", "libx264",
+                            "-c:a", "pcm_s16le", "-shortest", cmd[5]], check=True)
+            return 0
+        out = Path(t) / "render.mp4"
+        render_chunks(Path(t), Path(t) / "plan.json", Path(t), out, False, Path(t) / "c.log", 1, run=fake,
+                      bundle_to=lambda a, b: None)
+        assert sorted(set(tries)) == [(0, 199), (200, 399), (400, 449)] and len(tries) == 6, tries
+        n = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                            "stream=nb_read_frames", "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
+        assert int(n) == 450 and not (Path(t) / ".render-chunks").exists(), n
     print("demo ok")
 
 
@@ -786,7 +978,7 @@ def main():
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan"):]
     if a.cmd.startswith("github-"):
         if not a.repo:

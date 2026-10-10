@@ -19,7 +19,7 @@ the stills sheet (step 5) and picks where to render (step 6).
 
 Paths are relative to the folder Claude Code was started in. Run the scripts with `python3` on Mac
 and Linux, `py` on Windows. `S="${CLAUDE_SKILL_DIR}/scripts"`,
-`$VPY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
+`VPY="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`; `python3 "$VPY"` is the venv Python.
 
 ```
 edits/<name>/cut.mp4 + cut.transcript.json + words.json       (the cut skill)
@@ -31,8 +31,8 @@ captions.json -> beats.json -> visuals.json -> images/ + images.json -> plan.jso
 
 References, read only when a step says: `references/visuals.md` (each format in detail),
 `references/plan.md` (plan.py, cutout, sound, music, checks), `references/motion.md` (templates,
-transitions, marks), `references/render.md` (targets, live preview, export), `references/ai-tells.md`
-(the banned AI looks). `references/contracts.md` is every file's full shape, for people: never read it to run the skill.
+transitions, marks), `references/render.md` (targets, live preview, export), `references/review.md`
+(the review page), `references/ai-tells.md` (the banned AI looks). `references/contracts.md` (every file's shape) is for people: never read it.
 
 ## 0. Read the taste and profile
 
@@ -46,12 +46,13 @@ Follow every taste rule; the scripts read the settings themselves. When the user
 
 ## 1. Check the inputs
 
-- **No cut.mp4?** Run the cut skill first. Never style a raw take.
+- **No cut.mp4?** Run the cut skill first. Never style a raw take. **`prep-decisions.json`?** The
+  `visual-prep` agent did steps 1-3: `references/plan.md` "Prepared while the cut was reviewed".
 - **No style.json?** `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py" style edits/<name>`.
-  With no creators in the profile (or no profile) it writes the default style: smooth eased zooms
-  about every 5 s, 3-word captions (`references/plan.md` "No creator"). If it stops with
-  `no creator style.json found`, run creator-teardown in quick mode for the profile's creators,
-  then run it again. plan.py also plans with the default style when style.json is missing, and says so.
+  With no creators in the profile (or no profile) it writes the default style: a smooth zoom move
+  at least every 5 s, 3-word captions (`references/plan.md` "No creator"). If it stops with
+  `no creator style.json found`, run creator-teardown quick mode for the profile's creators, then
+  again. plan.py also plans with the default style when style.json is missing, and says so.
 - **The user's images:** everything in the profile's `assets_dir` that fits a line, plus anything
   they hand over, goes in `edits/<name>/images/` and `images.json`:
   `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `hold_s`,
@@ -84,16 +85,14 @@ on screen and the rules plan.py enforces.
 1. **Propose:** `python3 "$S/route.py" beats edits/<name>` splits captions.json into sentences,
    marks the profile's named things, and with a TypeSafe key Jev picks one route per sentence
    (`none`, `capture:shot|browser|sticker`, `post`, `logo`, `logo_cluster`, `chat`, `terminal`,
-   `toasts`, `side_by_side`, `video_card`) into beats.json. Without a key the picks are null: decide
-   them yourself from the same file.
+   `toasts`, `side_by_side`, `video_card`) into beats.json. No key: null picks, decide them yourself.
 2. **Real things first:** write `visuals.json` (`references/shapes.md`): a named product
    or doc becomes a `capture` (with `marks` found by text), a quoted post a `post`, an app an `app`,
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`.
 3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
-4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube
-   and GitHub images into `images/`, hides cookie banners, measures marks. Do not open the images one
-   by one: the stills sheet in step 5 shows every capture.
+4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube and
+   GitHub images into `images/`, hides cookie banners, measures marks. Do not open them: the step 5 sheet shows all.
 
 Pacing, one rule: a card where a sentence names something real (a product, site, post, person, or a
 figure on the page that published it), never two at once; otherwise the speaker carries it. No stretch
@@ -106,7 +105,7 @@ captures must read on a phone: give each a `find` (plan.py drops a small one wit
 Find the speaker's head first, so no box covers the face, then plan with the style.json from step 1:
 
 ```bash
-$VPY "$S/face.py" edits/<name>
+python3 "$VPY" "$S/face.py" edits/<name>
 python3 "$S/plan.py" edits/<name>/style.json edits/<name>/captions.json [--aspect 9:16|16:9] [--layout overlay|split]
 ```
 
@@ -133,7 +132,7 @@ python3 "$S/edit.py" stills edits/<name>
 
 The first run installs the renderer (a few minutes, once; say so first). Writes one still per beat and
 `stills/sheet.png`, one numbered stills sheet labelled with beat, time and card kind (about 1,600
-tokens). Review the sheet only; open a single still only to zoom in on a problem the sheet shows.
+tokens). Review the sheet; open a single still only to zoom in on a problem it shows.
 Fix before showing: a box on the face, a zoom cutting the head, a capture showing the wrong part,
 text too small for a phone, anything that looks like a default AI edit (icon tiles, emoji, dark
 glass with neon). The `stills-critic` agent can check a sheet.
@@ -187,7 +186,7 @@ All but `--draft` write `edits/<name>/render.mp4`. GitHub Actions (`--github`, t
 and `github-fetch`) and every target's detail: `references/render.md`. Then, before the user sees it:
 
 ```bash
-$VPY "$S/check.py" render edits/<name> [--plan plan.json] [--style edits/<name>/style.json]
+python3 "$VPY" "$S/check.py" render edits/<name> [--plan plan.json] [--style edits/<name>/style.json]
 ```
 
 FAILs go back to the plan or the cut; at most two fix rounds, then show the render with what is
@@ -203,13 +202,13 @@ A `loudness ... LUFS` WARN is the take's own level, not a fault in the edit. Ask
 >   peak. No compression, no noise removal: the voice sounds the same, only louder or quieter.
 
 Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/render.mp4`. It writes
-`render-normalized.mp4` beside the render and leaves `render.mp4` as it is; hand over the new file.
+`render-normalized.mp4` beside it; hand over that file.
 
 ## 8. Hand over
 
-Open the render (`open` on Mac, `start ""` on Windows, `xdg-open` on Linux) and give its full path.
-Ask for notes. Caption, zoom, card and visual notes: a new plan and stills sheet, then a render.
-Notes about what was cut go back to the cut skill.
+Hand over on the review page (`references/review.md`), then `serve` and `wait` in the background:
+`python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --video edits/<name>/render.mp4`
+(no page yet: `start`, same flags). Card, caption, zoom notes: plan, stills, render, `round`; cut notes: the cut skill.
 
 ## 9. Export to another editor
 
@@ -220,7 +219,7 @@ python3 "$S/export_nle.py" edits/<name> --to fcpxml|premiere|resolve|capcut|edl|
 ```
 
 Writes `edits/<name>/export/`. Moving cards render with alpha first (about 0.7 s a card frame; say
-so). Tell the user which file to open and how: `references/render.md` "Export to another editor".
+so). Tell the user which file to open and how: `references/render.md` "Export to another editor". 16:9: also offer YouTube chapters (`references/render.md` "YouTube chapters").
 
 ## If a script stops
 
@@ -238,13 +237,14 @@ so). Tell the user which file to open and how: `references/render.md` "Export to
 | capture.mjs `failed <kind> '<word>'` | drop that visual or give it another URL; the rest were saved |
 | `Modal is not set up on this computer` | the setup skill's Modal step |
 | `the GitHub CLI (gh) is missing` / `... is public` | setup's GitHub CLI section / a private repo only |
+| `the laptop render failed` | `references/render.md` "If a render stops" |
 | `the Modal render failed` / `the render failed. Open <url>` | say so, offer the laptop render |
 
 ## Files
 
 - `scripts/`: `route.py` beats, `capture.mjs` captures, `plan.py` plan, `face.py` head, `matte.py`
   cutout, `sfx.py` sound, `check.py` + `quality.py` checks, `sheet.py` stills sheet, `edit.py` stills,
-  estimate and render, `preview.py` live preview, `export_nle.py` export. Each has a `demo` self-check.
+  estimate and render, `preview.py` live preview, `export_nle.py` export, `chapters.py` chapters. Each has a `demo` self-check.
 - `${CLAUDE_PLUGIN_ROOT}/agents/template-filler.md` (haiku), `stills-critic.md` (sonnet): the helpers.
 - `${CLAUDE_PLUGIN_ROOT}/remotion/`: the renderer, copied to `~/.ai-video-editor/remotion` and refreshed
   on every run. `tests/golden.py` at the repo root: golden frames; `--update` after an intended look change.

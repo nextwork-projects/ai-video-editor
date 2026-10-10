@@ -226,7 +226,7 @@ def words_of(tdir, vid):
     p = tdir / f"{vid}.json"
     if not p.exists():
         return []
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     return [(w["start"], w["end"]) for w in d.get("words", []) if w.get("type") == "word"]
 
 
@@ -259,22 +259,22 @@ def cmd_measure(a):
     for p in vids:
         cache = p.with_suffix(".sound.json")
         if cache.exists() and not a.force:
-            rows.append(json.loads(cache.read_text()))
+            rows.append(json.loads(cache.read_text(encoding="utf-8")))
             continue
         vis = p.with_suffix(".visual.json")
-        cuts = json.loads(vis.read_text())["cuts"] if vis.exists() else []
+        cuts = json.loads(vis.read_text(encoding="utf-8"))["cuts"] if vis.exists() else []
         gj = p.with_suffix(".graphics.json")
-        gins = [g["t_in"] for g in json.loads(gj.read_text())["graphics"]] if gj.exists() else []
+        gins = [g["t_in"] for g in json.loads(gj.read_text(encoding="utf-8"))["graphics"]] if gj.exists() else []
         r = measure_audio(load_audio(p), words_of(outdir / "transcripts", p.stem), cuts, gins)
         r["id"] = p.stem
-        cache.write_text(json.dumps(r, indent=1))
+        cache.write_text(json.dumps(r, indent=1), encoding="utf-8")
         rows.append(r)
         print(f"{p.stem}: {len(r['sfx'])} effects ({r['sfx_per_min']}/min) "
               f"{dict(Counter(s['kind'] for s in r['sfx']))}, music {r['music']}", file=sys.stderr)
     sp = outdir / "style.json"
-    style = json.loads(sp.read_text()) if sp.exists() else {"handle": slug(a.handle)}
+    style = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"handle": slug(a.handle)}
     style["sound"] = summarise(rows)
-    sp.write_text(json.dumps(style, indent=2))
+    sp.write_text(json.dumps(style, indent=2), encoding="utf-8")
     if a.json:
         print(json.dumps(style["sound"], indent=1))
     print(summary_line(style["sound"], sp))

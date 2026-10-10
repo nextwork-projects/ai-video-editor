@@ -20,7 +20,7 @@
       "name": "ai-editor",
       "source": "./plugins/ai-editor",
       "description": "Edit your own talking-head video in a creator's measured style: retakes and pauses cut, then zooms, captions and cards rendered with Remotion on your laptop or AWS Lambda.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "media",
       "tags": ["video", "editing"],
       "keywords": ["video-editing", "captions", "jump-cut", "remotion", "talking-head"],

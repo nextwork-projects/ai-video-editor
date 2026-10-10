@@ -6,7 +6,7 @@ marked **code** (the id in backticks is the `tell` it returns). The rest are for
 - **BAN**: never by default. Only when the user's own brand kit or request names it.
 - **WARN**: allowed when there is a reason. Say the reason in the plan note.
 
-Run: `$VPY "$S/ai_tells.py" edits/NAME --plan plan.json --stills stills`
+Run: `python3 "$VPY" "$S/ai_tells.py" edits/NAME --plan plan.json --stills stills`
 
 Sources (numbered in the lists below):
 1. Anthropic, frontend-design skill: https://github.com/anthropics/claude-code/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md

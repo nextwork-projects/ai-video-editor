@@ -137,7 +137,7 @@ def load_flow(d, fid, vertical):
     p = d / "flows" / f"{fid}.states.json"
     if not p.exists():
         sys.exit(f"ERROR: {p} missing: node record.mjs {d} <flows.json> --states" + (" --mobile" if vertical else ""))
-    f = json.loads(p.read_text())
+    f = json.loads(p.read_text(encoding="utf-8"))
     f["real"] = [i for i, s in enumerate(f["steps"]) if not s.get("auto")]   # what a story's step numbers index
     return f
 
@@ -290,7 +290,7 @@ def text_lines(d, s):
         return [list(r) for r in s["lines"]]
     cache = d / (str(Path(s["src"]).with_suffix("")) + ".lines.json")
     if cache.exists() and cache.stat().st_mtime >= (d / s["src"]).stat().st_mtime:
-        return list(s.get("lines", [])) + json.loads(cache.read_text())
+        return list(s.get("lines", [])) + json.loads(cache.read_text(encoding="utf-8"))
     read = ocr_boxes()
     if not read:
         return list(s.get("lines", []))
@@ -306,7 +306,7 @@ def text_lines(d, s):
                 continue
             for _, (x, y, w, h) in read(im.crop([int(x0 * k), int(y0 * k), int(x1 * k), int(y1 * k)])):
                 out.append([round(x0 + x * (x1 - x0), 1), round(y0 + y * (y1 - y0), 1), round(w * (x1 - x0), 1), round(h * (y1 - y0), 1)])
-    cache.write_text(json.dumps(out))
+    cache.write_text(json.dumps(out), encoding="utf-8")
     return list(s.get("lines", [])) + out
 
 
@@ -654,7 +654,7 @@ def build(d, story, aspect="16:9", fps=60, variant="linear", pace=1.0):
         out_beats.append({"job": job, "start": round(start, 3), "end": round(t, 3), "text": text, "flow": fid})
     total = t
     who = d / "flows" / "whoami.json"
-    toks = [x.lower() for x in json.loads(who.read_text()).get("tokens", []) if len(x) >= 4] if who.exists() else []
+    toks = [x.lower() for x in json.loads(who.read_text(encoding="utf-8")).get("tokens", []) if len(x) >= 4] if who.exists() else []
     from PIL import Image
     for L in layers:
         L["src"] = redact(d, L["src"], toks)
@@ -1481,7 +1481,7 @@ def check_render(d, plan, video):
                             "product.py plan again (journey.text_guard re-frames it, edge_fades fades it)"))
     # names: the logged-in account's own name or handle, readable anywhere
     who = d / "flows" / "whoami.json"
-    toks = [x.lower() for x in json.loads(who.read_text()).get("tokens", []) if len(x) >= 4] if who.exists() else []
+    toks = [x.lower() for x in json.loads(who.read_text(encoding="utf-8")).get("tokens", []) if len(x) >= 4] if who.exists() else []
     read = ocr() if toks else None
     if toks and not read:
         out.append(("WARN", "no OCR engine (ocrmac or rapidocr): the name check did not run", "setup installs one"))

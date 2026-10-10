@@ -110,13 +110,13 @@ def test_alternate_hooks_after_the_cta():
     with tempfile.TemporaryDirectory() as d:
         e = Path(d) / "take"
         e.mkdir()
-        (e / "words.raw.json").write_text(json.dumps(toks))
-        (e / "spans.json").write_text(json.dumps(spans))
+        (e / "words.raw.json").write_text(json.dumps(toks), encoding="utf-8")
+        (e / "spans.json").write_text(json.dumps(spans), encoding="utf-8")
         assert [a["n"] for a in R.write_hooks(e, toks)] == [1, 2]
         assert "Alternate hooks" in R.candidates_md(R.find(toks))
         v = R.hook_variant(e, 2)
-        vt = B.resolve_spans(json.loads((v / "spans.json").read_text()), toks)
-        lead = B.resolve_spans([json.loads((v / "lead.json").read_text())], toks)[0]
+        vt = B.resolve_spans(json.loads((v / "spans.json").read_text(encoding="utf-8")), toks)
+        lead = B.resolve_spans([json.loads((v / "lead.json").read_text(encoding="utf-8"))], toks)[0]
         assert lead["evidence"] == "most people edit their videos the wrong way round.", lead
         kept = [w for w in toks if not B.covered_by(w, vt)]
         assert kept[0]["text"] == "start", kept[:3]
@@ -131,7 +131,7 @@ def test_alternate_hooks_on_the_sample_whisper_words():
     stretched to 3 s at 179 s), so no clause opened like the hook and no alternate was found. Matching
     on the word sequence finds one run of late takes from 179 s, with the stray "I" in it."""
     toks = [{"text": t, "start": a, "end": b, "type": "word"}
-            for t, a, b in json.loads((Path(__file__).parent / "testdata" / "sample-whisper.json").read_text())]
+            for t, a, b in json.loads((Path(__file__).parent / "testdata" / "sample-whisper.json").read_text(encoding="utf-8"))]
     alts = R.alt_hooks(toks)
     assert [round(toks[a]["start"]) for a, _ in alts] == [186, 191] and alts[-1][1] == len(toks) - 1, alts
     i = next(k for k, t in enumerate(toks) if t["text"] == "tips.")
@@ -146,13 +146,13 @@ def test_alternate_hooks_on_the_sample_whisper_words():
 
 def test_text_and_fix():
     with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "words.raw.json").write_text(json.dumps(take("I use cloud code. | cloud, daily")))
+        (Path(d) / "words.raw.json").write_text(json.dumps(take("I use cloud code. | cloud, daily")), encoding="utf-8")
         txt = R.text_view(R.load(d))
         assert "[0.00-" in txt and "(+1.2s)" in txt and "cloud code." in txt, txt
-        (Path(d) / "captions.json").write_text(json.dumps(take("cloud")))   # style-edit's caption copy
+        (Path(d) / "captions.json").write_text(json.dumps(take("cloud")), encoding="utf-8")   # style-edit's caption copy
         assert R.fix(d, [("cloud", "Claude")]) == 3
-        assert json.loads((Path(d) / "captions.json").read_text())[0]["text"] == "Claude"
-        words = [t["text"] for t in json.loads((Path(d) / "words.raw.json").read_text())]
+        assert json.loads((Path(d) / "captions.json").read_text(encoding="utf-8"))[0]["text"] == "Claude"
+        words = [t["text"] for t in json.loads((Path(d) / "words.raw.json").read_text(encoding="utf-8"))]
         assert words[2:4] == ["Claude", "code."] and words[4] == "Claude,", words
 
 
@@ -166,9 +166,9 @@ def test_fix_is_remembered_and_captions_use_the_cut_spelling():
     assert [w["text"] for w in words] == "I built it with Jev and Claude. then Haiku ran".split(), words
     assert ("Jeff", "Jev") in changed and ("cloud.", "Claude.") in changed, changed
     with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "words.json").write_text(json.dumps(take("then haiku ran")))
+        (Path(d) / "words.json").write_text(json.dumps(take("then haiku ran")), encoding="utf-8")
         R.fix(d, [("haiku", "Haiku")])
-        (Path(d) / "cut.transcript.json").write_text(json.dumps(take("then haiku ran")))
+        (Path(d) / "cut.transcript.json").write_text(json.dumps(take("then haiku ran")), encoding="utf-8")
         words, _ = R.captions(d)
         assert words[1]["text"] == "Haiku" and (Path(d) / "captions.txt").exists(), words
 
@@ -185,9 +185,9 @@ def test_a_multi_word_correction_is_one_token_per_word():
     assert a["start"] == 0.3 and b["end"] == 0.8 and a["start"] < a["end"] <= b["start"] < b["end"], words
     assert R.one_word_each([{"text": "x y", "start": 1.0, "end": 1.0}])[1]["start"] == 1.0   # zero length stays valid
     with tempfile.TemporaryDirectory() as d:        # a fix into two words on captions.json splits there too
-        (Path(d) / "captions.json").write_text(json.dumps(take("we use.")))
+        (Path(d) / "captions.json").write_text(json.dumps(take("we use.")), encoding="utf-8")
         R.fix(d, [("use", "are using")])
-        got = json.loads((Path(d) / "captions.json").read_text())
+        got = json.loads((Path(d) / "captions.json").read_text(encoding="utf-8"))
         assert [w["text"] for w in got] == ["we", "are", "using."] and got[1]["end"] <= got[2]["start"], got
 
 
@@ -211,7 +211,7 @@ def test_verify_counts_a_misheard_name_as_heard_differently():
 
 def test_no_key_falls_back():
     with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")))
+        (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")), encoding="utf-8")
         assert R.propose(d) == 4
         assert (Path(d) / "candidates.md").exists() and not (Path(d) / "spans.json").exists()
 
@@ -229,7 +229,7 @@ def test_rejected_key_has_its_own_exit():
                 raise R.jev.JevError(f"TypeSafe HTTP {code}: no", code)
             R.jev._post = post
             with tempfile.TemporaryDirectory() as d:
-                (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")))
+                (Path(d) / "words.raw.json").write_text(json.dumps(take("so the main | so the main thing.")), encoding="utf-8")
                 err, argv = io.StringIO(), sys.argv
                 sys.argv = ["retakes.py", "propose", d]
                 with contextlib.redirect_stderr(err):
@@ -254,6 +254,50 @@ def test_sample_list_and_comparison_are_not_candidates():
     # a "like" set off as a hesitation is still asked about
     loose = R.find(take("and like the thing is simple."))
     assert [c["kind"] for c in loose] == ["filler"], loose
+    # the user's taste says keep fillers (learned from their own edit): none is a candidate, not even "um"
+    assert not R.find(take("and like the um thing is simple."), keep_fillers=True)
+
+
+def test_remap_follows_the_words_through_a_recut():
+    """Visuals prepared on the first cut: a re-cut that removes the first "notion" re-points the second
+    to nth 1, drops a beat whose word was cut, keeps a beat with no nth, and a second run changes nothing."""
+    raw = take("notion is great | notion again | then figma | done")
+    spans_old = [{"start": 0.0, "end": 100.0}]
+    first, figma = raw[0], raw[6]
+    spans_new = [{"start": first["end"] + 0.05, "end": figma["start"] - 0.05}, {"start": figma["end"] + 0.05, "end": 100.0}]
+    beats = [{"word": "notion", "nth": 2, "kind": "logo"}, {"word": "figma", "nth": 1, "kind": "logo"},
+             {"word": "done", "kind": "capture"}]
+    kept, dropped = R.remap_beats(raw, spans_old, spans_new, beats)
+    assert kept == [{"word": "notion", "nth": 1, "kind": "logo"}, {"word": "done", "kind": "capture"}], kept
+    assert [b["word"] for b in dropped] == ["figma"], dropped
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "words.raw.json").write_text(json.dumps(raw), encoding="utf-8")
+        (d / "prep-decisions.json").write_text(json.dumps(spans_old), encoding="utf-8")
+        (d / "decisions.json").write_text(json.dumps(spans_new), encoding="utf-8")
+        (d / "visuals.json").write_text(json.dumps(beats), encoding="utf-8")
+        R.remap(d)
+        once = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
+        R.remap(d)
+        assert once == kept == json.loads((d / "visuals.json").read_text(encoding="utf-8")), once
+
+
+
+def test_remap_follows_a_retake_of_the_word():
+    """The real-footage test: the cut kept the second take of a line, so the first "notion" was cut but the
+    same word is said again in that sentence. The beat follows it instead of being dropped; a word cut with
+    no retake in its sentence is still dropped."""
+    raw = take("so i use notion | i use notion for notes. | then figma | done")   # a pause before the retake
+    spans_old = [{"start": 0.0, "end": 100.0}]
+    spans_new = [{"start": raw[3]["end"] + 0.05, "end": raw[10]["start"] - 0.05}, {"start": raw[10]["end"] + 0.05, "end": 100.0}]
+    beats = [{"word": "notion", "nth": 1, "kind": "logo"}, {"word": "figma", "nth": 1, "kind": "logo"}]
+    kept, dropped = R.remap_beats(raw, spans_old, spans_new, beats)
+    assert kept == [{"word": "notion", "nth": 1, "kind": "logo"}], kept
+    assert [b["word"] for b in dropped] == ["figma"], dropped
+    # the same word in another sentence is a different beat: still dropped
+    raw = take("i use notion. | notion is great")
+    spans_new = [{"start": raw[2]["end"] + 0.05, "end": 100.0}]
+    assert R.remap_beats(raw, spans_old, spans_new, [{"word": "notion", "nth": 1}])[0] == []
 
 
 if __name__ == "__main__":

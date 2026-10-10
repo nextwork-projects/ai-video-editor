@@ -109,6 +109,25 @@ def test_stretched_label_is_not_clipped():
     assert md.split("## What plays")[1].split("## Cuts")[0].split("\n")[-3] == "so if you", md
 
 
+def test_label_after_the_previous_words_tail():
+    """The real take: "you" 192.63-192.75 then "if" labelled 192.75-193.41. The audio: "you" sounds to
+    192.86, silence to 193.30, "if" at 193.30. Fitted from its label start, "if" landed on the tail of
+    "you", fell in the pause cut and was CLIPPED whatever the --pad. It is fitted after the silence."""
+    words = [{"text": "you", "start": 192.63, "end": 192.75, "type": "word"},
+             {"text": "if", "start": 192.75, "end": 193.41, "type": "word"},
+             {"text": "you", "start": 193.41, "end": 193.51, "type": "word"}]
+    loud = [(192.58, 192.86), (193.30, 193.60)]
+    lvl = [-20.0 if any(a <= i * B.RMS_WIN_S < b for a, b in loud) else -60.0 for i in range(int(194 / B.RMS_WIN_S))]
+    got = B.fit_labels(words, lvl, -40.0)
+    assert list(got) == [1] and 193.2 <= got[1][0] < got[1][1] <= 193.41, got
+
+
+def test_no_head_sliver():
+    """decisions.json started [0.0, 0.033] then [0.434, ...]: a one-frame flash, then a jump."""
+    frames = B.kept_frames([{"start": 0.05, "end": 0.43}, {"start": 3.0, "end": math.inf}], 30, 4.0)
+    assert frames == [[13, 90]], frames
+    assert B.kept_frames([{"start": 0.5, "end": 1.0}], 30, 2.0) == [[0, 15], [30, 60]]   # a real head stays
+
 
 def test_hidden_repeat_is_listed_and_shown():
     """The sample: Whisper labels "content" 117.07-119.01 s over "and to break down competitor ads and"
@@ -148,6 +167,19 @@ def test_hidden_repeat_is_listed_and_shown():
         B.window_rms_db, B.derive_noise_db = old
 
 
+def test_splice_never_reaches_a_removed_word():
+    """Speech runs 1.0-2.0 s with no gap ("the the thing"); the first "the" (1.0-1.3) is removed and the
+    keep starts at 1.3, inside speech. Walking back to the quiet would bring the stumble back, so the
+    edge stays and is listed. Without the removed word it moves to the quiet at 1.0 s."""
+    lvl = [-20.0 if 1.0 <= i * B.RMS_WIN_S < 2.0 else -70.0 for i in range(int(3 / B.RMS_WIN_S))]
+    frames = [[0, 15], [39, 90]]
+    got, moved, left = B.fix_splices(frames, 30, lvl, -40.0, 90, removed=[(1.0, 1.3)])
+    assert got == frames and left == [1.3] and not moved, (got, moved, left)
+    got, moved, left = B.fix_splices(frames, 30, lvl, -40.0, 90)
+    assert got == [[0, 15], [30, 90]] and moved == [(1.3, 1.0)] and not left, (got, moved, left)
+    assert B.fix_splices(got, 30, lvl, -40.0, 90)[1:] == ([], [])      # a second pass finds nothing
+
+
 if __name__ == "__main__":
     test_derive()
     test_audible_end()
@@ -155,5 +187,8 @@ if __name__ == "__main__":
     test_spans()
     test_frames_and_retime()
     test_stretched_label_is_not_clipped()
+    test_label_after_the_previous_words_tail()
+    test_no_head_sliver()
     test_hidden_repeat_is_listed_and_shown()
+    test_splice_never_reaches_a_removed_word()
     print("all ok")

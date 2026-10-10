@@ -146,7 +146,7 @@ def build(edit_dir, speech=None):
         write(out / f"{name}.wav", x, 10 ** ((target - loudest50(x)) / 20), nch)
         cues[name] = {"attack_s": attack(x), "db": round(target, 1)}
     kit = {"speech_db": round(speech, 1), "cut_mtime": cut.stat().st_mtime if cut.exists() else 0, "cues": cues}
-    (out / "kit.json").write_text(json.dumps(kit, indent=1))
+    (out / "kit.json").write_text(json.dumps(kit, indent=1), encoding="utf-8")
     print(summary())
     return kit
 
@@ -155,7 +155,7 @@ def kit(edit_dir):
     """kit.json, built first when missing or older than cut.mp4."""
     p, cut = Path(edit_dir) / ".sfx" / "kit.json", Path(edit_dir) / "cut.mp4"
     if p.exists():
-        k = json.loads(p.read_text())
+        k = json.loads(p.read_text(encoding="utf-8"))
         if not cut.exists() or k.get("cut_mtime", 0) >= cut.stat().st_mtime:
             return k
     return build(edit_dir)
@@ -237,7 +237,7 @@ if __name__ == "__main__":
         lvl = a.under_db
         if lvl is None and st.exists():
             from plan import took
-            sty = json.loads(st.read_text())
+            sty = json.loads(st.read_text(encoding="utf-8"))
             lvl = ((sty.get("sound") or {}).get("music") or {}).get("level_db") if took(sty, "sound") else None
         music(a.edit, a.track, a.mood, lvl)
     else:

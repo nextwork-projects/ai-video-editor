@@ -51,6 +51,12 @@ until they get it right. Exceptions:
 - The last attempt is itself broken or unfinished. Keep the best complete one.
 - The user supplied a script and both takes are complete: keep the one closer to it.
 
+**Hook check (after approval).** When the user gave a title or said what the hook promises, run
+`python3 "$S/hook_check.py" edits/<name> "<title>"`. It prints when the title's key words are first
+said in the cut and its first 10 s. On a FAIL, or a PASS whose first 10 s miss the point, tell the
+user and ask in the question box: keep the opening (Recommended), open on the line that says it, or
+try a hook variant. No title given: skip it.
+
 **Alternate hooks are not retakes.** Takes of the opening line recorded after the body (usually
 after the call to action) are alternate hooks. Last take wins would move the hook to the end. Instead:
 - The hook at the start stays: the last good take of it there, by the rules above.
@@ -76,7 +82,7 @@ Windows without bash, one after another:
 
 ```bash
 for n in 1 2; do ( v=$(python3 "$S/retakes.py" hook edits/<name> $n) && python3 "$S/build_timeline.py" <source> "$v" \
-  && python3 "$S/render.py" <source> "$v" && $PY "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
+  && python3 "$S/render.py" <source> "$v" && python3 "$PY" "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
 ```
 
 Words that often come just before a retake: "wait", "sorry", "again", "let me do that again",

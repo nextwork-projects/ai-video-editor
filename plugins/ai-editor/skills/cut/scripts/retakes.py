@@ -7,6 +7,7 @@ reviews only what Jev was unsure of.
     python3 retakes.py fix     <edit_dir> cloud=Claude [jiv=Jev ...]   fix misheard words
     python3 retakes.py captions <edit_dir>             captions.json + captions.txt for style-edit
     python3 retakes.py hook    <edit_dir> <n>          <edit_dir>-hook<n>/: the cut opening on alternate hook n
+    python3 retakes.py remap   <edit_dir>              re-point visuals built before a re-cut
 
 text     words.raw.json as "[start-end] words" per phrase, about a fifth of its size. Read
          this, never the raw JSON.
@@ -35,6 +36,12 @@ captions The caption words: what the verify pass heard in cut.mp4 (cut.transcrip
          it, with every word it heard differently at the same time (textnorm.pair_by_time) taken
          from the approved cut text (words.json), names spelled as the profile's `names`, and
          every fix in fixes.json applied. Writes captions.json and captions.txt (proofread this).
+remap    Visuals prepared while the user reviewed the cut (visuals.json, images.json) name a word and
+         which time it is said ("nth"). A re-cut can remove a word or an earlier time it was said.
+         Reads prep-decisions.json (the cut the visuals were keyed to, copied when prep started) and
+         decisions.json (the cut now), finds each beat's word in the source, and rewrites its nth for
+         the new cut. A beat whose word was cut is dropped and printed. Then copies decisions.json
+         over prep-decisions.json, so running it twice changes nothing.
 
 Exit codes: 0 ok, 1 error, 2 usage, 4 no TypeSafe key (fall back to deciding yourself)
 """
@@ -278,8 +285,15 @@ def loose_like(toks, i):
     return bool(set(nwords(prev["text"])) & LIKE_BEFORE)
 
 
-def find(toks):
-    """Every candidate, each with the Jev questions that decide it."""
+def keeps_fillers(d):
+    """The user's taste says keep every filler (taste skill, learned from a past edit)."""
+    from ai_editor import taste
+    return bool(taste.load_json(d).get("cut", {}).get("keep_fillers"))
+
+
+def find(toks, keep_fillers=False):
+    """Every candidate, each with the Jev questions that decide it. keep_fillers (the user's taste
+    `cut.keep_fillers`, learned from their own edit): no filler is a candidate."""
     phr = phrases(toks)
     end_of = {i: b for a, b in phr for i in range(a, b + 1)}
     cands = []
@@ -346,7 +360,7 @@ def find(toks):
             w0 = flat[:m.start()].count(" ")
             w1 = w0 + m.group(0).count(" ")
             a, b = seq[w0][1], seq[w1][1]
-            if a >= tail or (kind == "filler" and m.group(0) == "like" and not loose_like(toks, a)):
+            if a >= tail or (kind == "filler" and (keep_fillers or m.group(0) == "like" and not loose_like(toks, a))):
                 continue
             ctx = say(toks, max(0, a - 12), min(len(toks) - 1, b + 12))
             cid = f"c{len(cands)}"
@@ -363,7 +377,7 @@ def find(toks):
         ws = nwords(t["text"])
         if t.get("type") == "audio_event":
             add("audio_event", i, i)
-        elif ws and all(w in HARD_FILLERS for w in ws):
+        elif ws and all(w in HARD_FILLERS for w in ws) and not keep_fillers:
             add("filler", i, i)
     return sorted(cands, key=lambda c: c["cut"][0])
 
@@ -474,11 +488,11 @@ def propose(d, key=None, canned=None, force=False):
     """Returns 0, or 4 with no key. canned={qid: answer} runs offline (tests)."""
     d = Path(d)
     toks = load(d)
-    (d / "transcript.txt").write_text(text_view(toks, d.name))
-    cands = find(toks)
+    (d / "transcript.txt").write_text(text_view(toks, d.name), encoding="utf-8")
+    cands = find(toks, keeps_fillers(d))
     write_hooks(d, toks)
     if key is None and canned is None:
-        (d / "candidates.md").write_text(candidates_md(cands))
+        (d / "candidates.md").write_text(candidates_md(cands), encoding="utf-8")
         return 4
     sp = d / "spans.json"
     if sp.exists() and not force:
@@ -489,10 +503,10 @@ def propose(d, key=None, canned=None, force=False):
     spans = to_spans(cuts, toks)
     if sp.exists():
         sp.replace(d / "spans.prev.json")
-    sp.write_text(json.dumps(spans, indent=1))
-    (d / "review.md").write_text(review_md(review, toks))
+    sp.write_text(json.dumps(spans, indent=1), encoding="utf-8")
+    (d / "review.md").write_text(review_md(review, toks), encoding="utf-8")
     (d / "candidates.json").write_text(json.dumps(
-        [{k: v for k, v in c.items() if k != "questions"} for c in cands], indent=1))
+        [{k: v for k, v in c.items() if k != "questions"} for c in cands], indent=1), encoding="utf-8")
     u = jev.ask.last_usage
     n = sum(c["kind"] == "alt_hook" for c in cands)
     if n:
@@ -515,7 +529,7 @@ def write_hooks(d, toks):
     keep, oe, _ = hook_line(toks, alts[0])
     out = {"opening": q(keep, oe),
            "alternates": [{"n": n, **q(a, hook_line(toks, (a, b))[2])} for n, (a, b) in enumerate(alts, 1)]}
-    f.write_text(json.dumps(out, indent=1))
+    f.write_text(json.dumps(out, indent=1), encoding="utf-8")
     return out["alternates"]
 
 
@@ -531,7 +545,7 @@ def hook_variant(d, n):
         sys.exit(f"ERROR: no alternate hook {n}; {d.name} has {len(alts)} (retakes.py propose lists them)")
     take = alts[n - 1]
     keep, oe, le = hook_line(toks, take)
-    spans = json.loads((d / "spans.json").read_text())
+    spans = json.loads((d / "spans.json").read_text(encoding="utf-8"))
     t_open, t_tail = toks[oe]["end"], toks[alts[0][0]]["start"]
     # the opening (replaced) and the alternate hooks (rebuilt below, one span per take)
     out = [sp for sp in spans if t_open <= B.resolve_spans([sp], toks)[0]["start"] < t_tail]
@@ -548,8 +562,8 @@ def hook_variant(d, n):
     for name in ("words.raw.json", "fixes.json"):
         if (d / name).exists():
             shutil.copyfile(d / name, v / name)
-    (v / "spans.json").write_text(json.dumps(sorted(out, key=lambda s: s["after"]), indent=1))
-    (v / "lead.json").write_text(json.dumps(q(take[0], le, "alt_hook", f"alternate hook {n}, played first"), indent=1))
+    (v / "spans.json").write_text(json.dumps(sorted(out, key=lambda s: s["after"]), indent=1), encoding="utf-8")
+    (v / "lead.json").write_text(json.dumps(q(take[0], le, "alt_hook", f"alternate hook {n}, played first"), indent=1), encoding="utf-8")
     return v
 
 
@@ -564,14 +578,14 @@ def fix(d, pairs):
     """Replace whole words (case-insensitive), keeping each token's punctuation. Remembered in fixes.json."""
     d, n = Path(d), 0
     fj = d / "fixes.json"
-    kept = json.loads(fj.read_text()) if fj.exists() else {}
+    kept = json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {}
     kept.update({old.lower(): new for old, new in pairs})
-    fj.write_text(json.dumps(kept, indent=1))
+    fj.write_text(json.dumps(kept, indent=1), encoding="utf-8")
     for name in ("words.raw.json", "words.json", "cut.transcript.json", "captions.json"):
         f = d / name
         if not f.exists():
             continue
-        data = json.loads(f.read_text())
+        data = json.loads(f.read_text(encoding="utf-8"))
         toks = data["words"] if isinstance(data, dict) else data
         for t in toks:
             for old, new in pairs:
@@ -580,7 +594,7 @@ def fix(d, pairs):
                     t["text"], n = s, n + 1
         if name == "captions.json" and not isinstance(data, dict):
             data = one_word_each(data)
-        f.write_text(json.dumps(data, indent=1))
+        f.write_text(json.dumps(data, indent=1), encoding="utf-8")
     return n
 
 
@@ -638,15 +652,69 @@ def captions(d):
     cut = load_words(d / "words.json") if (d / "words.json").exists() else []
     fj = d / "fixes.json"
     names = [n["name"] for n in profile.load().get("names") or [] if isinstance(n, dict) and n.get("name")]
-    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text()) if fj.exists() else {})
-    (d / "captions.json").write_text(json.dumps(words, indent=1))
-    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."))
+    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {})
+    (d / "captions.json").write_text(json.dumps(words, indent=1), encoding="utf-8")
+    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."), encoding="utf-8")
     return words, changed
+
+
+def remap_beats(raw, old_spans, new_spans, beats):
+    """beats keyed to (word, nth) on the old cut -> (kept, dropped) on the new one. A beat with no nth is
+    kept as is (plan.py takes the next time the word is said). A beat whose word was cut follows the same
+    word said again in the same sentence (the retake kept); with none it is dropped. raw: the source words."""
+    from build_timeline import is_kept
+    key = lambda t: re.sub(r"[^\w'’-]+", "", t).lower()      # plan.py clean().lower()
+    old = [i for i, w in enumerate(raw) if is_kept(w, old_spans)]
+    new = {i for i, w in enumerate(raw) if is_kept(w, new_spans)}
+    sentence, n = [], 0      # a sentence ends at . ? ! (a false start before a retake has none, so it joins it)
+    for w in raw:
+        sentence.append(n)
+        n += w["text"].rstrip().endswith((".", "?", "!"))
+    kept, dropped = [], []
+    for b in beats:
+        if not b.get("word") or not b.get("nth"):
+            kept.append(b)
+            continue
+        hits = [i for i in old if key(raw[i]["text"]) == key(b["word"])]
+        if len(hits) < b["nth"]:
+            print(f"warning: '{b['word']}' #{b['nth']} is not in the earlier cut, left as is", file=sys.stderr)
+            kept.append(b)
+            continue
+        i = hits[b["nth"] - 1]
+        if i not in new:     # the word was cut: the same word said again in its sentence (a retake) carries it
+            again = [j for j in new if key(raw[j]["text"]) == key(b["word"]) and sentence[j] == sentence[i]]
+            if not again:
+                dropped.append(b)
+                continue
+            i = min(again, key=lambda j: abs(j - i))
+        kept.append({**b, "nth": sum(1 for j in new if j <= i and key(raw[j]["text"]) == key(b["word"]))})
+    return kept, dropped
+
+
+def remap(d):
+    from build_timeline import load_fitted
+    d = Path(d)
+    prev = d / "prep-decisions.json"
+    if not prev.exists():
+        sys.exit(f"ERROR: no prep-decisions.json in {d}: copy decisions.json to it when visual prep starts")
+    old, new = json.loads(prev.read_text(encoding="utf-8")), json.loads((d / "decisions.json").read_text(encoding="utf-8"))
+    raw = [w for w in load_fitted(d) if w.get("type", "word") == "word"]
+    for name in ("visuals.json", "images.json"):
+        f = d / name
+        if not f.exists():
+            continue
+        beats = json.loads(f.read_text(encoding="utf-8"))
+        kept, dropped = remap_beats(raw, old, new, beats)
+        f.write_text(json.dumps(kept, indent=1), encoding="utf-8")
+        moved = sum(1 for a, b in zip([x for x in beats if x not in dropped], kept) if a.get("nth") != b.get("nth"))
+        print(f"{f}: {len(kept)} kept, {moved} re-pointed, {len(dropped)} dropped"
+              + "".join(f"\n  dropped '{b['word']}' ({b.get('kind') or b.get('src')}): its word was cut" for b in dropped))
+    prev.write_text(json.dumps(new, indent=1), encoding="utf-8")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook"])
+    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook", "remap"])
     ap.add_argument("edit_dir")
     ap.add_argument("pairs", nargs="*", help="fix: old=new; hook: the alternate's number")
     ap.add_argument("--force", action="store_true")
@@ -654,7 +722,7 @@ def main():
     d = Path(a.edit_dir)
     if a.cmd == "text":
         out = d / "transcript.txt"
-        out.write_text(text_view(load(d), d.name))
+        out.write_text(text_view(load(d), d.name), encoding="utf-8")
         raw = (d / "words.raw.json").stat().st_size
         print(f"{out}  ({out.stat().st_size} bytes, {raw / out.stat().st_size:.1f}x smaller than words.raw.json)")
     elif a.cmd == "fix":
@@ -668,6 +736,8 @@ def main():
         if not (d / "spans.json").exists():
             sys.exit(f"ERROR: no spans.json in {d}: decide the main cut first")
         print(hook_variant(d, int(a.pairs[0])))
+    elif a.cmd == "remap":
+        remap(d)
     elif a.cmd == "captions":
         if not (d / "cut.transcript.json").exists():
             sys.exit(f"ERROR: no cut.transcript.json in {d}: run the cut skill's verify step first")
@@ -683,7 +753,7 @@ def main():
         try:
             code = propose(d, key=key, force=a.force)
         except jev.JevError as e:
-            (d / "candidates.md").write_text(candidates_md(find(load(d))))
+            (d / "candidates.md").write_text(candidates_md(find(load(d), keeps_fillers(d))), encoding="utf-8")
             if e.rejected_key:
                 print(f"TypeSafe rejected the saved key ({e}). Save a new one with the setup skill's setkey step. "
                       "Meanwhile decide the cut yourself from transcript.txt and candidates.md.", file=sys.stderr)

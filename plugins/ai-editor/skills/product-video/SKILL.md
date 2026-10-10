@@ -16,7 +16,7 @@ Every question to the user goes in the question box: call the AskUserQuestion to
 A URL in. A product video out, made only of the site's real UI, real recorded click-throughs of it, its own
 colours and type, and its own words, scored and mixed for this cut. `S="${CLAUDE_SKILL_DIR}/scripts"`,
 Run the scripts with `python3` on Mac and Linux, `py` on Windows.
-`$PY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
+`PY="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`; `python3 "$PY"` below runs the editor's venv Python (`py "$PY"` on Windows).
 Work in `product/<name>/` under the folder Claude Code was started in.
 
 ```
@@ -133,7 +133,7 @@ Write `story.json` as `beats` from the storyboard (shape: `references/shapes.md`
 case, payoff, end. Each beat's `steps` are its flow's step numbers.
 
 ```bash
-$PY "$S/product.py" plan product/<name> --story story.json --style linear --aspect 16:9 [--music generated|eleven|none|audio/<track>] [--sfx subtle|none] [--vo audio/vo.wav]
+python3 "$PY" "$S/product.py" plan product/<name> --story story.json --style linear --aspect 16:9 [--music generated|eleven|none|audio/<track>] [--sfx subtle|none] [--vo audio/vo.wav]
 ```
 
 Length: about 8 s a use case (40 s for five), the hook, payoff and logo included, unless the user asked
@@ -153,14 +153,14 @@ older shot film (screencasts and the shot library, each shot naming its `job`).
 ## 6. The animatic, the critic, approval
 
 ```bash
-$PY "$S/product.py" animatic product/<name> --plan plan-linear-16x9.json
+python3 "$PY" "$S/product.py" animatic product/<name> --plan plan-linear-16x9.json
 ```
 
 Writes `animatic-<tag>/sheet.png`, the animatic sheet: the start, middle and end of every beat, captioned with its job, time
 and words, in seconds. Run the `storyboard-critic` agent on the sheet; apply its fixes to the story (order,
 steps, words, a capture) and plan again; two rounds at most. Then show the sheet and ask in the question
 box: **Approve** (Recommended) / **Change the order** / **Swap a shot** / **Redo a capture**. Do not render
-before Approve. On Approve, stamp it: `$PY "$S/product.py" approve product/<name> --plan plan-linear-16x9.json`.
+before Approve. On Approve, stamp it: `python3 "$PY" "$S/product.py" approve product/<name> --plan plan-linear-16x9.json`.
 `render` refuses a plan with no stamp, or one whose plan or story changed after it (`scripts/gates.py`).
 
 `stills` still makes the denser per-shot sheet for the shot film.
@@ -171,7 +171,7 @@ Only after step 6's Approve. "Just render it" on a plan with no stamp still goes
 make the animatic and ask Approve.
 
 ```bash
-$PY "$S/product.py" render product/<name> --plan plan-linear-16x9.json [--draft | --modal | --lambda]
+python3 "$PY" "$S/product.py" render product/<name> --plan plan-linear-16x9.json [--draft | --modal | --lambda]
 ```
 
 A 30 s video renders in about a minute on a laptop. The same renderer and render paths as style-edit
@@ -181,7 +181,7 @@ A 30 s video renders in about a minute on a laptop. The same renderer and render
 ## 8. Check
 
 ```bash
-$PY "$S/product.py" check product/<name> --plan plan-linear-16x9.json
+python3 "$PY" "$S/product.py" check product/<name> --plan plan-linear-16x9.json
 ```
 
 The camera: every zoom changes size in log space (the same scale factor every frame), takes 0.9-1.4 s,
@@ -207,8 +207,8 @@ python3 "$S/product.py" share product/<name>
 ```
 
 `share.txt`: the caption (checked: only the site's sentences and its domain), the URL, and alt text
-that says what is shown. Open the render (`open` / `start ""` / `xdg-open`), give the full paths of
-the video, sheet and share.txt, and ask for notes. Notes about taste go to the taste skill.
+that says what is shown. Hand the render over on the review page (`../style-edit/references/review.md`;
+folder `product/<name>`, `alt` for a second tag), give the paths of the sheet and share.txt. Notes about taste go to the taste skill.
 
 A logged-in run: say where the login is kept (`node "$S/login.mjs" where <domain>` prints the folder)
 and that it stays logged in on this computer until removed. Once the video is approved, ask in the

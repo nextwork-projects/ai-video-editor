@@ -68,9 +68,9 @@ setup. When any id is printed, read `references/intake.md` (the questions, their
 
 `audience` and `names` belong to this video (the audience answer also saves `goal`): ask "Same
 audience and names as last time?" on later videos (one question, yes as the first option) instead of
-the full intake. Everything else is asked once.
+the full intake. Everything else is asked once. Edits by hand already: taste's "Learn from a past edit".
 The profile lives in `~/.ai-video-editor/profile.json`; `python3 "$P" show` prints it. On "just edit
-it" or "use the defaults", save nothing and go on: every answer has a default.
+it" or "use the defaults", run `python3 "$P" defaults` and go on.
 
 ## 3. Route
 
@@ -82,7 +82,7 @@ Do each step in order, skipping what is already done. Read each skill's SKILL.md
    several creators in parallel when the platform allows.
 3. **Blend the style**: `python3 "$P" style edits/<name>` writes `edits/<name>/style.json`, each part
    (captions, pace, visuals) from the creator the user picked for it, with the caption and sound
-   answers laid over. With no creator it writes the default style (smooth zooms about every 6 s,
+   answers laid over. With no creator it writes the default style (a smooth zoom move at least every 5 s,
    3-word captions). If it stops with `no creator style.json found`, step 2 did not finish for a
    creator: run it again.
 4. **cut** on the raw take, from its step 0b (start has already decided: cut, wait for the cut page
@@ -96,7 +96,7 @@ can do itself.
 
 ## 4. After
 
-Open the render, give its full path, and ask for notes. Corrections go to the taste skill so they
+The render is handed over on the review page (style-edit step 8): the user leaves notes on it. Corrections go to the taste skill so they
 are never needed again; a change of brand, creators or platform goes back into the profile with
 `python3 "$P" set ...`.
 

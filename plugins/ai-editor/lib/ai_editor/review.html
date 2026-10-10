@@ -1,0 +1,480 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>review</title>
+<style>
+/* monochrome: ink is the only emphasis. green is only the listening dot. */
+:root{--paper:#FAFAF9;--ink:#1C1C1B;--line:#D4D4D1;--soft:#E7E7E4;--wash:#F0F0EE;--muted:#6F6F6B;--quiet:#A8A8A4;--ok:#1F9D72}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
+.tbtn{color:var(--muted);font-size:14px;padding:6px 8px;border-radius:8px}
+.tbtn:hover:not(:disabled){color:var(--ink);background:var(--wash)}
+.solid{background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:12px;font-weight:500}
+.solid:hover:not(:disabled){background:#000}
+.solid:disabled{background:transparent;border:1px solid var(--line);color:var(--quiet);opacity:1}
+.ghost{border:1px solid var(--line);padding:11px 18px;border-radius:12px;font-weight:500}
+.ghost:hover:not(:disabled){border-color:var(--ink)}
+.linkbtn{text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line);color:var(--ink)}
+.linkbtn:hover{text-decoration-color:var(--ink)}
+
+header{display:flex;align-items:baseline;gap:28px;padding:22px 32px 0;border-bottom:1px solid var(--line)}
+h1{font-weight:500;font-size:20px;line-height:1;margin:0 0 18px;white-space:nowrap}
+h1 span{font-weight:400;font-size:14px;color:var(--muted);margin-left:12px}
+nav.steps{display:flex;gap:24px;margin:0 auto;align-self:stretch;align-items:flex-end}
+.step{position:relative;color:var(--quiet);font-size:15px;padding:0 0 18px;white-space:nowrap}
+.step:hover:not(:disabled){color:var(--ink)}
+.step:disabled{opacity:1;cursor:not-allowed}
+.step .n{margin-right:8px;font-variant-numeric:tabular-nums}
+.step .count{margin-left:8px;font-size:13px;color:var(--quiet)}
+.step.done{color:var(--muted)}.step.done .n{color:var(--ink)}
+.step.now{color:var(--ink);font-weight:500}
+.step.now::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ink)}
+#howbtn{width:32px;height:32px;display:grid;place-items:center;border-radius:50%;align-self:flex-start;margin:-6px 0 0 auto;color:var(--ink)}
+#howbtn:hover{background:var(--wash)}
+#how{display:none;border-bottom:1px solid var(--line);padding:24px 32px 28px}
+#how.open{display:block}
+#how ol{list-style:none;margin:0 auto;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;max-width:1760px}
+#how li{font-size:14px;color:var(--muted);max-width:40ch}
+#how li b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:4px}
+#how li b span{color:var(--muted);font-weight:400;margin-right:8px}
+#how .close{display:block;margin:20px auto 0;max-width:1760px}
+
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:40px;padding:24px 32px 32px;max-width:1760px;margin:auto}
+#what{margin:0 0 16px;font-size:15px;color:var(--muted);max-width:72ch}
+#what b{color:var(--ink);font-weight:500}
+.player{position:relative;border-radius:14px;overflow:hidden;background:var(--ink)}
+video{width:100%;display:block;aspect-ratio:16/9;background:var(--ink);cursor:pointer}
+#bigplay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;transition:opacity .15s}
+#bigplay span{width:64px;height:64px;border-radius:50%;background:rgba(28,28,27,.5);display:grid;place-items:center}
+#bigplay.show{opacity:1}
+#oldbadge{display:none;position:absolute;top:12px;right:12px;padding:5px 10px;border-radius:8px;background:var(--paper);font-size:13px;z-index:2}
+
+#bar{position:relative;height:36px;margin-top:10px;touch-action:none;cursor:pointer;user-select:none}
+#track{position:absolute;left:0;right:0;top:16px;height:4px;border-radius:2px;background:var(--soft)}
+#bar:hover #track{height:6px;top:15px}
+#fill{position:absolute;inset:0 auto 0 0;background:var(--muted);border-radius:2px}
+.range{position:absolute;top:-4px;bottom:-4px;background:rgba(28,28,27,.18)}
+#knob{position:absolute;top:11px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 3px var(--paper);pointer-events:none}
+.pin{position:absolute;top:1px;width:3px;height:11px;margin-left:-1.5px;border-radius:2px;background:var(--ink);cursor:pointer}
+.pin.fixed{background:var(--muted)}.pin.kept{background:var(--quiet)}
+.pin::after{content:'';position:absolute;inset:-6px}
+#hover{position:absolute;top:-16px;padding:2px 7px;border-radius:6px;background:var(--ink);color:var(--paper);font-size:12px;transform:translateX(-50%);display:none;pointer-events:none;font-variant-numeric:tabular-nums}
+
+.controls{display:flex;align-items:center;gap:4px;margin-top:4px;flex-wrap:wrap}
+#play{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:var(--ink);color:var(--paper);margin-right:6px}
+#time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:14px;margin:0 12px 0 8px}
+#mark{color:var(--ink);font-size:13px;margin-left:8px}
+#addnote{margin-left:auto;padding:9px 16px}
+#hint{font-size:13px;color:var(--muted);padding-top:8px;display:none;margin:0}
+
+#box{display:none;margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+#box.open{display:block}
+#box.drag{border-color:var(--ink);background:var(--wash)}
+#boxat{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+textarea{width:100%;min-height:64px;border:0;background:transparent;font:inherit;color:inherit;resize:vertical;outline:none;padding:4px 0}
+.row{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+.row .solid{padding:8px 14px}
+#pics{display:flex;gap:8px;flex-wrap:wrap}#pics:empty{display:none}
+#pics span{position:relative}#pics img{height:64px;border-radius:8px;border:1px solid var(--line);display:block}
+#pics button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:12px;line-height:20px}
+#allv{margin-right:auto;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer}
+#allv input{accent-color:var(--ink);margin:0}
+
+#keys{display:none;margin-top:16px;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 32px;font-size:13px;color:var(--muted)}
+#keys.open{display:grid}
+#keys div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--soft)}
+kbd{font:inherit;color:var(--ink)}
+
+aside{display:flex;flex-direction:column;position:sticky;top:16px;max-height:calc(100vh - 32px)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{color:var(--muted);font-size:14px;padding:4px 0 10px;white-space:nowrap;position:relative}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);font-weight:500}
+.tab.on::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ink)}
+.tab .latest{color:var(--muted);font-weight:400;margin-left:6px;font-size:13px}
+#list{overflow:auto;flex:1}
+h2{font-weight:500;font-size:13px;color:var(--muted);margin:24px 0 0;padding-bottom:6px;border-bottom:1px solid var(--soft)}
+.c{display:grid;grid-template-columns:64px 1fr;gap:0 10px;padding:14px 0;border-bottom:1px solid var(--soft);cursor:pointer}
+.c:hover .txt{text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.c .t{font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;padding-top:1px;white-space:nowrap}
+.c .t small{display:block;font-weight:400;color:var(--quiet);font-size:12px}
+.c .body{min-width:0}
+.c .txt{margin:0;overflow-wrap:anywhere}
+.c .meta{margin:3px 0 0;font-size:13px;color:var(--muted)}
+.c .st{font-size:13px;margin:0 0 2px;color:var(--muted)}
+.c .st.fixed{color:var(--quiet)}.c .st.wontfix{color:var(--ink);font-weight:500}.c .st.open{color:var(--ink)}
+.c .reply{margin:6px 0 0;font-size:14px;color:var(--muted)}
+.c .reply::before{content:'Claude: ';color:var(--ink)}
+.c .acts{display:flex;gap:2px;margin:6px 0 0 -8px}
+.c .acts button{font-size:13px}
+.c.old .txt{color:var(--muted)}
+.c .imgs{display:flex;gap:6px;margin:6px 0 0;flex-wrap:wrap}.c .imgs img{height:56px;border-radius:6px;border:1px solid var(--line)}
+.empty{color:var(--muted);font-size:14px;padding:16px 0;margin:0}
+#morechk{margin-top:8px;margin-left:-8px}
+.actions{display:flex;gap:10px;padding-top:16px;border-top:1px solid var(--line);margin-top:12px}
+.actions .solid{flex:1}
+#waiting{display:none;font-size:14px;color:var(--muted);padding:12px 0 0}
+#listen{font-size:13px;color:var(--muted);margin:10px 0 0}
+#listen::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line);margin-right:8px;vertical-align:1px}
+#listen.on::before{background:var(--ok)}
+/* what Claude is doing: one line per step, the live one with a progress line */
+#work{list-style:none;margin:8px 0 0;padding:0;font-size:13px;max-height:180px;overflow:auto}
+#work li{display:grid;grid-template-columns:16px 1fr auto;gap:6px;padding:3px 0;color:var(--muted)}
+#work li.now{color:var(--ink)}
+#work li .ic{color:var(--quiet)}
+#work li.now .ic{animation:pulse 1.2s ease-in-out infinite}
+#work time{color:var(--quiet);font-variant-numeric:tabular-nums}
+#work .pb{grid-column:2/4;height:3px;border-radius:2px;background:var(--soft);overflow:hidden;margin:3px 0 2px}
+#work .pb i{display:block;height:100%;background:var(--ink);transition:width .6s}
+@keyframes pulse{50%{opacity:.25}}
+
+/* every video in the round as a tab, the one on screen underlined */
+#verrow{display:flex;align-items:flex-end;gap:6px 28px;flex-wrap:wrap;margin:0 0 14px;font-size:14px;color:var(--muted)}
+#vtabs{display:flex;gap:16px;flex-wrap:wrap}
+.vtab{color:var(--muted);padding:2px 0 6px;position:relative;white-space:nowrap}
+.vtab:hover{color:var(--ink)}
+.vtab.on{color:var(--ink);font-weight:500}
+.vtab.on::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--ink)}
+.vtab small{font-size:12px;color:var(--quiet);font-weight:400;margin-left:5px}
+#ver2{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:6px 10px;min-width:140px}
+.vlabel{position:absolute;top:10px;left:10px;padding:4px 9px;border-radius:7px;background:rgba(250,250,249,.92);color:var(--ink);font-size:12px;pointer-events:none;z-index:2}
+.vlabel:empty{display:none}
+#cmpclose{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:50%;background:rgba(250,250,249,.92);display:grid;place-items:center;z-index:3}
+/* compare: a second player beside the first, kept in sync with it */
+#pair{display:grid;gap:12px}#p2{display:none}
+body.compare #pair{grid-template-columns:1fr 1fr}body.compare #p2{display:block}
+
+/* vertical renders: sized to the screen, controls beside it */
+body.vertical main{grid-template-columns:minmax(0,1fr) 400px}
+body.vertical #videoview section{--pw:max(280px,calc((100vh - 320px) * 9 / 16));display:grid;justify-self:center;
+  grid-template-columns:var(--pw) 190px;column-gap:28px;grid-template-areas:"what what" "ver ver" "player side" "bar side" "box box" "keys keys"}
+body.vertical #what{grid-area:what;max-width:none}body.vertical #pair{grid-area:player}body.vertical #bar{grid-area:bar}
+body.vertical #box{grid-area:box}body.vertical #keys{grid-area:keys;grid-template-columns:1fr}body.vertical #verrow{grid-area:ver}
+body.vertical video{aspect-ratio:9/16}
+body.vertical .controls{grid-area:side;flex-direction:column;align-items:flex-start;align-self:start;gap:2px;margin:0}
+body.vertical .controls #play{margin:0 0 8px}
+body.vertical #time{margin:0 0 8px 8px}
+body.vertical #addnote{margin:12px 0 0;width:100%}
+body.vertical.compare #videoview section{--pw:min(max(240px,calc((100vh - 320px) * 9 / 16)),calc((100vw - 740px) / 2));grid-template-columns:calc(var(--pw) * 2 + 12px) 190px}
+body.vertical .player{align-self:start}
+.player:fullscreen video{width:100%;height:100%;aspect-ratio:auto;object-fit:contain}
+/* the app's own buttons and text (plan.py SAFE for 9:16: 6% left, 14% top, 14% right, 22% bottom), shaded on the picture */
+#safebtn{display:none}body.vertical #safebtn{display:inline-block}
+.sz{display:none}
+.player.safe .sz{display:block;position:absolute;pointer-events:none}
+.sz i{position:absolute;background:rgba(28,28,27,.55)}
+.sz .zt{left:0;right:0;top:0;height:14%}
+.sz .zb{left:0;right:0;bottom:0;height:22%}
+.sz .zl{left:0;top:14%;width:6%;height:64%}
+.sz .zr{right:0;top:14%;width:14%;height:64%}
+.sz b{position:absolute;left:6%;top:14%;width:80%;height:64%;border:1px dashed rgba(250,250,249,.9)}
+@media (max-width:1100px){main{grid-template-columns:1fr}aside{position:static;max-height:none}header{flex-wrap:wrap;gap:12px 24px}nav.steps{margin:0;order:3;width:100%;overflow-x:auto}#keys{grid-template-columns:1fr 1fr}
+  body.vertical main{grid-template-columns:1fr}}
+@media (max-width:640px){header,main{padding-left:16px;padding-right:16px}body.vertical #videoview section{grid-template-columns:1fr;grid-template-areas:"what" "ver" "player" "bar" "side" "box" "keys";--pw:auto}
+  body.vertical .controls{flex-direction:row;flex-wrap:wrap}#how ol{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style></head><body>
+<header><h1>review<span id="name"></span></h1>
+<nav class="steps" aria-label="steps" id="steps"><button class="step" id="st1" data-go="cut"></button><button class="step" id="st2" data-go="edit"></button></nav>
+<button id="howbtn" aria-label="how this works" title="how this works"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="10" cy="10" r="8.3"/><path d="M7.7 7.6a2.4 2.4 0 1 1 3.3 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.4" r=".4" fill="currentColor"/></svg></button></header>
+<section id="how" aria-label="how this works"><ol>
+ <li><b><span>1</span>watch and note</b>pause where something is off and add a note. it is pinned to that moment, with the frame. paste or drop an image to show what you mean.</li>
+ <li><b><span>2</span>send notes</b>Claude reads every note, fixes the video and renders the next round. you see each step here while it works, and the page switches to the new round by itself.</li>
+ <li><b><span>3</span>approve</b>when it is right, approve. the cut moves on to the styled edit; the edit is finished.</li>
+</ol><div class="close"><button class="ghost" id="howclose">got it</button></div></section>
+
+<main id="videoview"><section>
+<p id="what"></p>
+<div id="verrow" style="display:none"><div id="vtabs"></div>
+ <button class="tbtn" id="cmpbtn">compare</button><label id="cmprow">beside it: <select id="ver2"></select></label></div>
+<div id="pair"><div class="player"><video id="v" preload="auto" playsinline></video><span class="vlabel" id="vl1"></span>
+ <div id="bigplay"><span><svg width="24" height="24" viewBox="0 0 24 24" fill="#FAFAF9"><path d="M8 5v14l11-7z"/></svg></span></div>
+ <div id="oldbadge"></div><div class="sz"><i class="zt"></i><i class="zb"></i><i class="zl"></i><i class="zr"></i><b></b></div></div>
+<div class="player" id="p2"><video id="v2" preload="auto" muted playsinline></video><span class="vlabel" id="vl2"></span>
+ <button id="cmpclose" aria-label="close compare" title="close compare"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11" stroke="#1C1C1B" stroke-width="1.6"/></svg></button><div class="sz"><i class="zt"></i><i class="zb"></i><i class="zl"></i><i class="zr"></i><b></b></div></div></div>
+<div id="bar"><div id="track"><div id="fill"></div></div><div id="knob"></div><div id="hover"></div></div>
+<div class="controls">
+ <button id="play" aria-label="play or pause"></button>
+ <button class="tbtn" id="back" title="j">−5s</button><button class="tbtn" id="fwd" title="l">+5s</button>
+ <span id="time">0:00 / 0:00</span>
+ <button class="tbtn" id="speed" title="[ and ]"></button>
+ <button class="tbtn" id="mute" title="m">sound on</button>
+ <button class="tbtn" id="full" title="f">full screen</button>
+ <button class="tbtn" id="safebtn" title="z">safe zone</button>
+ <button class="tbtn" id="keysbtn" title="?">shortcuts</button>
+ <span id="mark"></span>
+ <button class="ghost" id="addnote" title="c">add note</button>
+</div>
+<div id="box"><div id="boxat"></div><textarea id="ta" aria-label="note" placeholder="What should change here? Paste or drop an image to attach it."></textarea>
+ <div id="pics"></div><input type="file" id="picin" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+ <div class="row"><button class="tbtn" id="picbtn" title="or paste / drop">+ image</button><label id="allv"><input type="checkbox" id="allvc">all videos</label><button class="tbtn" id="cancel">cancel</button><button class="solid" id="savebtn">save note</button></div></div>
+<div id="keys"></div>
+</section>
+<aside>
+ <div class="tabs" id="tabs" role="tablist"></div>
+ <div id="list"></div>
+ <div id="waiting"></div>
+ <div class="actions"><button class="solid" id="send"></button><button class="ghost" id="approve"></button></div><p id="hint">send or delete your notes before you approve.</p><p id="listen"></p>
+</aside></main>
+<script>
+const $=id=>document.getElementById(id),v=$('v'),v2=$('v2'),bar=$('bar'),ta=$('ta'),box=$('box');
+const SPEEDS=[0.5,1,1.25,1.5,2],FPS=30,STAGE={cut:'the cut',edit:'the edit'};
+const KEYS=[['play or pause','space'],['back or forward 5 s','j l'],['back or forward 1 s','← →'],['one frame',', .'],['slower or faster','[ ]'],
+ ['add note','c'],['mark a range','i o'],['save note','enter'],['cancel','esc'],['full screen','f'],['mute','m'],['safe zone (vertical)','z'],['shortcuts','?']];
+$('keys').innerHTML=KEYS.map(([a,k])=>`<div><span>${a}</span><span>${k.split(' ').map(x=>'<kbd>'+x+'</kbd>').join('&nbsp;&nbsp;')}</span></div>`).join('');
+let S=null,view=null,alt='',cmp=null,loaded2='',inT=null,outT=null,loaded='',dragging=false,showChecked=false,news='';
+let speed=1;try{speed=+localStorage.getItem('review-speed')||1}catch(e){}
+const fmt=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0')};
+const fmtx=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+':'+(t%60).toFixed(1).padStart(4,'0')};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const key=r=>r.stage+'-'+r.round, cur=()=>({stage:S.stage,round:S.round});
+const viewRound=()=>(S.rounds||[]).find(r=>key(r)===key(view))||S;
+const onAlt=c=>(c.alt||'')===alt||c.alt==='*';   // each video keeps its own notes and pins; '*' = all videos
+const isCur=()=>view&&view.stage===S.stage&&view.round===S.round;
+const approved=st=>S.events.some(e=>e.type==='approve'&&e.stage===st);
+const pending=()=>{const e=S.events[S.events.length-1];return S.sent&&e?e.type:null};
+const plural=(n,w)=>n+' '+w+(n===1?'':'s');
+const mainName=r=>r.label||'main';
+
+// Redraw only when the state changed: redrawing every poll replaced the buttons under the pointer.
+let lastRaw='';
+async function load(force){
+  const raw=await (await fetch('/state')).text();
+  if(raw===lastRaw&&!force)return;lastRaw=raw;
+  const d=JSON.parse(raw),was=S&&key(cur());
+  S=d;
+  if(!view||(was&&was!==key(cur())&&key(view)===was))view=cur();      // follow a new round when it lands
+  if(was&&was!==key(cur())&&d.stage==='edit'&&was.startsWith('cut'))news='the styled edit is ready.';
+  setVideo();render();
+}
+function setVideo(){
+  if(alt&&!(viewRound().alts||[]).some(a=>a.name===alt))alt='';
+  const k=key(view)+'|'+alt;if(k!==loaded){const t=loaded.split('|')[0]===key(view)?v.currentTime:0;loaded=k;
+    v.src='/video?k='+key(view)+'&alt='+encodeURIComponent(alt);v.playbackRate=speed;if(t)v.addEventListener('loadedmetadata',()=>v.currentTime=Math.min(t,v.duration||t),{once:true})}
+  const names=['',...(viewRound().alts||[]).map(a=>a.name)];
+  if(cmp!==null&&(!names.includes(cmp)||cmp===alt))cmp=names.length>1?names.find(n=>n!==alt):null;
+  document.body.classList.toggle('compare',cmp!==null);
+  const k2=cmp===null?'':key(view)+'|'+cmp;
+  if(k2!==loaded2){loaded2=k2;if(cmp===null){v2.pause();v2.removeAttribute('src');v2.load()}
+    else{v2.src='/video?k='+key(view)+'&alt='+encodeURIComponent(cmp);v2.addEventListener('loadedmetadata',sync2,{once:true})}}}
+// the second player follows the first: play, pause, seek, speed. it stays muted.
+function sync2(){if(cmp===null||!v2.src)return;v2.playbackRate=v.playbackRate;
+  if(Math.abs(v2.currentTime-v.currentTime)>.05)v2.currentTime=Math.min(v.currentTime,v2.duration||v.currentTime);
+  v.paused?v2.pause():v2.play().catch(()=>{})}
+['play','pause','seeking','seeked','ratechange'].forEach(e=>v.addEventListener(e,sync2));
+v.addEventListener('timeupdate',()=>{if(cmp!==null&&!v.paused&&Math.abs(v2.currentTime-v.currentTime)>.3)sync2()});
+function renderVer(){
+  const r=viewRound(),alts=r.alts||[];$('verrow').style.display=alts.length?'':'none';if(!alts.length)return;
+  const n=a=>S.comments.filter(c=>c.stage===view.stage&&c.round===view.round&&(c.alt||'')===a).length;
+  const lab=x=>x===''?mainName(r):x;
+  $('ver2').innerHTML=['',...alts.map(a=>a.name)].filter(x=>x!==alt).map(x=>`<option value="${esc(x)}"${x===cmp?' selected':''}>${esc(lab(x))}</option>`).join('');
+  $('vtabs').innerHTML=['',...alts.map(a=>a.name)].map(x=>`<button class="vtab${x===alt?' on':''}" data-ver="${esc(x)}" aria-pressed="${x===alt}">${esc(lab(x))}${n(x)?`<small>${plural(n(x),'note')}</small>`:''}</button>`).join('');
+  $('cmpbtn').style.display=cmp===null?'':'none';$('cmprow').style.display=cmp===null?'none':'';
+  $('vl1').textContent=(cmp!==null?'left: ':'')+lab(alt);$('vl2').textContent=cmp!==null?'right: '+lab(cmp):'';
+}
+function steps(){
+  const has=st=>(S.rounds||[]).some(r=>r.stage===st);
+  $('steps').style.display=has('cut')?'':'none';   // no cut stage (a product video): no steps to show
+  [['st1','cut'],['st2','edit']].forEach(([id,st],i)=>{
+    const done=approved(st),viewing=view&&view.stage===st;
+    let note='';
+    if(S.stage===st&&!done)note=pending()?'with Claude':'round '+S.round+' to check';
+    if(st==='edit'&&!has('edit'))note=done?'':'after the cut';
+    $(id).className='step'+(done?' done':'')+(viewing?' now':'');$(id).setAttribute('aria-current',viewing?'page':'false');
+    $(id).innerHTML=`<span class="n">${done?'✓':i+1}</span>${STAGE[st]}${note?`<span class="count">${note}</span>`:''}`;
+    $(id).disabled=!has(st);
+  });
+}
+function listenText(S){
+  const e=S.events[S.events.length-1],picked=!!(S.sent&&e&&e.handled);
+  if(S.listening)return 'Claude is listening';
+  if(picked&&e.type==='approve')return e.stage==='cut'?'the cut is approved':'approved';
+  return picked?'Claude is working on your notes':'Claude is not listening right now. notes still save, and Claude reads them next time.';
+}
+function render(){
+  document.body.classList.toggle('vertical',!!S.vertical);
+  $('name').textContent=S.name;document.title=S.name+(pending()==='send'?' · Claude working':' · round '+S.round);steps();
+  const L=$('listen'),lastEv=S.events[S.events.length-1],picked=!!(S.sent&&lastEv&&lastEv.handled);
+  L.className=S.listening||picked?'on':'';
+  L.textContent=listenText(S);
+  const what={cut:'<b>check the cut.</b> mistakes gone, no doubled lines, no long pauses.',
+              edit:'<b>check captions, cards, zooms and timing.</b>'};
+  if(pending()==='send'&&isCur())what[view.stage]=`<b>notes sent.</b> Claude is making round ${S.round+1}; progress is on the right. this page switches to it when it lands.`;
+  else if(view.round>1&&isCur()&&!news)what[view.stage]=`<b>round ${view.round} is ready.</b> check Claude's answers on the right, then watch for anything new.`;
+  const vr=viewRound(),cc=view.stage==='cut'&&S.cutcheck?' <a class="linkbtn" href="/cut-check.html" target="_blank" rel="noopener">see the transcript with every cut word struck through</a>.':'';
+  const fin=approved('edit')?'<b>approved.</b> the edit is finished.':approved('cut')&&view.stage==='cut'?'<b>the cut is approved.</b> Claude is styling it.':'';
+  $('what').innerHTML=(news?`<b>${esc(news)}</b> `:'')+(fin||what[view.stage])+(vr.note?' Claude: '+esc(vr.note):'')+cc;
+  const rs=(S.rounds||[cur()]).filter(r=>r.stage===view.stage);
+  $('tabs').innerHTML=rs.map(r=>`<button class="tab${key(r)===key(view)?' on':''}" role="tab" data-k="${key(r)}">round ${r.round}${key(r)===key(cur())?'<span class="latest">latest</span>':''}</button>`).join('');
+  $('oldbadge').style.display=isCur()?'none':'block';$('oldbadge').textContent='older round, read only';
+  const p=pending(),w=$('waiting');
+  const act=(S.activity||[]).filter(x=>x.round===S.round),live=act.some(x=>!x.done),ago=x=>{const s=Math.max(0,(Date.now()-new Date(x.at))/1000|0);return s<60?s+'s':Math.floor(s/60)+'m'};
+  const head=p==='approve'?(S.stage==='cut'?'cut approved. Claude is styling it.':'approved.')
+    :p==='send'?(act.length?`Claude is working on round ${S.round+1}:`:picked?`Claude has your notes and is starting round ${S.round+1}.`:'notes sent. waiting for Claude to pick them up.')
+    :live?'still coming in this round:':'';
+  w.innerHTML=esc(head)+((p||live)&&act.length?'<ol id="work">'+act.map(x=>`<li class="${x.done?'':'now'}"><span class="ic">${x.done?'✓':'●'}</span><span>${esc(x.text)}${!x.done&&x.pct!=null?' · '+x.pct+'%':''}</span><time>${x.done?'':ago(x)}</time>${!x.done&&x.pct!=null?`<span class="pb"><i style="width:${x.pct}%"></i></span>`:''}</li>`).join('')+'</ol>':'');
+  w.style.display=head?'block':'none';
+  const wk=$('work');if(wk)wk.scrollTop=wk.scrollHeight;
+  const mine=S.comments.filter(c=>c.stage===S.stage&&c.round===S.round).length;
+  $('send').textContent=mine?'send '+plural(mine,'note'):'send notes';
+  $('approve').textContent=S.stage==='cut'?'approve the cut':(S.alts||[]).length?'approve all':'approve';
+  $('send').disabled=!!p||!mine||!isCur();$('approve').disabled=!!p||!isCur()||mine>0;$('addnote').disabled=!!p||!isCur();
+  $('hint').style.display=!p&&isCur()&&mine?'block':'none';
+  renderVer();requestAnimationFrame(fit);renderBar();renderList();
+}
+const here=c=>(c.stage===view.stage&&c.round===view.round)?c.t:(c.new_t??c.t);
+function renderBar(){
+  const D=v.duration||1;
+  $('track').querySelectorAll('.range').forEach(e=>e.remove());bar.querySelectorAll('.pin').forEach(e=>e.remove());
+  if(inT!==null){const e=document.createElement('div');e.className='range';const b=outT??v.currentTime;
+    e.style.left=(Math.min(inT,b)/D*100)+'%';e.style.width=(Math.abs(b-inT)/D*100)+'%';$('track').appendChild(e)}
+  S.comments.filter(c=>onAlt(c)&&c.stage===view.stage&&(c.round===view.round||(c.round===view.round-1&&c.new_t!=null&&!c.checked))).forEach(c=>{
+    const e=document.createElement('div'),old=c.round!==view.round;
+    e.className='pin'+(old?(c.status==='fixed'?' fixed':c.status==='wontfix'?' kept':''):'');
+    e.style.left=(here(c)/D*100)+'%';e.title=fmt(here(c))+'  '+c.text;
+    e.onpointerdown=ev=>{ev.stopPropagation();v.currentTime=Math.max(0,here(c)-(old?3:0))};bar.appendChild(e)});
+  tick();
+}
+function card(c){
+  const old=c.round!==view.round,t=here(c),live=isCur()&&!pending(),alts=(viewRound().alts||[]).length;
+  const st=old?`<p class="st ${c.status}">${c.status==='wontfix'?'left as is':c.status==='fixed'?'fixed':'still open'}</p>`:'';
+  const acts=[];
+  if(old&&live&&!c.checked&&c.status!=='open')acts.push(`<button class="tbtn" data-good="${c.id}">got it</button>`);
+  if(old&&live&&c.status==='wontfix')acts.push(`<button class="tbtn" data-anyway="${c.id}">fix it anyway</button>`);
+  if(!old&&live&&alts)acts.push(`<button class="tbtn" data-scope="${c.id}">${c.alt==='*'?'make it this video only':'apply to all videos'}</button>`);
+  if(!old&&live)acts.push(`<button class="tbtn" data-del="${c.id}">delete</button>`);
+  const range=c.t_end!=null&&!old?`<small>to ${fmt(c.t_end)}</small>`:'';
+  const moved=old&&c.new_t!=null&&fmt(c.new_t)!==fmt(c.t)?`<small>${fmt(c.t)} in round ${c.round}</small>`:'';
+  return `<div class="c${old?' old':''}" data-t="${t}" data-old="${old?1:0}"><span class="t">${fmt(t)}${range}${moved}</span><div class="body">${st}
+  <p class="txt">${esc(c.text)}</p>${(c.images||[]).length?`<div class="imgs">${c.images.map(x=>`<a href="/frames/${encodeURIComponent(x)}" target="_blank" rel="noopener"><img src="/frames/${encodeURIComponent(x)}" alt="attached image"></a>`).join('')}</div>`:''}
+  ${alts?`<p class="meta">${c.alt==='*'?'✓ on all videos':'only on '+esc(c.alt||mainName(viewRound()))}</p>`:''}${c.card?`<p class="meta">card ${c.card.i + 1}${c.card.trigger_word?', on “'+esc(c.card.trigger_word)+'”':''}</p>`:''}
+  ${c.words?`<p class="meta">“${esc(c.words)}”</p>`:''}${c.reply?`<p class="reply">${esc(c.reply)}</p>`:''}
+  ${acts.length?`<div class="acts">${acts.join('')}</div>`:''}</div></div>`;
+}
+function renderList(){
+  const mine=S.comments.filter(c=>onAlt(c)&&c.stage===view.stage&&c.round===view.round).sort((a,b)=>a.t-b.t);
+  const prev=S.comments.filter(c=>onAlt(c)&&c.stage===view.stage&&c.round===view.round-1).sort((a,b)=>here(a)-here(b));
+  let h='';
+  // fixed notes fold away in the new round: only what still needs the user (still open, left as is) stays out
+  const todo=prev.filter(c=>!c.checked&&c.status!=='fixed'),done=prev.filter(c=>c.checked||c.status==='fixed');
+  if(prev.length){
+    h+=`<h2>Claude's answers to your round ${view.round-1} notes</h2>`;
+    h+=todo.length?todo.map(card).join(''):`<p class="empty">${done.length===prev.length?(done.length>1?'all ':'')+plural(done.length,'note')+' fixed.':''}</p>`;
+    if(done.length)h+=`<button class="tbtn" id="morechk">${done.length} fixed, ${showChecked?'hide':'show'}</button>`+(showChecked?done.map(card).join(''):'');
+    h+=`<h2>your notes on round ${view.round}</h2>`;
+  }
+  h+=mine.length?mine.map(card).join(''):`<p class="empty">${isCur()?(prev.length?'no new notes yet.':'no notes yet. pause where something is off and add a note.'):'no notes on this round.'}</p>`;
+  $('list').innerHTML=h;
+}
+async function post(u,b){const r=await fetch(u,{method:'POST',body:JSON.stringify(b)});return r.ok?r.json():{}}
+
+$('steps').addEventListener('click',e=>{
+  const b=e.target.closest('button.step');if(!b||b.disabled)return;news='';
+  const rs=(S.rounds||[]).filter(r=>r.stage===b.dataset.go);
+  if(rs.length){view=rs[rs.length-1];inT=outT=null;setVideo()}render();
+});
+$('tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;const[stage,r]=b.dataset.k.split('-');view={stage,round:+r};inT=outT=null;setVideo();render()};
+$('list').addEventListener('click',async e=>{
+  const sc=e.target.closest('[data-scope]');
+  if(sc){e.stopPropagation();const c=S.comments.find(c=>c.id===+sc.dataset.scope);
+    await post('/scope',{id:c.id,alt:c.alt==='*'?(alt||null):'*'});return load()}
+  const d=e.target.closest('[data-del]'),a=e.target.closest('[data-anyway]'),g=e.target.closest('[data-good]');
+  if(d){e.stopPropagation();await post('/delete',{id:+d.dataset.del});return load()}
+  if(g){e.stopPropagation();await post('/check',{ids:[+g.dataset.good]});return load()}
+  if(a){e.stopPropagation();const c=S.comments.find(c=>c.id===+a.dataset.anyway);
+    await post('/comment',{t:c.new_t??c.t,t_end:null,text:'fix it anyway: '+c.text,alt:c.alt||null});return load()}
+  if(e.target.id==='morechk'){showChecked=!showChecked;return renderList()}
+  if(e.target.closest('a'))return;
+  const c=e.target.closest('.c');if(c)v.currentTime=Math.max(0,+c.dataset.t-(c.dataset.old==='1'?3:0));
+});
+
+// player
+const toggle=()=>{v.paused?v.play():v.pause()};
+v.addEventListener('click',toggle);v2.addEventListener('click',toggle);$('play').onclick=toggle;
+const icon=()=>{$('play').innerHTML=v.paused?'<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>':'<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';$('bigplay').classList.toggle('show',v.paused)};
+v.addEventListener('play',icon);v.addEventListener('pause',icon);icon();
+$('back').onclick=()=>v.currentTime-=5;$('fwd').onclick=()=>v.currentTime+=5;
+function setSpeed(x){speed=x;v.playbackRate=x;try{localStorage.setItem('review-speed',x)}catch(e){}$('speed').textContent=x+'× speed'}
+$('speed').onclick=()=>setSpeed(SPEEDS[(SPEEDS.indexOf(speed)+1)%SPEEDS.length]);setSpeed(speed);
+v.addEventListener('loadedmetadata',()=>{v.playbackRate=speed;renderBar()});
+$('mute').onclick=()=>{v.muted=!v.muted;$('mute').textContent=v.muted?'muted':'sound on'};
+$('full').onclick=()=>document.fullscreenElement?document.exitFullscreen():document.querySelector('.player').requestFullscreen();
+$('vtabs').onclick=e=>{const b=e.target.closest('[data-ver]');if(!b)return;alt=b.dataset.ver;inT=outT=null;closeBox();setVideo();render()};
+$('cmpclose').onclick=()=>{cmp=null;setVideo();render()};
+$('ver2').onchange=e=>{cmp=e.target.value;setVideo();render();e.target.blur()};
+$('cmpbtn').onclick=()=>{cmp=['',...(viewRound().alts||[]).map(a=>a.name)].find(n=>n!==alt);setVideo();render()};
+$('keysbtn').onclick=()=>{$('keys').classList.toggle('open');fit()};
+$('safebtn').onclick=()=>{const on=!document.querySelector('.player').classList.contains('safe');
+  document.querySelectorAll('.player').forEach(p=>p.classList.toggle('safe',on));$('safebtn').textContent=on?'hide safe zone':'safe zone';placeSafe()};
+// the box sits on the picture, not the element: in full screen the picture is letterboxed inside the screen
+function placeSafe(){document.querySelectorAll('.player').forEach(p=>{const m=p.querySelector('video'),r=m.getBoundingClientRect(),pr=p.getBoundingClientRect();
+  const ar=m.videoWidth?m.videoWidth/m.videoHeight:9/16;let w=r.width,h=r.height;if(w/h>ar)w=h*ar;else h=w/ar;
+  Object.assign(p.querySelector('.sz').style,{left:r.left-pr.left+(r.width-w)/2+'px',top:r.top-pr.top+(r.height-h)/2+'px',width:w+'px',height:h+'px'})})}
+// one screen, no scroll: measure how far the page overflows and shrink the player by that much
+let fitting=false;
+function fit(){
+  if(fitting||!S||innerWidth<=1100)return;fitting=true;
+  const sec=document.querySelector('#videoview section'),pl=document.querySelector('.player');
+  sec.style.removeProperty('--pw');sec.style.removeProperty('max-width');
+  const as=document.querySelector('aside');as.style.maxHeight=as.style.height=(innerHeight-as.getBoundingClientRect().top-scrollY-parseFloat(getComputedStyle(document.querySelector('main')).paddingBottom))+'px';
+  requestAnimationFrame(()=>{
+    const over=document.documentElement.scrollHeight-innerHeight,h=pl.getBoundingClientRect().height;
+    if(over>0&&h){const nh=Math.max(240,h-over-12);
+      if(S.vertical)sec.style.setProperty('--pw',(nh*9/16)+'px');
+      else sec.style.maxWidth=(nh*16/9*(document.body.classList.contains('compare')?2:1)+12)+'px'}
+    fitting=false;placeSafe()})}
+addEventListener('resize',fit);
+const ro=new ResizeObserver(placeSafe);ro.observe(v);ro.observe(v2);[v,v2].forEach(m=>m.addEventListener('loadedmetadata',placeSafe));
+function tick(){const D=v.duration||0,p=D?v.currentTime/D*100:0;$('fill').style.width=p+'%';$('knob').style.left=p+'%';
+  $('time').textContent=fmt(v.currentTime)+' / '+fmt(D)}
+v.addEventListener('timeupdate',tick);
+const at=e=>{const r=bar.getBoundingClientRect();return Math.min(1,Math.max(0,(e.clientX-r.left)/r.width))*(v.duration||0)};
+bar.addEventListener('pointerdown',e=>{dragging=true;bar.setPointerCapture(e.pointerId);v.currentTime=at(e);tick()});
+bar.addEventListener('pointermove',e=>{const h=$('hover'),t=at(e),r=bar.getBoundingClientRect();
+  h.style.display='block';h.style.left=(e.clientX-r.left)+'px';h.textContent=fmtx(t);if(dragging){v.currentTime=t;tick()}});
+bar.addEventListener('pointerup',()=>dragging=false);bar.addEventListener('pointerleave',()=>{if(!dragging)$('hover').style.display='none'});
+
+// notes
+function openBox(){if($('addnote').disabled)return;v.pause();box.classList.add('open');ta.value='';ta.focus();fit();
+  $('allvc').checked=false;$('allv').style.display=(viewRound().alts||[]).length?'':'none';boxTime()}
+// the time on the open note box follows the playhead: scrub, step or seek and it updates, and that is the time saved
+function boxTime(){if(!box.classList.contains('open'))return;const a=inT??v.currentTime,b=inT!==null?(outT??v.currentTime):null;
+  $('boxat').textContent=b!==null?fmtx(Math.min(a,b))+'–'+fmtx(Math.max(a,b)):fmtx(a)}
+v.addEventListener('timeupdate',boxTime);v.addEventListener('seeked',boxTime);
+function closeBox(){pics=[];showPics();box.classList.remove('open');fit();ta.blur();inT=outT=null;$('mark').textContent='';if(S)renderBar()}
+// pictures on a note: paste, drop or pick; kept as data urls until the note is saved
+let pics=[];
+function showPics(){requestAnimationFrame(fit);$('pics').innerHTML=pics.map((p,i)=>`<span><img src="${p}" alt="attached image ${i+1}"><button data-rm="${i}" aria-label="remove image">×</button></span>`).join('')}
+function addFiles(fs){[...fs].filter(f=>/^image\/(png|jpeg|gif|webp)$/.test(f.type)).slice(0,6-pics.length).forEach(f=>{const r=new FileReader();r.onload=()=>{pics.push(r.result);showPics()};r.readAsDataURL(f)})}
+$('picbtn').onclick=()=>$('picin').click();$('picin').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+$('pics').onclick=e=>{const b=e.target.closest('[data-rm]');if(b){pics.splice(+b.dataset.rm,1);showPics()}};
+ta.addEventListener('paste',e=>{const fs=[...(e.clipboardData?.files||[])];if(fs.length){e.preventDefault();addFiles(fs)}});
+box.addEventListener('dragover',e=>{e.preventDefault();box.classList.add('drag')});box.addEventListener('dragleave',()=>box.classList.remove('drag'));
+box.addEventListener('drop',e=>{e.preventDefault();box.classList.remove('drag');addFiles(e.dataTransfer.files)});
+async function save(){const text=ta.value.trim();if(!text&&!pics.length){closeBox();return}
+  let t=inT??v.currentTime,te=inT!==null?(outT??v.currentTime):null;if(te!==null&&te<t)[t,te]=[te,t];
+  await post('/comment',{t,t_end:te,text,images:pics,alt:$('allvc').checked&&(viewRound().alts||[]).length?'*':alt||null});closeBox();await load()}
+$('addnote').onclick=openBox;$('savebtn').onclick=save;$('cancel').onclick=closeBox;
+ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();save()}if(e.key==='Escape')closeBox()});
+$('send').onclick=async()=>{await post('/event',{type:'send'});load()};
+$('approve').onclick=async()=>{await post('/event',{type:'approve'});load()};
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.metaKey||e.ctrlKey||e.altKey)return;const k=e.key;
+  if(k===' '){e.preventDefault();toggle()}
+  else if(k==='j')v.currentTime-=5;else if(k==='l')v.currentTime+=5;
+  else if(k==='ArrowLeft'){e.preventDefault();v.currentTime-=1}else if(k==='ArrowRight'){e.preventDefault();v.currentTime+=1}
+  else if(k===','){v.pause();v.currentTime-=1/FPS}else if(k==='.'){v.pause();v.currentTime+=1/FPS}
+  else if(k==='['||k===']'){const i=SPEEDS.indexOf(speed)+(k===']'?1:-1);setSpeed(SPEEDS[Math.max(0,Math.min(SPEEDS.length-1,i))])}
+  else if(k==='i'){inT=v.currentTime;outT=null;$('mark').textContent='range from '+fmtx(inT)+'. press o to end it.';renderBar()}
+  else if(k==='o'&&inT!==null){outT=v.currentTime;$('mark').textContent=fmtx(inT)+'–'+fmtx(outT)+'. press c to note it.';renderBar()}
+  else if(k==='c'){e.preventDefault();openBox()}
+  else if(k==='z'&&S.vertical)$('safebtn').click();
+  else if(k==='?')$('keysbtn').click();else if(k==='f')$('full').click();else if(k==='m')$('mute').click();
+  else if(k==='Escape'){inT=outT=null;$('mark').textContent='';renderBar()}
+});
+$('howbtn').onclick=()=>{$('how').classList.toggle('open');fit()};
+$('howclose').onclick=()=>{$('how').classList.remove('open');fit()};
+load();setInterval(load,3000);
+</script></body></html>

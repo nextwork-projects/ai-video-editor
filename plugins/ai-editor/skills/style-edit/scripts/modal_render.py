@@ -5,6 +5,7 @@ the pieces come back and join on this computer with the GitHub Actions join (edi
 Runs in the editor venv, where `setup.py modal` installs the modal package. edit.py calls it:
 
     ~/.ai-video-editor/venv/bin/python modal_render.py render <bundleDir> <plan.json> <out.mp4>
+    ~/.ai-video-editor/venv/bin/python modal_render.py held <publicDir>   footage bytes Modal does not hold yet
     ~/.ai-video-editor/venv/bin/python modal_render.py hello      one tiny function call: proves the login works
     ~/.ai-video-editor/venv/bin/python modal_render.py demo       self-check, no account needed
 
@@ -63,18 +64,23 @@ image = (modal.Image.debian_slim(python_version="3.12")
          .add_local_file(REMOTION / "package-lock.json", "/r/package-lock.json", copy=True)
          .run_commands("cd /r && npm ci --no-audit --no-fund && npx remotion browser ensure")
          .add_local_file(REMOTION / "render.mjs", "/r/render.mjs"))
-vol = modal.Volume.from_name("ai-video-editor-renders", create_if_missing=True)
+VOL_NAME = "ai-video-editor-renders"
+vol = modal.Volume.from_name(VOL_NAME, create_if_missing=True)
 VOL_DIR, RENDER_MJS = "/vol", "/r/render.mjs"     # where the container sees them (demo points them here)
 LOCAL_DIR = tempfile.gettempdir()                 # the container's own disk
 HEDGE = 2
+# Test only, off by default: "piece:seconds" holds the first copy of that piece in its container, the slow
+# container the hedge is for. AI_EDITOR_MODAL_SLOW_PIECE=0:600 edit.py render <edit> --modal
+SLOW_PIECE_ENV = "AI_EDITOR_MODAL_SLOW_PIECE"
 app = modal.App("ai-video-editor")
 
 
 @app.function(image=image, volumes={"/vol": vol}, cpu=CPU, memory=MEM_MB, timeout=1800, retries=1,
               max_containers=MODAL_MAX_CONTAINERS, scaledown_window=2)   # Modal's default bills 60 s idle per container
-def render_chunk(job, i, a, b, copy=0):
+def render_chunk(job, i, a, b, copy=0, delay=0):
     import resource
     t0, ru0 = time.time(), resource.getrusage(resource.RUSAGE_CHILDREN)
+    time.sleep(delay)       # a test's slow container (SLOW_PIECE_ENV); 0 otherwise
     bundle = unpack(job)
     out = f"{VOL_DIR}/{job}/chunks/chunk-{i:03d}-{copy}.mkv"
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -87,7 +93,7 @@ def render_chunk(job, i, a, b, copy=0):
     ru = resource.getrusage(resource.RUSAGE_CHILDREN)     # a reused container counts from its first input
     cpu = ru.ru_utime + ru.ru_stime - ru0.ru_utime - ru0.ru_stime
     return {"i": i, "frames": b - a + 1, "wall_s": time.time() - t0, "cpu_s": cpu, "boot": BOOT, "t0": t0,
-            "out": out[len(VOL_DIR):]}
+            "copy": copy, "out": out[len(VOL_DIR):]}
 
 
 def pack(bundle_dir, out):
@@ -134,10 +140,11 @@ def join(chunk_dir, chunks, fps, out):
 
 
 def render(bundle_dir, plan_path, out):
-    plan = json.loads(Path(plan_path).read_text())
+    plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
     frames, fps = plan["durationInFrames"], plan["fps"]
     n, r = plan_pieces(frames, speed()[0]["s_per_frame"])
     job = uuid.uuid4().hex[:12]
+    slow, slow_s = map(int, os.environ[SLOW_PIECE_ENV].split(":")) if os.environ.get(SLOW_PIECE_ENV) else (-1, 0)
     media = sum(f.stat().st_size for f in Path(bundle_dir, "public").rglob("*") if f.is_file())
     done = []
     t0 = time.time()
@@ -158,7 +165,8 @@ def render(bundle_dir, plan_path, out):
                 print(f"rendering {frames} frames in {len(r)} pieces on {n} container{'s' * (n > 1)}", flush=True)
                 t_sub, gets = time.time(), []
                 # each piece downloads as soon as it is done, while the others render
-                for c in run_pieces(lambda *x: render_chunk.spawn(job, *x), r, n):
+                for c in run_pieces(lambda i, a, b, copy: render_chunk.spawn(
+                        job, i, a, b, copy, slow_s if (i, copy) == (slow, 0) else 0), r, n):
                     done.append(c)
                     gets.append(pool.submit(fetch, c, cdir))
                 t_ren = time.time()
@@ -176,6 +184,33 @@ def render(bundle_dir, plan_path, out):
     print(f"rendered {out} in {res['wall_s']:.1f} s on {res['containers']} containers; about ${res['usd']:.3f} at Modal's "
           f"rates (the Modal dashboard has the exact bill)")
     print(json.dumps(res))
+
+
+def to_upload(pub):
+    """Bytes of the footage Modal does not hold yet. Each file's sha256 is asked of Modal, nothing is
+    sent: the upload skips a held file by the same hash. Uses Modal's internal API (modal is pinned in
+    setup.py), so a volume of another version, or any error, counts every byte."""
+    import asyncio
+    import hashlib
+    from modal.volume import _Volume
+    from modal_proto import api_pb2
+
+    async def ask():
+        v = _Volume.from_name(VOL_NAME)
+        await v.hydrate()
+        if v._metadata.version not in (api_pb2.VOLUME_FS_VERSION_UNSPECIFIED, api_pb2.VOLUME_FS_VERSION_V1):
+            raise RuntimeError("not a v1 volume")
+        n = 0
+        for f in (f for f in Path(pub).rglob("*") if f.is_file()):
+            with open(f, "rb") as fh:
+                sha = hashlib.file_digest(fh, "sha256").hexdigest()
+            r = await v._client._stub.MountPutFile(api_pb2.MountPutFileRequest(sha256_hex=sha))
+            n += 0 if r.exists else f.stat().st_size
+        return n
+    try:
+        return asyncio.run(ask())
+    except Exception:
+        return sum(f.stat().st_size for f in Path(pub).rglob("*") if f.is_file())
 
 
 def fetch(c, cdir):
@@ -212,6 +247,7 @@ def run_pieces(spawn, r, n, poll=5.0):
             if t_dry and done and time.time() - t_dry > HEDGE * statistics.median(c["wall_s"] for c in done.values()):
                 for i in set(left) - hedged:
                     hedged.add(i)
+                    print(f"piece {i} still running at {HEDGE}x the median piece: a second copy started", flush=True)
                     go(i, 1)
     finally:
         stop.set()
@@ -234,7 +270,8 @@ def measure(done, frames, t0, t_up, t_sub, t_ren, t_end, up_bytes):
     """What the next estimate reads (edit.py MODAL_MEASURED says what each is)."""
     boots = {c["boot"] for c in done}           # one per container
     n, work = len(boots), sum(c["wall_s"] for c in done)
-    start = max(0.0, max(boots) - t_sub)
+    # a second copy's container boots late on purpose: start-up is the first copies' containers
+    start = max(0.0, max(c["boot"] for c in done if not c.get("copy")) - t_sub)
     res = {"wall_s": round(t_end - t0, 1), "upload_s": round(t_up, 1), "pieces": len(done), "containers": n,
            "frames": frames, "cpu_s": round(sum(c["cpu_s"] for c in done), 1), "usd": round(cost(work, n), 4),
            "s_per_frame": round(work / frames, 4), "start_s": round(start, 1),
@@ -255,7 +292,7 @@ def demo():
         b = Path(t, "b")
         (b / "public").mkdir(parents=True)
         for f, x in (("bundle.js", "js"), ("1.bundle.js", "font"), ("bundle.js.map", "map"), ("1.bundle.js.map", "map"), ("public/cut.mp4", "mp4")):
-            Path(b, f).write_text(x)
+            Path(b, f).write_text(x, encoding="utf-8")
         pack(b, Path(t, "1.tar"))
         os.utime(b / "bundle.js", (1, 1))
         pack(b, Path(t, "2.tar"))
@@ -267,6 +304,8 @@ def demo():
     m = measure(pcs, 1000, 0, 40, 100, 200, 230, 152e6)
     assert m["containers"] == 2 and m["start_s"] == 8 and m["s_per_frame"] == 0.17 and m["tail_s"] == 30, m
     assert m["straggle"] == round((100 - 8) / 85, 2) and m["up_bytes_s"] == 3.8e6, m
+    late = measure(pcs + [{"boot": 220, "t0": 220, "wall_s": 30, "cpu_s": 0, "copy": 1}], 1000, 0, 40, 100, 260, 290, 152e6)
+    assert late["start_s"] == 8 and late["containers"] == 3, "a second copy's late container counted as start-up"
     assert "up_bytes_s" not in measure(pcs, 1000, 0, 2, 100, 200, 230, 152e6), "a skipped upload is not a speed"
     # a piece stuck on a slow container gets a second copy once the queue is empty; the first to finish counts
     calls = []
@@ -349,7 +388,7 @@ def mocked_render(bundle_dir, plan_path, out):
         # A Modal container with cpu=4 shows Node more cores than `nproc` (4), and Remotion takes the
         # lower: a fake nproc on PATH gives this computer the same split.
         with one_at_a_time, tempfile.TemporaryDirectory() as bin_dir:
-            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n")
+            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n", encoding="utf-8")
             Path(bin_dir, "nproc").chmod(0o755)
             path = os.environ["PATH"]
             os.environ["PATH"] = bin_dir + os.pathsep + path
@@ -379,6 +418,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "render" and len(sys.argv) == 5:
         render(*sys.argv[2:5])
+    elif cmd == "held" and len(sys.argv) == 3:
+        print(json.dumps({"to_upload": to_upload(sys.argv[2])}))
     elif cmd == "hello":
         with app.run():
             print(hello.remote())

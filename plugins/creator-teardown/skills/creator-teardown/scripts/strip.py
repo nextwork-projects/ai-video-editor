@@ -44,7 +44,7 @@ def main():
     a = ap.parse_args()
     src = ROOT / a.handle / 'audio' / f'{a.id}.mp4'
     if not src.exists():
-        urls = {v['id']: v['webpage_url'] for v in json.loads((ROOT / a.handle / 'videos.json').read_text())['videos']}
+        urls = {v['id']: v['webpage_url'] for v in json.loads((ROOT / a.handle / 'videos.json').read_text(encoding="utf-8"))['videos']}
         if a.id not in urls: sys.exit(f'{a.id} not in videos.json')
         subprocess.run(['yt-dlp', '-f', 'b[ext=mp4]/b', '--no-warnings', '-o', str(src), urls[a.id]], check=True)
     strips = ROOT / a.handle / 'strips'

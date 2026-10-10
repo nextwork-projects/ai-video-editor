@@ -39,7 +39,7 @@ def label(toks, cuts, spans):
     return out
 
 
-def paper_edit(lab, cuts, dur, final):
+def paper_edit(lab, cuts, dur, final, words_only=False):
     kept, prev = [], None
     for t, ci, gone in lab:
         if gone:
@@ -51,7 +51,8 @@ def paper_edit(lab, cuts, dur, final):
             prev = None
     clipped = [t["text"] for t, ci, gone in lab if gone and ci is None]
     lines = ["# Paper edit", "",
-             f"- source {dur:.1f}s, cut {final:.1f}s, {dur - final:.1f}s removed",
+             (f"- words only, pauses not counted: source {dur:.1f}s, cut {final:.1f}s" if words_only
+              else f"- source {dur:.1f}s, cut {final:.1f}s, {dur - final:.1f}s removed"),
              f"- {len(cuts)} cuts from spans.json", ""]
     if clipped:
         lines += [f"- **CLIPPED by a pause cut, not asked for:** {' '.join(clipped)}", ""]
@@ -154,9 +155,9 @@ def cut_check(lab, cuts, spans, dur, final, has_video):
 def write_all(d, toks, cuts, spans, dur, final):
     d = Path(d)
     lab = label(toks, cuts, spans)
-    (d / "paper-edit.md").write_text(paper_edit(lab, cuts, dur, final))
+    (d / "paper-edit.md").write_text(paper_edit(lab, cuts, dur, final), encoding="utf-8")
     (d / "cut-check.html").write_text(cut_check(lab, cuts, spans, dur, final,
-                                                (d / "cut.mp4").exists()))
+                                                (d / "cut.mp4").exists()), encoding="utf-8")
 
 
 if __name__ == "__main__":
@@ -164,9 +165,9 @@ if __name__ == "__main__":
     if len(args) != 1:
         sys.exit(__doc__)
     d = Path(args[0])
-    rep = json.loads((d / "report.json").read_text())
+    rep = json.loads((d / "report.json").read_text(encoding="utf-8"))
     toks = [t for t in load_fitted(d) if t.get("type") in ("word", "audio_event")]
-    write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text()),
+    write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text(encoding="utf-8")),
               rep["duration"], rep["final_s"])
     print(d / "paper-edit.md")
     print(d / "cut-check.html")

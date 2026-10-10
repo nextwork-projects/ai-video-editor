@@ -4,6 +4,154 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.2.0 (2026-10-09)
+
+- Review-page notes now reach your taste. After send or approve, Claude picks the notes that are
+  preferences, asks the scope once for the round, and runs `review.py learn`, which saves them with
+  `taste.py add` and marks the rest one-off. Each note in review.json records what happened to it
+  (`taste`: rule id, `video-only`, `suggested`, `one-off`). `wait` ends with the command, `round`
+  lists notes not learned yet, and `taste.py report` marks rules that came from review notes.
+  `improve.py collect` reads every `*/review.json` under edits, clips and product: notes marked
+  would-help-everyone and rules repeated across videos. Tests: `review.py demo`, `improve.py demo`.
+- Each review round keeps its own copy of its video in `<edit>/review/` (`v-cut1.mp4`,
+  `v-edit2-wide.mp4`), so a new render to the same `cut.mp4` no longer changes what an earlier
+  round's tab replays. Test: `review.py demo`.
+- After an approve, the review page footer says the round is approved, not "Claude is working on
+  your notes". Test: `review.py demo` (runs the page's `listenText` in node).
+- Fixes from a real-footage test of this release:
+  - `learn.py` measures your pauses from the audio of both files (build_timeline.py's threshold and
+    silencedetect), at every join, not from word gaps. Whisper stretches word ends over pauses, so a
+    205 s take measured 6 pauses and saved `cut.max_pause` 0.08; it now measures 18 joins, median
+    0.17 s, and saves 0.26. Re-learning the same value saves nothing. Test: `learn.py demo`.
+  - A `build_timeline.py --dry-run` no longer counts your taste rules as applied, so the next
+    correction is not reported as a regression. Test: `taste.py demo`.
+  - `join.py` output was 21 ms out of sync (audio late). Parts now keep PCM audio and the joined
+    file encodes it once. `check()` fails a file whose streams start over half a frame apart.
+    `parts.json` adds each part's audio length and full path. Test: `join.py demo`.
+  - `links.py` reads macOS Terminal drag-and-drop paths (`My\ Takes/IMG\ 0001.MOV`), says when a
+    local file is not there, and keeps several files in the order you gave them. Test: `links.py demo`.
+  - The skills define `$PY` and `$VPY` as the run.py path (`python3 "$PY" ...`), so the commands
+    work in zsh, the macOS default.
+  - `judge_cut.py apply` dropped every finding that quoted a join (`he ended up <<7>> he ended up`)
+    as "quote is not in the paper edit": the paper lost its `<<n>>` markers before matching and the
+    quote kept them. Both now drop them. The judge's paper edit labels its lengths as words only, and
+    adds the last build's real lengths and its CLIPPED line from `paper-edit.md`. Test: `judge_cut.py demo`.
+  - A stretched word label that starts on the previous word's tail is fitted after the silence
+    inside it. The real take's "if" (labelled 192.75-193.41 s, said at 193.30 s) was fitted onto
+    "you", fell in a pause cut and showed as CLIPPED at any `--pad`. Test: `test_build_timeline.py`.
+  - `verify_cut.py` no longer prints a SURVIVED span that would cut words of a kept line. It says a
+    word label is off instead. On the real take it had offered a span that cut "better. if you".
+    Test: `verify_cut.py demo`.
+  - A kept span under 0.2 s at the head of the take is dropped. `decisions.json` had started with a
+    one-frame flash (0.0-0.033 s) and a jump to 0.43 s. Test: `test_build_timeline.py`.
+  - `read_cut.py chunks` writes no prompt for a chunk with no kept line (a long cut block) and says
+    which it skipped. Each reader now sees the cut blocks between sentences in its chunk; before,
+    only lines with a time reached a reader. A verifier sees only the lines around its finding, in
+    order, not every cut block in the take. `verify` names any reader-N.json that is missing, and
+    `-h` prints the help. Test: `read_cut.py demo`.
+  - The default style (no creator) pushes its zooms over 0.8 s instead of a 0.0 s punch, so the
+    recommended path passes the editor's own smoothness check. Test: `profile.py demo`.
+  - The render check measures each zoom against the cut behind it, so a handheld camera's own
+    movement no longer reads as a surge (16 of 16 zooms WARNed on the test take; now 0). It never
+    advises the zoom kind already in use. Test: `quality.py demo`.
+  - The render check no longer counts white text in the footage under a caption as a second caption
+    line, and reads a card's first frame against the footage a frame either side, so a card fading
+    in is not called a first-frame flash. Tests: `quality.py demo`.
+  - `route.py` no longer takes capitalised common words ("This", "Can", "So") for names when the
+    transcript has no full stop before them. Test: `route.py demo`.
+  - `plan.py` prints its caption contrast fixes as one line with a count and the three lowest pages,
+    not one line a page. Test: `plan.py demo`.
+  - A laptop render that prints no new frame for 3 min (or 200 frames' time) is stopped and rendered
+    again in 200-frame pieces, then joined. A failed render prints one short message with the log
+    path and the next step instead of a traceback. `render.mjs` prints `Rendered N/M`. Test: `edit.py demo`.
+  - `edit.py estimate` says when its laptop speed comes from another video, as a rough guess.
+  - `chapters.py` writes nothing on a FAIL and removes an old `description.txt` when run without
+    `--intro`. Chapter titles are picked from `captions.txt`. Test: `chapters.py demo`.
+  - The default zoom spacing reads the same in start and style-edit: a move at least every 5 s.
+  - A `matte.py` WARNING names the field that moves the card: the beat's `box`. Test: `matte.py demo`.
+  - `profile.py defaults` saves the style defaults when the user says "use the defaults", so
+    `missing --style` stops listing all ten after setup. Test: `profile.py demo`.
+  - A local file's route action says it is cut where it is, never copied. Test: `links.py demo`.
+  - `retakes.py remap` follows a beat to the same word said again in its sentence instead of
+    dropping it. Test: `test_retakes.py`.
+  - `plan.py` uses the source's real frame rate (29.97 stays 29.97), so the plan has the cut's 1996
+    frames, not 1997. Test: `plan.py demo`.
+- Several takes of one video. When the user hands over two or more files, the editor asks in the
+  question box whether they are one video (in the order the user gave them) or separate videos.
+  For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
+  then the normal cut runs. Each clip is fitted to the first clip's size (rotation applied, black bars,
+  no stretching), one frame rate and 48 kHz audio, so upright, sideways and variable frame rate phone
+  clips join cleanly. It exits 1 when any clip or the joined file has audio and video more than 0.1 s
+  apart. `links.py route` asks the question as one `ask` item (kind `takes`). Details:
+  `cut/references/takes.md`. Tests: `join.py demo` (in demos.sh), `links.py demo`.
+- The editor can learn how you cut from a video you already edited by hand. Give it the raw take and
+  the version you posted (setup asks once, and start offers it when you say you edit by hand). The
+  taste skill's `learn.py` transcribes both, lines the words up and measures the pauses you leave,
+  the pauses you tighten, which take of a repeated line you keep, and the fillers you keep. It saves
+  what it measured often enough as your taste, with the counts in each rule: `cut.max_pause`, the new
+  `cut.keep_fillers` (retakes.py then proposes no filler cuts) and word rules for retakes. It also
+  lists the false cuts: words you kept that the default cut would remove. Test: `learn.py demo`,
+  `test_retakes.py`.
+- The read-through before a render is scored, not eyeballed. The new `cut-judge` agent grades the
+  paper edit against `cut/references/judge-rubric.md` (six checks: a mistake left in, a broken join,
+  a good take destroyed, a lost setup, a weak reason, an under-cut) and returns findings as JSON.
+  `judge_cut.py apply` turns them into `spans.json` edits by quote, never by timestamp, and the agent
+  loops until nothing is left to apply (3 rounds at most). A restored line is frozen so rounds cannot
+  argue. Takes over 5 minutes first get parallel readers (`read_cut.py`, one `cut-reader` agent per
+  ~180 s, then one verifier per proposed cut that argues to keep it): they catch a line re-said in
+  new words and a sentence stitched from two takes, which word matching misses. After approval,
+  `judge_cut.py score` records which judge changes the user reverted in
+  `$AI_EDITOR_HOME/judge-eval.jsonl`; below 60% precision over 5+ changes, `apply` only suggests.
+  clip-editor grades each clip the same way. Tests: `judge_cut.py demo`, `read_cut.py demo`.
+- A whole edit no longer waits for the cut's approval to start the visuals. When start runs the cut,
+  the new `visual-prep` agent starts in the background as the cut page opens: images, captions,
+  beats, visuals.json, captures and the face pass, on the first cut. It plans, renders and uploads
+  nothing, and the cut page stays the only thing handed over. A cut-first request made to the cut
+  skill alone starts nothing. Every prepared visual names a word and which time it is said, so a
+  re-cut after notes needs one command: `retakes.py remap` re-points each one to the new cut and
+  drops those whose word was cut. Test: `test_retakes.py`.
+- A join could cut into a word whose transcript time was wrong (numbers worst: a word that started
+  0.6 s before its label lost its first syllable to the lead-in cut). `build_timeline.py` now reads the
+  audio at every join and moves any that lands inside speech out to the nearest quiet frame, at most
+  0.6 s and never into a word the cut removes. It prints how many it moved and lists any it could not
+  fix (`splices_in_speech` in report.json). Skipped under a music bed, where word labels bound the
+  joins. Tests: `test_media.py` (a tone burst with a late label), `test_build_timeline.py`.
+- A keeper that starts with a stumble ("now, now one thing") passed every check. `verify_cut.py` now
+  lists each word or two-word pair said twice in a row in the render as `DOUBLED`, with its time and
+  the span that cuts the first one. Claude keeps the natural ones. Test: `verify_cut.py demo`.
+
+- YouTube chapters from the final cut. For a 16:9 video, style-edit step 9 offers chapters next to
+  the export. Claude picks the titles from the transcript; `chapters.py` times each one off
+  `cut.transcript.json` and checks YouTube's rules: first at 0:00, at least 3, each at least 10 s,
+  in order. Writes `edits/<name>/chapters.txt`, and `description.txt` with `--intro`. Test:
+  `chapters.py demo` (in demos.sh).
+- Hook check. When the user gave a title, `cut/scripts/hook_check.py` finds the second its key words
+  are first said in the cut and prints the first 10 s, so Claude can say when the opening misses the
+  promise. Cut step 6 runs it after approval. Test: `hook_check.py demo` (in demos.sh).
+- `check.py render` now checks motion on every frame of the whole picture, not only on each card. It
+  FAILs a one-frame flash (frame 0 too) and one or two black frames while the footage has picture, and
+  WARNs a one-frame jump that no cut, zoom or card change explains. Each names the time and the fix. A
+  fault the footage itself has is skipped. Test: `quality.py demo` (a clean clip passes; a white flash,
+  black frames and a jump are caught).
+- Every render now opens on a review page in the browser instead of a file path in the chat: the
+  cut, the styled edit, each clip and a product video. Play, scrub and leave a note at a moment (the
+  frame is saved, images can be pasted on), send the notes, and Claude fixes and renders the next
+  round on the same page, with its progress shown live. Approve moves on. Earlier rounds stay as
+  tabs; several videos in a round (every clip of a long video) are tabs you can compare side by
+  side. Notes save in `edits/<name>/review.json`. Stdlib only, Mac, Windows and Linux, the default
+  browser, 127.0.0.1 with a random token. The live preview before the render is unchanged.
+  `lib/ai_editor/review.py`, `style-edit/references/review.md`. Test: `review.py demo` (in demos.sh).
+
+- The Modal hedge tested on a real render. 45 s of the sample take (1,352 frames, 9 pieces, 3
+  containers) with piece 0 held in its container (`AI_EDITOR_MODAL_SLOW_PIECE=0:600`, test only, off by
+  default): a second copy started, finished first, and the held one was cancelled. 197 s against 189 s
+  with nothing held; $0.032 on the bill against $0.037. `check.py render` 0 FAIL. The render's saved
+  start-up read 124 s, because the second copy's container boots late on purpose. Start-up now counts
+  only first copies. Test: `modal_render.py demo`.
+- The Modal estimate counted the whole footage upload when Modal already held it (a re-render uploads
+  in 3-4 s). It now asks Modal by each file's hash and counts only what is missing, without sending
+  anything (about 1 s; every byte when Modal is not set up or does not answer). Test: `edit.py demo`.
+
 ## ai-editor 2.1.0, creator-teardown 2.4.0 (2026-10-08)
 
 - Setup times are now measured, not guessed. Six clean GitHub runs of the e2e job (2026-10-08) took

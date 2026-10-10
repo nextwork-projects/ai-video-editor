@@ -34,6 +34,9 @@ The mechanical jobs this does so nobody types a timestamp:
      parts (pad after one word + pad before the next) add up past it on their own.
   4. Frames. Boundaries are quantized to frames: start floored, end ceiled, and
      the end clamped so it never reaches into the next kept word's frame.
+  5. Splices against the audio. Word times can be wrong (numbers worst: one started
+     0.6 s late and a pause cut took "a hun-"). Any kept edge with speech on both
+     sides moves out to the nearest quiet frame, never into a removed word.
 
 Pause target: --max-pause (default 0.15 s), tightened to two thirds of it (0.10 s).
 Exit codes: 0 ok, 1 error
@@ -254,7 +257,16 @@ def fit_labels(toks, lvl, noise_db):
             continue
         est = plausible_s(w["text"])
         nxt = next((t["start"] for t in toks[i + 1:] if t.get("type") in ("word", "audio_event")), w["end"] + est)
-        a = audible_start(lvl, noise_db, w["start"], min(nxt, w["end"] + est)) if lvl else None
+        s = w["start"]
+        k = int(s / RMS_WIN_S)
+        if lvl and 0 < k < len(lvl) and lvl[k - 1] > noise_db:
+            # the previous word is still sounding at the label start: its tail is not this word.
+            # Search from the silence after that tail; with no silence inside the label, keep the label start.
+            while k < len(lvl) and lvl[k] > noise_db and k * RMS_WIN_S < w["end"]:
+                k += 1
+            if k * RMS_WIN_S < w["end"]:
+                s = k * RMS_WIN_S
+        a = audible_start(lvl, noise_db, s, min(nxt, w["end"] + est)) if lvl else None
         if a is None:
             out[i] = (w["start"], round(w["start"] + est, 3))
             continue
@@ -291,7 +303,7 @@ def load_fitted(d):
     words.json and verify_cut.py all judge, so the three agree."""
     toks = load_words(Path(d) / "words.raw.json")
     rep = Path(d) / "report.json"
-    labels = json.loads(rep.read_text()).get("labels", {}) if rep.exists() else {}
+    labels = json.loads(rep.read_text(encoding="utf-8")).get("labels", {}) if rep.exists() else {}
     return apply_labels(toks, {int(k): v for k, v in labels.items()})
 
 
@@ -497,12 +509,65 @@ def kept_frames(cuts, fps, dur, total=None):
         if b <= a:
             continue
         # A sliver between two cuts is the tail of a flub the transcriber mislabelled, not a word.
-        if a > cursor and (not kept and cursor == 0 or a - cursor >= MIN_KEPT_S * fps):
+        # At the head of the take it is a one-frame flash before the first jump.
+        if a - cursor >= MIN_KEPT_S * fps:
             kept.append([cursor, a])
         cursor = b
     if cursor < total:
         kept.append([cursor, total])
     return kept
+
+
+# --- 6. splices against the audio ---------------------------------------------
+SPLICE_REACH_S = 0.6     # how far an edge may move to find a quiet frame
+LOUD_OVER_DB = 10.0      # speech: this far over the silence threshold
+
+
+def in_speech(lvl, t, quiet_db):
+    """The 20 ms windows just before and just after t are both speech."""
+    w = int(t / RMS_WIN_S)
+    return 0 < w < len(lvl) and min(lvl[w - 1], lvl[w]) > quiet_db + LOUD_OVER_DB
+
+
+def fix_splices(frames, fps, lvl, quiet_db, total, removed=()):
+    """Move each kept edge that lands inside speech out into its removed side, to the first frame
+    with a quiet window next to it (at most SPLICE_REACH_S, never into a removed word's label).
+    removed: [(start, end)] of the words the cut removes on purpose. total: the source's frame count.
+    Returns (frames, moved [(old_s, new_s)], left [edge_s]): left are edges no quiet frame could fix."""
+    frames = [list(f) for f in frames]
+    reach = int(SPLICE_REACH_S * fps)
+
+    def quiet(g):
+        w = int(g / fps / RMS_WIN_S)
+        return min(lvl[max(0, w - 1):w + 1] or [0.0]) <= quiet_db
+
+    moved, left = [], []
+    for k, fr in enumerate(frames):
+        for side in (0, 1):    # 0: the keep's start (walk back), 1: its end (walk on)
+            f = fr[side]
+            t = f / fps
+            if f == (0 if side == 0 else total) or not in_speech(lvl, t, quiet_db):
+                continue
+            if side == 0:
+                lo = max([frames[k - 1][1] if k else 0, f - reach]
+                         + [math.ceil(min(e, t) * fps) for s, e in removed if s < t])
+                to = next((g for g in range(f, lo - 1, -1) if quiet(g)), None)
+            else:
+                hi = min([frames[k + 1][0] if k + 1 < len(frames) else total, f + reach]
+                         + [math.floor(max(s, t) * fps) for s, e in removed if e > t])
+                to = next((g for g in range(f, hi + 1) if quiet(g)), None)
+            if to is None:
+                left.append(round(t, 2))
+            else:
+                fr[side] = to
+                moved.append((round(t, 2), round(to / fps, 2)))
+    out = []
+    for fr in frames:   # an edge moved up to its neighbour joins the two
+        if out and fr[0] <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], fr[1])
+        else:
+            out.append(fr)
+    return out, moved, left
 
 
 def lead_first(frames, a, b):
@@ -557,7 +622,7 @@ def main():
     if not any(t["type"] == "word" for t in toks):
         sys.exit("ERROR: transcript has no words")
     sp = d / "spans.json"
-    spans_in = json.loads(sp.read_text()) if sp.exists() else []
+    spans_in = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else []
     resolve_spans(spans_in, toks)   # a bad quote fails before the audio is read
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -604,9 +669,13 @@ def main():
         last = max(w["end"] for w in kept_words)
         allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
     frames = kept_frames(allcuts, fps, dur, nframes)
+    moved, left = [], []
+    if splice_noise is not None:
+        removed = [(w["start"], w["end"]) for w in words if covered_by(w, model_cuts)]
+        frames, moved, left = fix_splices(frames, fps, lvl, noise, nframes, removed)
     lead = d / "lead.json"
     if lead.exists():   # split halfway into the pauses either side, so no word is halved
-        lc = resolve_spans([{**json.loads(lead.read_text()), "kind": "alt_hook"}], toks)[0]
+        lc = resolve_spans([{**json.loads(lead.read_text(encoding="utf-8")), "kind": "alt_hook"}], toks)[0]
         before = max([t["end"] for t in toks if t["end"] <= lc["start"]], default=0.0)
         after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
         frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
@@ -621,6 +690,10 @@ def main():
     print(f"result     {final:.2f}s  ({dur - final:.2f}s removed, {len(spans)} kept spans)")
     if gaps:
         print(f"splices    median {gaps[len(gaps) // 2]:.3f}s  max {gaps[-1]:.3f}s")
+    if splice_noise is not None:
+        print(f"speech     {len(moved)} join(s) moved off speech to a quiet frame"
+              + "".join(f" ({a:.2f}->{b:.2f}s)" for a, b in moved[:5]) + f"; {len(left)} still in speech"
+              + (": " + ", ".join(f"{t:.2f}s" for t in left[:8]) + " (listen to these joins)" if left else ""))
     for c in model_cuts:
         flag = "  <- LOW CONFIDENCE" if c["confidence"] == "low" else ""
         print(f"  CUT {c['start']:7.2f}-{c['end']:7.2f} [{c['kind']:<11}] {c['evidence'][:60]!r}{flag}")
@@ -632,13 +705,13 @@ def main():
         c.pop("_next", None)
         if c["end"] == math.inf:
             c["end"] = dur
-    (d / "decisions.json").write_text(json.dumps(spans, indent=1))
+    (d / "decisions.json").write_text(json.dumps(spans, indent=1), encoding="utf-8")
     (d / "report.json").write_text(json.dumps(
         {"source": str(Path(a.source).resolve()), "fps": fps, "duration": dur, "final_s": final,
          "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts,
-         "labels": {str(i): v for i, v in labels.items()}},
-        indent=1))
-    (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1))
+         "labels": {str(i): v for i, v in labels.items()}, "splices_in_speech": left},
+        indent=1), encoding="utf-8")
+    (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1), encoding="utf-8")
     import preview_cut
     preview_cut.write_all(d, toks, model_cuts, spans, dur, final)
     for f in ("decisions.json", "report.json", "words.json", "paper-edit.md", "cut-check.html"):

@@ -32,13 +32,14 @@ Files in ~/.ai-video-editor/ (AI_EDITOR_HOME overrides; outside the plugin, so u
               "applied_in": [edit names], "since_fix", "regressions": [{"edit", "at"}]}]
   suggestions.jsonl  corrections the user said would help everyone: {"at", "what", "rule", "owner", "example"}
 
-How a rule is applied: plan.py and build_timeline.py call load_json() (their only hook). It returns
+How a rule is applied: plan.py, build_timeline.py and retakes.py call load_json() (their only hook). It returns
 taste.json plus the "this video only" settings of the edit being worked on, and counts every setting
 rule it hands over as applied to that edit. Word rules are counted by `show --edit`.
 Stdlib only. Exit codes: 0 ok, 1 error, 2 usage
 """
 import datetime
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -73,12 +74,12 @@ def now():
 def read_json():
     """taste.json as it is on disk. No counting: for the CLI and for writes."""
     p = json_path()
-    return json.loads(p.read_text()) if p.exists() else {}
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
 def save_json(data):
     HOME.mkdir(parents=True, exist_ok=True)
-    json_path().write_text(json.dumps(data, indent=1))
+    json_path().write_text(json.dumps(data, indent=1), encoding="utf-8")
 
 
 def load_md():
@@ -86,7 +87,7 @@ def load_md():
     out = {s: [] for s in SECTIONS}
     cur = None
     p = md_path()
-    for line in (p.read_text().splitlines() if p.exists() else []):
+    for line in (p.read_text(encoding="utf-8").splitlines() if p.exists() else []):
         if line.startswith("## "):
             cur = line[3:].strip().title()
             out.setdefault(cur, [])
@@ -101,7 +102,7 @@ def save_md(md):
              "Rules I've given the AI video editor. It reads this before every edit.", ""]
     for s, rules in md.items():
         lines += [f"## {s}", ""] + [f"- {r}" for r in rules] + [""]
-    md_path().write_text("\n".join(lines))
+    md_path().write_text("\n".join(lines), encoding="utf-8")
 
 
 def similar(a, b):
@@ -175,7 +176,7 @@ def load_rules():
     """rules.json. Before the first one, taste.md's bullets are the rules (every video, never applied)."""
     p = rules_path()
     if p.exists():
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     md = [(s, r) for s, rs in load_md().items() for r in rs]
     return [new_rule(i, s, r, None, None, "all") for i, (s, r) in enumerate(md, 1)]
 
@@ -183,7 +184,7 @@ def load_rules():
 def save_rules(rules):
     HOME.mkdir(parents=True, exist_ok=True)
     tmp = rules_path().with_suffix(".tmp")
-    tmp.write_text(json.dumps(rules, indent=1))
+    tmp.write_text(json.dumps(rules, indent=1), encoding="utf-8")
     tmp.replace(rules_path())   # a crash mid-write never leaves half a file
 
 
@@ -203,9 +204,10 @@ def find(rules, section, rule, setting, scope):
     return None
 
 
-def add(section, rule, setting=None, value=None, scope="all", edit=None):
+def add(section, rule, setting=None, value=None, scope="all", edit=None, source=None):
     """Capture one correction. Returns (status, rule): 'added', 'updated', or 'regression' (the rule
-    was applied at least once since it was last corrected, and the user had to say it again)."""
+    was applied at least once since it was last corrected, and the user had to say it again).
+    source="review": it came from a review-page note (review.py learn); report says so."""
     section = section.strip().title()
     edit = edit_name(edit)
     rules = load_rules()
@@ -226,6 +228,8 @@ def add(section, rule, setting=None, value=None, scope="all", edit=None):
         if setting:
             r.update(setting=setting, value=value)
     r["corrections"].append({"edit": edit, "at": now(), "rule": rule, "value": value})
+    if source:
+        r["from"] = source
     r["since_fix"] = 0
     if scope == "all":
         add_rule(section, rule)
@@ -270,14 +274,15 @@ def guess_edit(argv):
 
 
 # Which settings each caller acts on, so a plan.py run does not count the cut's pause rule.
-CALLERS = {"build_timeline.py": lambda k: k.startswith("cut."),
+CALLERS = {"build_timeline.py": lambda k: k == "cut.max_pause", "retakes.py": lambda k: k == "cut.keep_fillers",
            "plan.py": lambda k: not k.startswith("cut.")}
 
 
 def load_json(edit_dir=None, count=True):
     """THE HOOK. What plan.py and build_timeline.py read: taste.json, plus the "this video only"
     settings of the edit being worked on (found from the script's arguments when not passed).
-    Counts each setting rule it hands over as applied to that edit."""
+    Counts each setting rule it hands over as applied to that edit, except on a --dry-run (nothing is
+    built, so nothing was applied, and the next correction would wrongly read as a regression)."""
     data = read_json()
     if not rules_path().exists():
         return data
@@ -288,7 +293,7 @@ def load_json(edit_dir=None, count=True):
     for r in mine:
         if r["scope"] != "all":
             data = set_key(data, r["setting"], r["value"])
-    if count:
+    if count and "--dry-run" not in sys.argv[1:]:
         # ponytail: caller found by script name; give load_json a key filter if a third caller appears
         acts = CALLERS.get(Path(sys.argv[0]).name, lambda k: True)
         ids = {r["id"] for r in mine if acts(r["setting"])}
@@ -300,7 +305,7 @@ def load_json(edit_dir=None, count=True):
 def show(edit=None):
     """taste.md and taste.json; with an edit, also that video's own rules, and the word rules count
     as applied to it (Claude follows them in that edit)."""
-    out = [md_path().read_text() if md_path().exists() else "(no taste.md yet)", json.dumps(read_json(), indent=1)]
+    out = [md_path().read_text(encoding="utf-8") if md_path().exists() else "(no taste.md yet)", json.dumps(read_json(), indent=1)]
     name = edit_name(edit)
     if name and (rules_path().exists() or md_path().exists()):
         rules = load_rules()
@@ -320,7 +325,8 @@ def report():
     lines = []
     for r in sorted(rules, key=order):
         setting = f"  [{r['setting']} = {json.dumps(r['value'])}]" if r.get("setting") else ""
-        scope = "every video" if r["scope"] == "all" else r["scope"].replace("video:", "only ")
+        scope = ("every video" if r["scope"] == "all" else r["scope"].replace("video:", "only ")) + (
+            ", from a review note" if r.get("from") == "review" else "")
         reg = r["regressions"][-1] if r["regressions"] else None
         lines.append(f"#{r['id']} {r['section']}: {r['rule']}{setting}")
         lines.append(f"    {scope}. applied {r['applied']}x in {len(r['applied_in'])} edit(s), "
@@ -330,6 +336,9 @@ def report():
     regs = [r for r in rules if r["regressions"]]
     lines += ["", f"{len(rules)} rules, {sum(r['applied'] for r in rules)} applications, "
                   f"{len(regs)} said twice after being applied" + (": " + ", ".join(f"#{r['id']}" for r in regs) if regs else ".")]
+    rev = [r for r in rules if r.get("from") == "review"]
+    if rev:
+        lines.append(f"{len(rev)} came from review-page notes: " + ", ".join(f"#{r['id']}" for r in rev))
     return "\n".join(lines)
 
 
@@ -346,7 +355,7 @@ def profile_names():
     """Every name, domain and creator handle in the user's profile (profile.py's file), longest first."""
     p = HOME / "profile.json"
     try:
-        prof = json.loads(p.read_text()) if p.exists() else {}
+        prof = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     except (OSError, ValueError):
         prof = {}
     out = []
@@ -374,20 +383,28 @@ def suggestions_path():
     return HOME / "suggestions.jsonl"
 
 
-def suggest(what, rule, owner, example=""):
-    """A correction the user said would help everyone, as a general rule for the maintainers."""
+def note_key(note):
+    """A review note's "<edit>#<id>" as a short hash: matches across files, carries no name."""
+    return hashlib.sha256(note.encode()).hexdigest()[:12]
+
+
+def suggest(what, rule, owner, example="", note=None):
+    """A correction the user said would help everyone, as a general rule for the maintainers.
+    note: "<edit>#<id>" of the review note it came from, kept only as note_key(), so improve counts it once."""
     names = profile_names()
     row = {"at": now(), **{k: scrub(v, names) for k, v in
                            {"what": what, "rule": rule, "owner": owner, "example": example}.items()}}
+    if note:
+        row["note"] = note_key(note)
     HOME.mkdir(parents=True, exist_ok=True)
-    with open(suggestions_path(), "a") as f:
+    with open(suggestions_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
     return row
 
 
 def issue(yes=False):
     """The latest suggestion as a GitHub issue. Shows it unless yes; opens it with gh only when gh is logged in."""
-    rows = [json.loads(x) for x in suggestions_path().read_text().splitlines() if x.strip()] if suggestions_path().exists() else []
+    rows = [json.loads(x) for x in suggestions_path().read_text(encoding="utf-8").splitlines() if x.strip()] if suggestions_path().exists() else []
     if not rows:
         return "No suggestions yet."
     r = rows[-1]
@@ -436,6 +453,9 @@ def demo():
         rs = {x["setting"]: x for x in load_rules() if x.get("setting")}
         assert rs["captions.size_pct"]["applied"] == 1 and rs["captions.size_pct"]["applied_in"] == ["vid-a"]
         assert rs["cut.max_pause"]["applied"] == 0
+        sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed), "--dry-run"]
+        load_json()     # a dry run builds nothing: not applied
+        assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 0}
         sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed)]
         load_json()
         assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 1}
@@ -470,7 +490,7 @@ def demo():
         assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** style-edit quality.py" in issue()
         # the profile's names, their domains and the creators' handles, and any bare domain, never leave
         (HOME / "profile.json").write_text(json.dumps({"names": ["Example Product", {"name": "Example Tool",
-                                                       "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}))
+                                                       "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}), encoding="utf-8")
         r = suggest("Example Product logo too big, like example-creator does", "Logos under the caption", "plan.py",
                     "example tool on example.com and example.org, see style.json")
         assert "Example" not in json.dumps(r) and "example-creator" not in r["what"], r

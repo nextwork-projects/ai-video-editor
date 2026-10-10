@@ -21,7 +21,7 @@ Read a skill's `SKILL.md` in full before doing its task.
 | `setup` | `plugins/ai-editor/skills/setup/` | "set up the editor", or a tool is missing |
 | `cut` | `plugins/ai-editor/skills/cut/` | "cut my video", "remove my mistakes" |
 | `style-edit` | `plugins/ai-editor/skills/style-edit/` | "style it", "add captions and zooms", "render the edit" |
-| `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms" |
+| `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms"; "learn from my edit" (a raw take and the posted cut) |
 | `product-video` | `plugins/ai-editor/skills/product-video/` | "make a launch video for <url>", "product video of my site", pastes a website |
 | `clips` | `plugins/ai-editor/skills/clips/` | "clip this video", "make shorts from my podcast", drops a long video or YouTube link |
 | `improve` | `plugins/ai-editor/skills/improve/` | maintainers: "improve the editor", "turn feedback into fixes", "process suggestions" |
@@ -29,7 +29,8 @@ Read a skill's `SKILL.md` in full before doing its task.
 
 Order: `start` asks a few questions once, then runs setup, creator-teardown, cut and style-edit in order.
 `creator-teardown` measures a creator, `cut` cleans the user's take, `style-edit` renders
-it in that creator's style. `taste` runs whenever the user corrects an edit; a correction the user says would help everyone goes to
+it in that creator's style. Every render (cut, edit, clip, product video) is handed over on the review page
+(`plugins/ai-editor/lib/ai_editor/review.py`): the user leaves notes at moments, Claude fixes and re-renders. `taste` runs whenever the user corrects an edit; a correction the user says would help everyone goes to
 `~/.ai-video-editor/suggestions.jsonl` (and, if they agree, a GitHub issue), which `improve` turns into fixes here.
 `product-video` stands alone: a URL in, a product video out (no footage, no creator).
 

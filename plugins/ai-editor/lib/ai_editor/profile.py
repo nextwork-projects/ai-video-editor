@@ -6,6 +6,8 @@
     python3 profile.py set <key.path>=<value> ...  several answers in one call, one line out;
                                                   each value parsed as JSON if it can be
     python3 profile.py set <key.path> <value>     one answer (the older form)
+    python3 profile.py defaults                   "use the defaults": every unanswered style question saved as its
+                                                  default, so `missing --style` stops asking them
     python3 profile.py style <edits/NAME> [--out]  blend the profile's creators into edits/NAME/style.json
                                                   (no creators: the default style, DEFAULT_STYLE)
     python3 profile.py demo                       self-check
@@ -22,7 +24,8 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "captions": {"on": true, "style": "creator"},     style: creator | bold | karaoke | minimal
    "sound": {"sfx": true, "music": false},
    "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
-   "cloud_cleanup": true}                              delete uploaded footage from GitHub / S3 after a cloud render
+   "cloud_cleanup": true,                              delete uploaded footage from GitHub / S3 after a cloud render
+   "past_edit": true}                                  learned from a raw take and their posted cut (taste learn.py); false: declined
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
 `editorial` preset. No creator: DEFAULT_STYLE (style-edit references/plan.md "No creator"). Stdlib only.
@@ -38,13 +41,15 @@ from pathlib import Path
 
 HOME = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor"))
 # Style questions are asked once, at setup. Video questions belong to each video, asked by start.
-STYLE_QUESTIONS = ("platform", "creators", "liked_videos", "brand", "assets_dir", "avoid", "captions", "sound", "behind")
+STYLE_QUESTIONS = ("platform", "creators", "liked_videos", "brand", "assets_dir", "avoid", "captions", "sound", "behind",
+                   "past_edit")
 VIDEO_QUESTIONS = ("audience", "names")
 QUESTIONS = STYLE_QUESTIONS + VIDEO_QUESTIONS
 DEFAULTS = {"platform": "tiktok", "aspect": "9:16", "creators": [], "liked_videos": [], "brand": {"use_creator": True},
             "assets_dir": "", "names": [], "avoid": {"emoji": True, "stock": True, "icons": True, "colors": []},
             "captions": {"on": True, "style": "creator"}, "sound": {"sfx": True, "music": False},
-            "behind": False}   # unanswered: off, so no plan needs the cutout step until the user says yes
+            "behind": False,   # unanswered: off, so no plan needs the cutout step until the user says yes
+            "past_edit": False}
 ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "youtube": "16:9"}
 # Fonts every AI tool reaches for, and the default geometric / neo grotesks that read as AI-made as a
 # heading. Swapped for the preset's face unless the user's brand names them.
@@ -65,20 +70,29 @@ def path():
 
 def load():
     p = path()
-    return {**DEFAULTS, **(json.loads(p.read_text()) if p.exists() else {})}
+    return {**DEFAULTS, **(json.loads(p.read_text(encoding="utf-8")) if p.exists() else {})}
 
 
 def save(prof):
     HOME.mkdir(parents=True, exist_ok=True)
     raw = dict(prof)   # only what was answered: missing() reads the file
     raw["aspect"] = ASPECT.get(raw.get("platform"), raw.get("aspect", "9:16"))
-    path().write_text(json.dumps(raw, indent=1))
+    path().write_text(json.dumps(raw, indent=1), encoding="utf-8")
     return path()
+
+
+def save_defaults():
+    """Every unanswered style question saved as its default: the answer "use the defaults" (or a style step
+    finished on the recommended options) is an answer, so start never asks it again. Video questions stay."""
+    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
+    new = [q for q in STYLE_QUESTIONS if q not in have]
+    save({**have, **{q: DEFAULTS[q] for q in new}})
+    return new
 
 
 def missing(group=QUESTIONS):
     """The intake questions in `group` with no saved answer yet."""
-    have = json.loads(path().read_text()) if path().exists() else {}
+    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
     return [q for q in group if q not in have]
 
 
@@ -198,20 +212,20 @@ def resolve_look(style, prof=None, warn=print):
 
 
 # ---------- no creator: the default style ----------
-# The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Motion"): the smooth
-# personality, punch zooms the renderer eases (0.16 s power2.out, never a one-frame snap), captions the footage
-# decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor was
-# built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
-# creator teardown): punch zooms in all three, scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 a minute; median shot 2.4 /
-# 2.4 / 3.98 s; 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three.
+# The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Smooth before varied"):
+# the smooth personality, push zooms eased 0.8 s each way on sine.inOut (a camera move, never a step), captions the
+# footage decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor
+# was built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
+# creator teardown): scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 zooms a minute; median shot 2.4 / 2.4 / 3.98 s;
+# 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three. The three measured
+# punch zooms; the default pushes, because check.py render judges a punch by its one-frame travel.
 # max_hold_s: a sentence longer than this still gets a zoom change (plan.py place_zooms), so nothing holds still
-# past check.py's 6 s. A push (eased over 0.8 s) was tried first: on a talking head the render check reads the
-# speaker's own movement during a slow 1.12 push as a surge (6 WARNs on the sample take).
+# past check.py's 6 s.
 DEFAULT_STYLE = {
     "handle": "default",
     "pace": {"median_shot_s": 2.4, "max_pause_s": 0.25},
     "motion": "smooth",
-    "zoom": {"per_min": 9.5, "kind": "punch", "scale": 1.18, "duration_s": 0.0, "on": "sentence_start", "max_hold_s": 5.0},
+    "zoom": {"per_min": 9.5, "kind": "push", "scale": 1.18, "duration_s": 0.8, "on": "sentence_start", "max_hold_s": 5.0},
     "captions": {"present": True, "words_per_caption": 3, "y_pct": 66, "size_pct": 5.5, "case": "lower",
                  "weight": 800, "color": "#FFFFFF", "stroke": False, "box": False, "animation": "pop"},
 }
@@ -287,7 +301,7 @@ def write_style(edit_dir, root=Path("."), out=None):
     for c in prof.get("creators") or []:
         p = Path(root) / "creator-teardowns" / c["handle"] / "style.json"
         if p.exists():
-            styles[c["handle"]] = json.loads(p.read_text())
+            styles[c["handle"]] = json.loads(p.read_text(encoding="utf-8"))
         else:
             print(f"warning: no {p}; run creator-teardown on @{c['handle']} first", file=sys.stderr)
     if not prof.get("creators"):
@@ -297,11 +311,11 @@ def write_style(edit_dir, root=Path("."), out=None):
     else:
         style = blend(styles, prof["creators"], prof)
     clip = Path(edit_dir) / "clip.json"
-    if clip.exists() and json.loads(clip.read_text()).get("audio_only"):   # a podcast clip: the words are the picture
+    if clip.exists() and json.loads(clip.read_text(encoding="utf-8")).get("audio_only"):   # a podcast clip: the words are the picture
         style["captions"] = {**style.get("captions", {}), "present": True}
     out = Path(out or Path(edit_dir) / "style.json")
     out.parent.mkdir(parents=True, exist_ok=True)   # start writes the style before cut makes edits/<name>/
-    out.write_text(json.dumps(style, indent=1))
+    out.write_text(json.dumps(style, indent=1), encoding="utf-8")
     return out, style
 
 
@@ -327,14 +341,23 @@ def demo():
         assert missing() == list(QUESTIONS) and missing(VIDEO_QUESTIONS) == ["audience", "names"]
         save({"platform": "youtube", "creators": [{"handle": "a"}]})
         assert load()["aspect"] == "16:9" and "creators" not in missing() and "audience" in missing()
+        # the real-footage test: setup finished on "use the defaults", which saved nothing, so start's
+        # `missing --style` printed all 10 style ids and asked them again. Defaults are saved as answers
+        assert save_defaults() == [q for q in STYLE_QUESTIONS if q not in ("platform", "creators")]
+        assert missing(STYLE_QUESTIONS) == [] and missing(VIDEO_QUESTIONS) == ["audience", "names"]
+        assert load()["platform"] == "youtube" and load()["creators"] == [{"handle": "a"}], "answers kept"
+        assert save_defaults() == [] and all(q in DEFAULTS for q in STYLE_QUESTIONS)
         # no creators (the recommended answer): the default style is written, never an exit
         save({"creators": [], "captions": {"style": "karaoke"}})
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
-        assert json.loads(out.read_text())["handle"] == "default"
+        assert json.loads(out.read_text(encoding="utf-8"))["handle"] == "default"
+        # the recommended path passes the editor's own smoothness check: a push eased at least 0.8 s (check.py
+        # PUSH_MIN_S), never a punch of 0.0 s that the render check reads as a one-frame snap
+        assert st["zoom"]["kind"] == "push" and st["zoom"]["duration_s"] >= 0.8, st["zoom"]
         # captions off in the profile, but an audio-only podcast clip keeps them: its words are the picture
         save({"captions": {"on": False}})
-        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}))
+        (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}), encoding="utf-8")
         assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is True
         (Path(d) / "clip.json").unlink()
         assert write_style(d, out=Path(d) / "style.json")[1]["captions"]["present"] is False
@@ -376,12 +399,12 @@ def demo():
         r = subprocess.run([sys.executable, __file__, "set", "platform=youtube", "sound.music=false",
                             'names=["Jev"]', "brand.url=https://x.io/?a=b"], capture_output=True, text=True, env=env)
         assert r.returncode == 0 and r.stdout.count("\n") == 1, (r.stdout, r.stderr)
-        got = json.loads((Path(d) / "profile.json").read_text())
+        got = json.loads((Path(d) / "profile.json").read_text(encoding="utf-8"))
         assert got["platform"] == "youtube" and got["sound"] == {"music": False} and got["names"] == ["Jev"], got
         assert got["brand"]["url"] == "https://x.io/?a=b", got
         r = subprocess.run([sys.executable, __file__, "set", "audience", "builders"], capture_output=True,
                            text=True, env=env)
-        assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text())["audience"] == "builders"
+        assert r.returncode == 0 and json.loads((Path(d) / "profile.json").read_text(encoding="utf-8"))["audience"] == "builders"
         # the two forms mixed: the message names the argument that is not key=value
         r = subprocess.run([sys.executable, __file__, "set", "goal", "follow", "platform=youtube"], capture_output=True,
                            text=True, env=env)
@@ -398,18 +421,21 @@ def main():
     elif a and a[0] == "missing":
         group = {"--style": STYLE_QUESTIONS, "--video": VIDEO_QUESTIONS}.get(a[1] if len(a) > 1 else "", QUESTIONS)
         print("\n".join(missing(group)) or "(all answered)")
+    elif a == ["defaults"]:
+        new = save_defaults()
+        print(f"saved the defaults for {', '.join(new)} -> {path()}" if new else "(all style questions answered)")
     elif len(a) >= 2 and a[0] == "set":
         pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
         bad = [x for x, p in zip(a[1:], pairs) if len(p) != 2 or not p[0]]
         if bad:
             sys.exit(f"profile.py set: {bad[0]!r} is not key=value. Write every answer as key=value "
                      "(the `set key value` form takes one answer alone)")
-        prof = set_pairs(json.loads(path().read_text()) if path().exists() else {}, pairs)
+        prof = set_pairs(json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}, pairs)
         print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
         print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else
-                                              "no creator: the default style (smooth zooms about every 6 s, 3-word captions)"))
+                                              "no creator: the default style (smooth zooms, a move at least every 5 s, 3-word captions)"))
     else:
         print(__doc__)
         sys.exit(2)

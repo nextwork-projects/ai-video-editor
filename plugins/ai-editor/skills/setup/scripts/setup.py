@@ -147,7 +147,7 @@ def installed():
 
 def env_load():
     try:
-        return json.loads(ENV.read_text())
+        return json.loads(ENV.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -158,13 +158,13 @@ def env_save(**kv):
     new = {**old, **kv}
     if new != old:
         HOME.mkdir(parents=True, exist_ok=True)
-        ENV.write_text(json.dumps(new, indent=1, sort_keys=True) + "\n")
+        ENV.write_text(json.dumps(new, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def npm_version(name):
     """The version npm ci installs for a package, from the shipped package-lock.json."""
     try:
-        return json.loads(NPM_LOCK.read_text())["packages"][f"node_modules/{name}"]["version"]
+        return json.loads(NPM_LOCK.read_text(encoding="utf-8"))["packages"][f"node_modules/{name}"]["version"]
     except (OSError, ValueError, KeyError):
         return None
 
@@ -214,7 +214,7 @@ def adopt(env, have, remotion_have):
 
 def remotion_installed():
     try:
-        return json.loads((REMOTION_HOME / "node_modules" / "remotion" / "package.json").read_text())["version"]
+        return json.loads((REMOTION_HOME / "node_modules" / "remotion" / "package.json").read_text(encoding="utf-8"))["version"]
     except (OSError, ValueError, KeyError):
         return None
 
@@ -366,7 +366,7 @@ LATER = HOME / "later.json"   # steps the user chose to do later; doctor reminds
 
 def later_load():
     try:
-        return json.loads(LATER.read_text())
+        return json.loads(LATER.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
 
@@ -392,7 +392,7 @@ def later(name):
         return 2
     items = [x for x in later_load() if x != name] + [name]
     HOME.mkdir(parents=True, exist_ok=True)
-    LATER.write_text(json.dumps(items))
+    LATER.write_text(json.dumps(items), encoding="utf-8")
     print(f"Saved for later: {name}. Say \"finish setup\" any time to add it.")
     return 0
 
@@ -495,7 +495,7 @@ def doctor_quiet():
 def pip_optional(name):
     """Install an optional extra at its pin, holding every recorded package where it is."""
     cons = HOME / "constraints.txt"
-    cons.write_text("".join(f"{k}=={v}\n" for k, v in sorted(env_load().get("python_packages", {}).items())))
+    cons.write_text("".join(f"{k}=={v}\n" for k, v in sorted(env_load().get("python_packages", {}).items())), encoding="utf-8")
     subprocess.run([str(VPY), "-m", "pip", "install", "-q", "-c", str(cons), OPTIONAL[name]], check=True)
 
 
@@ -638,7 +638,7 @@ def check_lambda():
     if not f.exists():
         sys.exit("No AWS keys yet. Run: setup.py awskey")
     env = dict(os.environ)
-    for line in f.read_text().splitlines():
+    for line in f.read_text(encoding="utf-8").splitlines():
         k, _, v = line.partition("=")
         if v:
             env[k] = v
@@ -743,9 +743,10 @@ def demo():
     assert names[:3] == ["python", "ffmpeg", "node"], names
     global HOME, LATER
     import tempfile
-    keep = HOME, LATER
+    keep = HOME, LATER, profile.HOME
     with tempfile.TemporaryDirectory() as d:
         HOME, LATER = Path(d), Path(d) / "later.json"
+        profile.HOME = Path(d)       # a home whose profile has every style answer marks style done
         later("style"); later("style")
         assert later_load() == ["style"] and "style" in still_later()
         assert later("bogus") == 2 and later_load() == ["style"]   # an unknown step is refused, not saved
@@ -754,7 +755,7 @@ def demo():
         "typesafe", "gemini", "elevenlabs", "style", "modal", "matte"]
     assert todo({x: (lambda x=x: x != "gemini") for x in STEPS}) == ["gemini"]
     assert set(step_done()) == set(STEPS)
-    HOME, LATER = keep
+    HOME, LATER, profile.HOME = keep
     # Saved logins: one row each, with its age and the logout offer; a folder with no profile is not one
     with tempfile.TemporaryDirectory() as d:
         for name in ("example.com", "app.other.org"):
@@ -785,10 +786,10 @@ def demo():
     assert ffmpeg_version("ffmpeg version n7.0.2") >= FFMPEG_MIN
     assert ffmpeg_version("ffmpeg version N-118000-gabc") >= FFMPEG_MIN and ffmpeg_version(None) == (0, 0)
     # The lock pins every package to one version with hashes; opencv-python never sneaks in.
-    lines = [x for x in LOCK.read_text().splitlines() if x and not x.startswith((" ", "#"))]
+    lines = [x for x in LOCK.read_text(encoding="utf-8").splitlines() if x and not x.startswith((" ", "#"))]
     assert lines and all("==" in x and x.endswith("\\") for x in lines), lines[:3]
     assert not any(x.startswith("opencv-python==") for x in lines)
-    assert npm_version("remotion") == json.loads((REMOTION_SRC / "package.json").read_text())["dependencies"]["remotion"]
+    assert npm_version("remotion") == json.loads((REMOTION_SRC / "package.json").read_text(encoding="utf-8"))["dependencies"]["remotion"]
     # Drift from the pins, fed a made-up env.json: each kind is caught, a clean match is not.
     good = {"python_lock": file_sha(LOCK), "python_packages": {"numpy": "2.5.3", "yt-dlp": "2026.8.19"},
             "node_lock": file_sha(NPM_LOCK), "models": {"yunet.onnx": models.PINS["yunet.onnx"][1]}}

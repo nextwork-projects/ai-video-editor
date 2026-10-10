@@ -9,7 +9,8 @@
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
-Kinds: own (the user's footage: cut + style-edit), creator (creator-teardown), long (clips),
+Kinds: own (the user's footage: cut + style-edit), takes (several own files joined into one video, then cut),
+creator (creator-teardown), long (clips),
 product (product-video), music (the music question with rights), video (a single video whose
 kind depends on its length and whose it is: `decide`), ask (one question in the question box),
 unsupported (a sentence to say to the user).
@@ -54,9 +55,11 @@ SLOW = ("yt-dlp did not finish in {} minutes on that link. Paste one video's own
         "channel or podcast feed), or download the file in the browser and give me its path.")
 LOOKUP = "https://itunes.apple.com/lookup?id="
 TEARDOWN_PLATFORMS = ("tiktok", "youtube", "instagram")  # what creator-teardown's fetch.py lists
-ORDER = ("ask", "creator", "own", "video", "long", "product", "music", "unsupported")
+ORDER = ("ask", "creator", "takes", "own", "video", "long", "product", "music", "unsupported")
 ACTION = {
     "own": "fetch into the edit folder, then cut + style-edit",
+    "own-local": "cut it where it is (never copied; the cut skill reads the path), then style-edit",
+    "takes": "join the files in order into edits/<name>/joined.mp4 (cut/references/takes.md), then cut + style-edit",
     "creator": "creator-teardown (quick mode), then blend the style",
     "long": "clips",
     "product": "product-video",
@@ -65,13 +68,14 @@ ACTION = {
     "ask": "one question in the question box, recommended option first",
     "unsupported": "say the note to the user",
 }
-LABEL = {"own": "Edit it as my video", "creator": "Copy this creator's style",
+LABEL = {"own": "Edit it as my video", "takes": "One video: join them in this order", "separate": "Separate videos", "creator": "Copy this creator's style",
          "long": "Make short clips from it", "music": "Use it as music"}
 _EXT = "|".join(e[1:] for e in VIDEO_EXT + AUDIO_EXT)
 TOKEN_RE = re.compile(
     r"https?://[^\s<>\"')\]]+"                                   # a full link
     r"|(?<![\w./@])@[A-Za-z0-9._]{2,30}"                          # an @handle
     r"|\"[^\"]+\.(?:" + _EXT + r")\"|'[^']+\.(?:" + _EXT + r")'"   # a quoted path with spaces
+    r"|(?<![\w./@\\])[^\s\"'\\]*(?:\\.[^\s\"'\\]*)+\.(?:" + _EXT + r")\b"  # Terminal drag and drop: My\ Takes/a\ 1.mov
     r"|(?:~|\.{1,2}|[A-Za-z]:)?[\\/][^\s\"']+\.(?:" + _EXT + r")\b"  # a path
     r"|(?<![\w./@\\])[\w-]+\.(?:" + _EXT + r")\b"                # a bare file name
     r"|(?<![\w./@-])[\w-]+(?:\.[\w-]+)*\.(?:com|ai|io|app|co|fm|ms|be|org|net|dev|so|xyz)\b(?:/[^\s<>\"')\]]*)?",
@@ -79,7 +83,7 @@ TOKEN_RE = re.compile(
 
 
 def _item(kind, url, **kw):
-    d = {"kind": kind, "url": url, "action": ACTION[kind]}
+    d = {"kind": kind, "url": url, "action": ACTION["own-local" if kind == "own" and kw.get("local") else kind]}
     d.update({k: v for k, v in kw.items() if v is not None})
     return d
 
@@ -119,6 +123,8 @@ def classify(raw, own=False):
         if re.match(r"(~|\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])", s) or (
                 s.lower().endswith(VIDEO_EXT + AUDIO_EXT) and (first == s or "." not in first)):
             p = os.path.abspath(os.path.expanduser(s))
+            if not os.path.exists(p):
+                return _item("unsupported", p, note=f"No file at {p}. Check the path (or drag the file in again).")
             if p.lower().endswith(AUDIO_EXT):
                 return _ask(p, ["long", "music"], name=_slug(Path(p).stem), local=True)
             return _item("own", p, name=_slug(Path(p).stem), local=True)
@@ -310,6 +316,8 @@ def extract(text):
     found = []
     for m in TOKEN_RE.finditer(text):
         t = m.group(0).strip("\"'").rstrip(".,;:!?)]")
+        if "\\" in t and not re.match(r"https?://|[A-Za-z]:\\", t):
+            t = re.sub(r"\\(\W)", r"\1", t)   # a shell escape (\ , \(, \'), never a Windows separator
         if t and t not in found:
             found.append(t)
     return found
@@ -321,6 +329,17 @@ def group(items):
     for it in items:
         if it["kind"] in ("video", "ask") and it.get("handle") and it.get("platform") in TEARDOWN_PLATFORMS:
             by.setdefault((it["platform"], it["handle"]), []).append(it)
+    takes = [it for it in items if it["kind"] == "own" and it.get("local")]   # in the order the user gave them
+    if len(takes) >= 2:   # several of the user's own files: one video in parts, or separate videos?
+        names = ", ".join(Path(t["url"]).name for t in takes)
+        merged = _item("ask", f"{len(takes)} files", name=takes[0]["name"], files=[t["url"] for t in takes],
+                       question=f"Are these {len(takes)} files one video ({names}, in the order you gave them) "
+                                "or separate videos?",
+                       options=[{"kind": "takes", "label": LABEL["takes"]},
+                                {"kind": "separate", "label": LABEL["separate"]}],
+                       action="one question in the question box. takes: " + ACTION["takes"]
+                              + ". separate: each file is an `own` item with its own edit folder")
+        items = [merged] + [it for it in items if not any(it is t for t in takes)]
     out, done = [], set()
     for it in items:
         key = (it.get("platform"), it.get("handle"))
@@ -763,7 +782,7 @@ CASES = [  # (pasted, own, kind, expected normalised url or None)
     ("https://example.com/episode.mp3", False, "ask", None),
     ("~/Movies/take.mov", False, "own", None),
     ("./take.mp4", False, "own", None),
-    ("C:\\Users\\me\\Videos\\take.mp4", False, "own", None),
+    ("C:\\Users\\me\\Videos\\take.mp4", False, "unsupported", None),   # a local path, but no such file
     ("https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", False, "long", None),
     ("https://podcasts.apple.com/us/podcast/some-show/id123456789?i=1000600000000", False, "long", None),
     ("https://feeds.example.com/show/rss", False, "ask", None),
@@ -782,6 +801,25 @@ CASES = [  # (pasted, own, kind, expected normalised url or None)
 
 
 def demo():
+    """In a temp home and working folder holding the files the local-path cases name: a path that does
+    not exist is reported as not found."""
+    old = os.getcwd(), {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+    with tempfile.TemporaryDirectory() as d:
+        for f in ("Movies/take.mov", "take.mp4", "take.MOV", "a.mp3", "a.mov", "b.mov", "A.mov", "take.mov",
+                  "My Takes/IMG 0001.MOV", "My Takes/IMG 0002.MOV"):
+            Path(d, f).parent.mkdir(parents=True, exist_ok=True)
+            Path(d, f).touch()
+        os.chdir(d)
+        os.environ.update(HOME=d, USERPROFILE=d)
+        try:
+            _demo(os.path.realpath(d))
+        finally:
+            os.chdir(old[0])
+            for k, v in old[1].items():
+                os.environ.pop(k, None) if v is None else os.environ.update({k: v})
+
+
+def _demo(home):
     assert "[height<=1080]" in video_format(1080) and "2160" not in video_format(1080)
     assert video_format(1080).count("[height<=1080]") == 4, video_format(1080)   # every fallback that knows its height
     for raw, own, kind, url in CASES:
@@ -790,6 +828,10 @@ def demo():
         if url:
             assert it["url"] == url, (raw, it["url"], url)
     assert len(CASES) >= 40, len(CASES)
+    # a local file is cut where it is (the cut skill never copies the source): its action never says "fetch"
+    loc = classify("take.mp4")
+    assert loc["kind"] == "own" and loc.get("local") and "fetch" not in loc["action"] and "never copied" in loc["action"], loc
+    assert "fetch" in classify("https://example.com/v/take.mp4")["action"]
     # a Drive link: the share how-to is said only when the download fails; the folder is named after the file
     dr = classify("https://drive.google.com/file/d/1l5rk28jrAbCdEf/view?usp=sharing")
     assert "note" not in dr and "Anyone with the link" in dr["if_fails"], dr
@@ -830,6 +872,22 @@ def demo():
     items = [decide(classify(u)) for u in ("https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@a/video/2")]
     g = group(items)
     assert len(g) == 1 and g[0]["kind"] == "creator" and g[0]["handle"] == "a" and len(g[0]["urls"]) == 2, g
+    # several own files: one question (one video joined, or separate), in the order the user gave them
+    g = group([classify(u) for u in ("~/b.mov", "https://example.com", "~/A.mov")])
+    assert g[0]["kind"] == "ask" and [o["kind"] for o in g[0]["options"]] == ["takes", "separate"], g
+    assert [Path(f).name for f in g[0]["files"]] == ["b.mov", "A.mov"] and g[0]["name"] == "b", g
+    assert "b.mov, A.mov, in the order you gave them" in g[0]["question"] and [i["kind"] for i in g[1:]] == ["product"], g
+    # macOS Terminal drag and drop escapes spaces; a path that is not there is said, not guessed at
+    # (shell escapes come from macOS/Linux terminals; a Windows drop arrives quoted)
+    second = (home + "/My\\ Takes/IMG\\ 0001.MOV") if os.name != "nt" else ("'" + home + "/My Takes/IMG 0001.MOV'")
+    msg = "join My\\ Takes/IMG\\ 0002.MOV and " + second + " please"
+    assert extract(msg) == ["My Takes/IMG 0002.MOV", home + "/My Takes/IMG 0001.MOV"], extract(msg)
+    g = group([classify(t) for t in extract(msg)])
+    assert [Path(f).name for f in g[0]["files"]] == ["IMG 0002.MOV", "IMG 0001.MOV"], g
+    assert os.path.realpath(g[0]["files"][0]) == os.path.join(home, "My Takes", "IMG 0002.MOV"), g
+    nf = classify("~/My Takes/IMG 0003.MOV")
+    assert nf["kind"] == "unsupported" and nf["note"].startswith("No file at"), nf
+    assert [i["kind"] for i in group([classify("~/a.mov")])] == ["own"]   # one file: no question
     p = plan([classify(u) for u in ("https://open.spotify.com/track/x", "https://example.com", "~/take.mov",
                                     "https://www.tiktok.com/@a")])
     assert [i["kind"] for i in p] == ["creator", "own", "product", "music"], p

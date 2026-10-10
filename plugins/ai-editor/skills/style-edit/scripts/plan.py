@@ -196,7 +196,7 @@ def audio_cover(edit_dir, words):
     """plan "cover" for an audio-only clip with artwork (clip.json from clips.py trim), else None. Pulses: sentence
     starts, never in the opening half second and at least a second apart."""
     cj = edit_dir and Path(edit_dir) / "clip.json"
-    meta = json.loads(cj.read_text()) if cj and cj.exists() else {}
+    meta = json.loads(cj.read_text(encoding="utf-8")) if cj and cj.exists() else {}
     if not (meta.get("audio_only") and meta.get("cover") and meta.get("cover_box")
             and (Path(edit_dir) / meta["cover"]).exists()):
         return None
@@ -217,7 +217,7 @@ def card_gap_s(style):
 def named_beats(edit_dir):
     """route.py's beats.json sentences that name one of the profile's things ([] when there is none)."""
     bj = edit_dir and Path(edit_dir) / "beats.json"
-    return [x for x in json.loads(bj.read_text()) if x.get("names")] if bj and bj.exists() else []
+    return [x for x in json.loads(bj.read_text(encoding="utf-8")) if x.get("names")] if bj and bj.exists() else []
 
 
 def card_gaps(cards, duration):
@@ -534,7 +534,7 @@ def anim_items(visuals, edit_dir=None, style=None):
             if not f or not f.exists():
                 print(f"warning: no images/post-{pid}.json for '{v.get('word')}', run capture.mjs first; skipped", file=sys.stderr)
                 continue
-            props = {k: x for k, x in json.loads(f.read_text()).items() if k != "url"}
+            props = {k: x for k, x in json.loads(f.read_text(encoding="utf-8")).items() if k != "url"}
             props.update(v.get("props") or {})
             v = {**v, "kind": "anim", "type": "social_post", "props": props}
         if v.get("kind") != "anim":
@@ -1477,7 +1477,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
     width, height = SIZES[aspect]
-    fps = round(meta["fps"]) or 30
+    fps = source_fps(meta["fps"])
     duration = meta["duration"]
     visuals = anti_generic(list(visuals), profile)
     cap = dict(style.get("captions") or {})
@@ -1486,12 +1486,12 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     chunks = mark_emph(chunk_captions(words, cap.get("words_per_caption") or 3, cap.get("case", "sentence"))) \
         if cap.get("present", True) else []
     fj = edit_dir and Path(edit_dir) / "face.json"
-    face = json.loads(fj.read_text()) if fj and fj.exists() else None
+    face = json.loads(fj.read_text(encoding="utf-8")) if fj and fj.exists() else None
     lay = {**SPLIT, **(style.get("layout") or {}), **(layout or {})}
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import profile as prof_mod
     head = {"video": meta["video"], "width": width, "height": height, "fps": fps,
-            "durationInFrames": int(duration * fps),
+            "durationInFrames": round(duration * fps),
             "look": pick_look(style, profile, prof_mod),
             "motion": pick_motion(style)}
     pace = (style.get("pace") or {}) if took(style, "pace") else {}
@@ -1583,6 +1583,16 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
                             "control_first_graphic_s": ((style.get("hook") or {}).get("control") or {}).get("first_graphic_s")}
     return {**out, "captions": {"style": cap, "chunks": chunks}, "zooms": zooms, "card_gap_s": gap,
             "cards": scene_parts(cards, words, edit_dir), **extra}
+
+
+def source_fps(fps):
+    """The plan's frame rate: the source's own (29.97 stays 29.97003), so frame n of the plan is frame n of
+    the cut. Rounding a 29.97 source to 30 drew 1997 frames from its 1996 and put the render a frame off
+    the cut by the end (quality.py reads the cut frame by frame against the render; matte.py names its
+    cutout frames by the cut's own frame numbers)."""
+    if not fps:
+        return 30
+    return round(fps) if abs(fps - round(fps)) < 1e-3 else round(fps, 5)
 
 
 def probe(video):
@@ -1740,23 +1750,39 @@ def treat_captions(plan, edit_dir, meta, floors=None):
 STEPS = (None,) + TREATS
 
 
+def contrast_summary(changed, chunks, worst=3):
+    """treat_captions' pages as one line: how many got each treatment, and the lowest contrasts they reach."""
+    if not changed:
+        return ""
+    by = {}
+    for _, t, _ in changed:
+        by[t] = by.get(t, 0) + 1
+    low = sorted((got, i) for i, _, got in changed if got)[:worst]
+    late = sum(1 for _, _, got in changed if not got)
+    return (f"captions: {len(changed)} of {len(chunks)} pages treated for contrast ("
+            + ", ".join(f"{n} {t}" for t, n in sorted(by.items(), key=lambda kv: -kv[1])) + ")"
+            + (f"; lowest reached: " + ", ".join(f"{got}:1 '{chunks[i]['text']}' at {chunks[i]['start']:.1f} s"
+                                                 for got, i in low) if low else "")
+            + (f"; {late} from the last render check" if late else ""))
+
+
 def contrast_floors(edit_dir, out):
     """{page start: treat}: the caption pages the last render check (check<tag>.json, caption_contrast.low_at)
     read under CONTRAST_TARGET get one treatment past the one that render drew (the plan at `out`). Kept in
     contrast.json, so every later plan keeps them; each check is read once. This is what "plan again" does."""
     f, ck = edit_dir / "contrast.json", edit_dir / f"check{out.stem[len('plan'):]}.json"
-    doc = json.loads(f.read_text()) if f.exists() else {"pages": {}, "read": []}
-    low = ((json.loads(ck.read_text()).get("render") or {}).get("caption_contrast") or {}).get("low_at") \
+    doc = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {"pages": {}, "read": []}
+    low = ((json.loads(ck.read_text(encoding="utf-8")).get("render") or {}).get("caption_contrast") or {}).get("low_at") \
         if ck.exists() else None
     stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
     if low and out.exists() and stamp not in doc["read"]:
-        for c in json.loads(out.read_text())["captions"]["chunks"]:
+        for c in json.loads(out.read_text(encoding="utf-8"))["captions"]["chunks"]:
             if any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in low):
                 key, nxt = f"{c['start']:.2f}", STEPS[min(len(STEPS) - 1, STEPS.index(c.get("treat")) + 1)]
                 if STEPS.index(nxt) > STEPS.index(doc["pages"].get(key)):
                     doc["pages"][key] = nxt
         doc["read"].append(stamp)
-        f.write_text(json.dumps(doc, indent=1))
+        f.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     return doc["pages"]
 
 
@@ -1766,7 +1792,7 @@ def cut_points(edit_dir):
     if not p.exists():
         return []
     t, out = 0.0, []
-    for span in json.loads(p.read_text())[:-1]:
+    for span in json.loads(p.read_text(encoding="utf-8"))[:-1]:
         t += span["end"] - span["start"]
         out.append(round(t, 3))
     return out
@@ -1809,7 +1835,10 @@ def demo():
     meta = {"video": "cut.mp4", "width": 3840, "height": 2160, "fps": 29.97, "duration": t}
     imgs = [{"src": "images/n.png", "word": "Notion"}]
     p = build(style, words, meta, imgs)
-    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 30), p
+    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 29.97), p
+    # the source's real rate: the real-footage test's 29.97 cut (1996 frames, 66.5998 s) planned at 30 drew 1997
+    assert source_fps(30000 / 1001) == 29.97003 and source_fps(30.0) == 30 and source_fps(25) == 25 and source_fps(0) == 30
+    assert round(66.599813 * source_fps(30000 / 1001)) == 1996 and int(66.599813 * 30) == 1997
     chunks = p["captions"]["chunks"]
     assert all(len(c["words"]) <= 3 for c in chunks)
     assert chunks[0]["text"] == "SO THIS IS" and chunks[1]["text"] == "HOW I EDIT", chunks[:2]
@@ -1993,7 +2022,7 @@ def demo():
     assert place_sfx(sp, sw, kit, {"sfx_per_min": 0}) == []
     assert all("whoosh" not in c["src"] for c in place_sfx(sp, sw, kit, {"kinds": {"impact": 100}}))
     # one lead model for plan, renderer and check: motion.ts carries the same two numbers
-    ts = (Path(__file__).resolve().parents[3] / "remotion" / "src" / "motion.ts").read_text()
+    ts = (Path(__file__).resolve().parents[3] / "remotion" / "src" / "motion.ts").read_text(encoding="utf-8")
     assert f"CARD_LEAD_S = {CARD_LEAD_S};" in ts and f"OVERLAY_LEAD_S = {OVERLAY_LEAD_S};" in ts, "motion.ts lead drifted"
     # the default style (no creator) on a 47 s cut whose sentences run 2-7 s: a zoom change at least every 5 s,
     # so check.py render never finds 6 s with nothing moving (the editorial {} planned 0 zooms here)
@@ -2023,7 +2052,7 @@ def demo():
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
         assert audio_cover(td, words) is None
         (Path(td) / "cover.png").write_bytes(b"")
-        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}))
+        (Path(td) / "clip.json").write_text(json.dumps({"audio_only": True, "cover": "cover.png", "cover_box": [20, 17, 59, 33]}), encoding="utf-8")
         cv = audio_cover(td, words)
         assert cv["src"] == "cover.png" and cv["push"] > 1 and cv["pulses"] and cv["pulses"][0] >= 0.5, cv
         assert all(b - a >= 1 for a, b in zip(cv["pulses"], cv["pulses"][1:])), cv["pulses"]
@@ -2059,12 +2088,18 @@ def demo_contrast():
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
         (d / "plan.json").write_text(json.dumps({"captions": {"chunks": [{"start": 1.0, "end": 2.0, "treat": "shadow"},
-                                                                          {"start": 2.0, "end": 3.0}]}}))
-        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5]}}}))
+                                                                          {"start": 2.0, "end": 3.0}]}}), encoding="utf-8")
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5]}}}), encoding="utf-8")
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
         pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
         assert treat_captions(pl, d, None, {"1.00": "stroke"}) == [(0, "stroke", None)]
+    # the real-footage test printed 94 lines, one per page; now one line with the count and the worst three
+    ch = [{"text": f"w{i}", "start": float(i)} for i in range(10)]
+    got = contrast_summary([(i, "backing" if i % 3 else "stroke", 9.0 - i / 2) for i in range(9)] + [(9, "stroke", None)], ch)
+    assert got.count("\n") == 0 and "10 of 10 pages" in got and "6 backing" in got and "4 stroke" in got, got
+    assert "5.0:1 'w8'" in got and "'w5'" not in got and "1 from the last render check" in got, got
+    assert contrast_summary([], ch) == ""
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
@@ -2084,11 +2119,11 @@ def demo_contrast():
             assert got == want, (colour, pl["captions"]["chunks"])
         # no style.json (the no-creator path): a note and the default style, never a traceback
         import os
-        (Path(d) / "captions.json").write_text(json.dumps(words))
+        (Path(d) / "captions.json").write_text(json.dumps(words), encoding="utf-8")
         r = subprocess.run([sys.executable, __file__, f"{d}/style.json", f"{d}/captions.json"], capture_output=True,
                            text=True, env={**os.environ, "AI_EDITOR_HOME": d})
         assert r.returncode == 0 and "default style" in r.stderr, r.stderr
-        assert json.loads((Path(d) / "plan.json").read_text())["zooms"], r.stdout
+        assert json.loads((Path(d) / "plan.json").read_text(encoding="utf-8"))["zooms"], r.stdout
 
 
 def main():
@@ -2110,29 +2145,29 @@ def main():
     if not video.exists():
         sys.exit(f"ERROR: no cut.mp4 in {edit_dir}. Run the cut skill first.")
     img = Path(a.images) if a.images else edit_dir / "images.json"
-    images = json.loads(img.read_text()) if img.exists() else []
+    images = json.loads(img.read_text(encoding="utf-8")) if img.exists() else []
     vis = edit_dir / "visuals.json"
-    visuals = json.loads(vis.read_text()) if vis.exists() else []
+    visuals = json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else []
     # The user's own settings (taste skill) win over the creator's measured style.
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import taste, profile
     prof = profile.load()   # the start skill's answers: brand kit, what to avoid, sound
     sp = Path(a.style)
-    style = json.loads(sp.read_text() or "{}") if sp.is_file() else None
+    style = json.loads(sp.read_text(encoding="utf-8") or "{}") if sp.is_file() else None
     if not style:
         print(f"note: {sp} {'is empty' if style == {} else 'not found'}; planning with the default style. To keep it "
               f"with the edit: python3 {Path(profile.__file__)} style {edit_dir}", file=sys.stderr)
         style = profile.default_style(prof)
     style = profile.fill_transitions(taste.merge(style, taste.load_json()),
                                      lambda m: print(f"note: {m}", file=sys.stderr))
-    plan = build(style, json.loads(Path(a.words).read_text()),
+    plan = build(style, json.loads(Path(a.words).read_text(encoding="utf-8")),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
     out = Path(a.out) if a.out else edit_dir / "plan.json"
-    for i, t, got in treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)):
-        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast " +
-              (f"(reaches {got}:1 on the footage behind it)" if got else "(the last render check read it too low)"),
-              file=sys.stderr)
+    line = contrast_summary(treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)),
+                            plan["captions"]["chunks"])
+    if line:
+        print(line, file=sys.stderr)
     if a.no_sfx or (prof.get("sound") or {}).get("sfx") is False:
         plan["sfx"] = []
     if (edit_dir / ".sfx" / "music.wav").exists() and (prof.get("sound") or {}).get("music") is not False:
@@ -2149,7 +2184,7 @@ def main():
         if len(plan["cutouts"]) < len(matte.behind_ranges(plan)):
             print(f"behind cards: run matte.py {edit_dir}" + (f" --plan {out.name}" if out.name != "plan.json" else "")
                   + " (it cuts only the frames not cut yet)", file=sys.stderr)
-    out.write_text(json.dumps(plan, indent=1))
+    out.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     from ai_tells import check_plan as ai_tells, for_brand   # the AI-made look (references/ai-tells.md)
     for f in for_brand(ai_tells(plan, visuals), prof.get("brand")):
         print(f"{'error' if f['level'] == 'BAN' else 'warning'}: AI tell '{f['tell']}': {f['where']} -> {f['fix']}", file=sys.stderr)

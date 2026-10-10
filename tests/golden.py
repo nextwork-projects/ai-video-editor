@@ -70,12 +70,12 @@ def make_plan(work):
         "-c:a", "aac", edit / "cut.mp4", cwd=work)
     words = [{"text": t, "start": round(0.3 + i * 0.4, 2), "end": round(0.3 + i * 0.4 + 0.3, 2), "type": "word"}
              for i, t in enumerate("so this is ten times faster in three steps comment now".split())]
-    (edit / "captions.json").write_text(json.dumps(words))
+    (edit / "captions.json").write_text(json.dumps(words), encoding="utf-8")
     (work / "style.json").write_text(json.dumps({
         "handle": "golden", "sfx": False, "pace": {"max_pause_s": 0.2},
         "zoom": {"per_min": 0, "kind": "punch", "scale": 1.15, "on": "sentence_start"},
         "captions": {"present": True, "words_per_caption": 2, "y_pct": 68, "size_pct": 5, "case": "lower",
-                     "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": True}}))
+                     "font_match": "Inter", "weight": 800, "color": "#FFFFFF", "stroke": True}}), encoding="utf-8")
     (edit / "visuals.json").write_text(json.dumps([
         {"word": "ten", "nth": 1, "kind": "anim", "type": "chat", "hold_s": 1.0,
          "props": {"app": "Router", "messages": [{"from": "user", "text": "ten times faster", "word": "ten"},
@@ -84,7 +84,7 @@ def make_plan(work):
          "props": {"title": "zsh", "lines": [{"text": "make plan build ship", "kind": "cmd", "word": "three"}]}},
         {"word": "comment", "nth": 1, "kind": "anim", "type": "toasts", "hold_s": 0.9,
          "props": {"items": [{"app": "Inbox", "title": "comment now", "word": "comment"}]}},
-    ]))
+    ]), encoding="utf-8")
     run(sys.executable, SK / "plan.py", work / "style.json", edit / "captions.json", "--no-sfx", cwd=work)
     return edit
 
@@ -99,7 +99,7 @@ def banned(edit, stills=None):
     """The default look must carry no banned AI tell (references/ai-tells.md): plan side, and on the stills."""
     sys.path.insert(0, str(SK))
     from ai_tells import check_plan, check_stills
-    plan = json.loads((edit / "plan.json").read_text())
+    plan = json.loads((edit / "plan.json").read_text(encoding="utf-8"))
     found = check_plan(plan) + (check_stills(stills, plan) if stills else [])
     return [f"{f['tell']}: {f['where']}" for f in found if f["level"] == "BAN"]
 
@@ -127,9 +127,9 @@ def demo():
     with tempfile.TemporaryDirectory() as t:
         edit = make_plan(Path(t))
         assert banned(edit) == [], banned(edit)                     # the default look has no banned tell
-        plan = json.loads((edit / "plan.json").read_text())
+        plan = json.loads((edit / "plan.json").read_text(encoding="utf-8"))
         plan["look"] = {"preset": "neutral", "ground": "linear-gradient(135deg,#6366F1,#8B5CF6)"}
-        (edit / "plan.json").write_text(json.dumps(plan))
+        (edit / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
         assert any("purple-blue" in b for b in banned(edit)), banned(edit)   # and the check can fail
     print("demo ok")
 

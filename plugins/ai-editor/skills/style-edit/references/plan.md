@@ -3,12 +3,35 @@
 Moved out of SKILL.md step 4. Read the section the step points at.
 
 ## Contents
+- Prepared while the cut was reviewed
 - No creator: the default style
 - What plan.py does
 - Behind the speaker (the cutout)
 - Sound cues
 - Music
 - What the checks FAIL and WARN
+
+## Prepared while the cut was reviewed
+
+Called by start for a whole edit, the cut skill starts the `visual-prep` agent as the cut page opens.
+It does steps 1-3 and `face.py` on the first cut and copies its `decisions.json` to
+`prep-decisions.json`. Every visual it writes names a word and which time it is said (`nth`), never a
+second. It plans, renders and uploads nothing; its one bill is the step 3 Jev call (a fraction of a
+cent).
+
+Wait for its JSON if it is still running. Cut approved unchanged: go to step 4. Cut changed after notes:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" remap edits/<name>
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" captions edits/<name>
+python3 "$S/route.py" beats edits/<name>
+python3 "$VPY" "$S/face.py" edits/<name>
+```
+
+`remap` re-points each beat in visuals.json and images.json to the new cut and prints the ones it
+dropped because their word was cut. Add a beat (step 3) for a line the re-cut brought back that names
+something real, then run `capture.mjs` again (it keeps files already fetched). Captures and logos do
+not change with the cut. Then step 4.
 
 ## No creator: the default style
 
@@ -20,7 +43,7 @@ against:
 
 | part | default | measured (3 styles) |
 |---|---|---|
-| zooms | punch to 1.18, eased by the renderer (0.16 s, never a one-frame snap), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
+| zooms | push to 1.18, eased 0.8 s each way (sine.inOut, PRINCIPLES "Smooth before varied"), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
 | long sentences | a zoom change on the word nearest the middle of any stretch over 5 s (`zoom.max_hold_s`) | (the render check WARNs at 6 s with nothing moving) |
 | motion | `smooth` personality, median shot 2.4 s | 2.4 / 2.4 / 3.98 s |
 | captions | 3 words, 5.5% type, y 66%, lower case, weight 800, white, no stroke (plan.py adds one where the footage needs it) | 1 / 3 / 3 words; 4.7 / 5.5 / 6.5%; y 62 / 66 / 75% |
@@ -67,12 +90,14 @@ the speaker, and a card above the head grows down behind the hair while its mark
 clear of the head. Overlay layout only. Then cut the speaker out where those cards are up:
 
 ```bash
-$VPY "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
+python3 "$VPY" "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 ```
 
 It writes `edits/<name>/cutout/<size>-<key>/` (RGBA PNGs named by their frame of the cut, about
 0.5 MB a frame; the key changes with cut.mp4) and the plan's `cutouts`, then prints, per card, how much of its key region the speaker covers and that the face
-is solid. On a `WARNING`, shrink or move that card. Laptop CPU: about 0.2-0.5 s a frame (free).
+is solid. On a `WARNING`, shrink or move that card: give its beat a smaller `"box": [x, y, w, h]` (% of
+the frame) beside the head or higher, on its beat in visuals.json or its entry in images.json, then
+plan.py and matte.py again; or plan with `--behind off`. Laptop CPU: about 0.2-0.5 s a frame (free).
 `--modal` runs each range on its own Modal CPU container (8 cores). The estimate is Modal's listed
 rates times the laptop's 0.26 s a frame: about $0.00003 a frame, $0.06 per minute of behind-card time;
 the run then prints the cost from the containers' own run time. `--estimate` prints
@@ -110,7 +135,7 @@ lay the bed under the voice (a file of their own: copy it into the edit folder a
 `--track`):
 
 ```bash
-$VPY "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
+python3 "$VPY" "$S/sfx.py" music edits/<name> [--track audio/track.wav] [--mood linear] [--under-db 18]
 ```
 
 `.sfx/music.wav`: the track, or a bed generated for this cut's length (product-video sound.py,

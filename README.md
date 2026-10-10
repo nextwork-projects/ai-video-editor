@@ -15,6 +15,8 @@ It also makes three other things:
 - **A creator teardown.** Paste a profile; you get what makes their videos work and a style you can
   edit with.
 
+![Six frames from an edit of the sample take: word captions, a captured page and logos timed to the words](docs/screens/after-talking-head.jpg)
+
 <!-- TODO(owner): drop a 10-second before/after demo GIF at docs/demo.gif, then replace this comment with: ![Before and after](docs/demo.gif) -->
 
 Built by [NextWork](https://nextwork.ai). Free and open source (MIT). Works on Mac, Windows and Linux.
@@ -95,11 +97,13 @@ single skill folders, clone the whole repo too.
    `~/.ai-video-editor/profile.json`.
 4. **Your first edit.** Give the path to your video (an mp4 or mov of you talking to camera), or
    paste a link to it. No video yet? Pick **Use the sample take**.
-5. **Approve the cut.** You see your transcript with the removed parts struck through. Approve it,
-   or say which lines to keep.
+5. **Approve the cut.** You watch it on a review page and leave notes at any moment; the transcript
+   with the removed parts struck through is one click away. Approve it, or send notes.
 6. **Approve the stills.** A sheet of frames from the styled edit. Approve, or say what to change.
    You can also open the edit in your browser and move, trim, swap or delete anything by hand.
 7. **Pick where to render.** Claude times each option on your video and shows the cost first.
+   The render opens on a review page: watch it, pause and leave notes at the moments to change,
+   then send them for the next round or approve.
 8. **Say what you'd change** ("captions too small", "fewer zooms"). It is saved to
    `~/.ai-video-editor/taste.md` and used on every video after.
 

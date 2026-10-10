@@ -7,11 +7,13 @@ SKILL.md steps 6-9.
 
 `edit.py estimate` never renders the whole video. Laptop: seconds per frame from a 2-second benchmark
 the first time, then from the last full laptop render of 10 s or more (`~/.ai-video-editor/laptop.json`).
+The line says when that render was another video's: a rough guess, since cards and length change it.
 Modal: upload + container start + the work over the containers times a straggle factor + the tail
 (the last download and the join), each measured on the last Modal render
 (`~/.ai-video-editor/modal.json`); before the first one, the sample take's (`edit.py`
-`MODAL_MEASURED`, where each is defined), said as a guess in the printed line. The upload is counted
-in full, though footage Modal already holds is skipped.
+`MODAL_MEASURED`, where each is defined), said as a guess in the printed line. The upload counts only
+footage Modal does not hold yet: `modal_render.py held` asks Modal by each file's hash and sends nothing
+(about 1 s).
 
 ## Laptop
 
@@ -36,6 +38,20 @@ tabs were much slower (80 s against 54 s, 80 s against 43 s). A draft is not muc
 time goes on Chrome and reading the source video, not on pixels. The 4 s smoke clip renders in
 3.7-8.6 s with either tab count: Chrome start-up is most of it.
 
+### If a render stops
+
+The renderer prints `Rendered N/M` about once a second; edit.py writes all of its output to
+`edits/<name>/render.renderer.log` (`render-draft.renderer.log` for a draft) and shows the progress.
+A watchdog stops a render that prints no new frame for `max(180 s, 200 frames' time)` (a render once
+sat 25 min at 0% CPU after Remotion restarted a crashed browser) and renders again in 200-frame
+pieces, each its own Chrome, joined like the GitHub render. Nothing to do: it says so and carries on.
+
+| message | do |
+|---|---|
+| `the laptop render failed (exit N). The renderer's log: <path>` | read its last line; render again once; then offer `--draft` or `--modal` |
+| `render.mjs <cmd> failed (exit N)` (stills, bundle, Lambda) | run the same command again once; the same error twice: say so with that line |
+| `the render stalled: ... rendering again in 200-frame pieces` | wait; it finishes on its own |
+
 ## Modal
 
 ```bash
@@ -59,7 +75,8 @@ Needs the setup skill's step 5b. `edit.py` bundles the renderer with the media i
    command the GitHub workflow runs, on a copy of the code unpacked once per container. Once the
    queue is empty, a piece still running at twice the median piece time gets a second copy on
    another container and the first to finish counts (one piece once took 368 s where the other 53
-   took 16-61 s).
+   took 16-61 s). To test it, `AI_EDITOR_MODAL_SLOW_PIECE=0:600` holds piece 0's first copy for 600 s
+   in its container. On the 45 s sample cut that render took 197 s against 189 s with no piece held.
 4. Each piece downloads as soon as it is done, and the pieces join on the laptop with the GitHub
    workflow's join (`edit.py JOIN`): video copied, audio cut to each piece's frames and encoded to
    AAC once.
@@ -129,6 +146,26 @@ The server listens on 127.0.0.1 only and its URL carries a random token (`?t=...
 without it, reads and writes alike, gets 403, so another page open in the browser cannot change the
 edit. Open the URL it prints, as printed.
 
+The preview is before the render. After it, the render goes to the review page, where the user
+leaves notes at moments on the timeline: `review.md`.
+
+## Motion check
+
+`check.py render` reads every frame of the render, not a still a second: a still a second hides a
+frame that flickers. `quality.py` compares each frame of the whole picture with the frames round it
+and with the cut behind it. It names the time and the fix for:
+
+- a one-frame flash: a frame unlike the frames on both sides, which match each other. Frame 0
+  counts: an element that shows its finished state before its entrance starts. FAIL.
+- black frames while the footage has picture: a card, clip or cutout missing there. FAIL for one or
+  two frames, WARN for a longer run.
+- a one-frame jump: the picture changes in one frame where no cut, zoom or card change explains it.
+  WARN.
+
+A flash, black frame or jump the cut behind also has is the footage's own and is not reported, nor
+are black frames under a full-frame scene. The measurements land in `check.json` under `motion`.
+Test: `quality.py demo` encodes a clean clip and a bad one and reads both back.
+
 ## Export to another editor
 
 `export_nle.py` writes the jump cut as trims of the raw take (so every cut can be re-opened),
@@ -166,3 +203,18 @@ card frame on a laptop); `--no-render` skips them. If the raw take moved, pass `
   frame mapping matches cut.mp4 (42 dB PSNR at four points, against 27-31 dB one frame off). No
   editor was installed on the test Mac except CapCut, so no file was import-tested in an editor.
 
+## YouTube chapters
+
+Offered for a 16:9 video at step 9, in the question box: add chapters for the YouTube description
+(Recommended), or skip. On yes, read `captions.txt` (the cut's words; never the JSON) and pick one chapter
+per section: the words spoken where it starts and a short title from the speaker's own words. Write
+`edits/<name>/chapters.json` as `[["words spoken", "title"], ...]`, then:
+
+```bash
+python3 "$S/chapters.py" edits/<name> [--intro "a plain description draft"]
+```
+
+It times each chapter off the cut (a re-cut re-times them) and writes `chapters.txt`, plus
+`description.txt` with `--intro` (a run without it removes an older one). YouTube's rules are checked:
+first at 0:00, at least 3, each at least 10 s, in order. A FAIL writes nothing: merge or move chapters
+and run it again. Hand over the file's path.

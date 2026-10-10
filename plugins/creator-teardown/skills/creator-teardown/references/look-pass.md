@@ -96,7 +96,7 @@ One Agent call, `model: "haiku"`, so the images never enter the main conversatio
 
 > For each video id in `<ids>`, read `creator-teardowns/<handle>/sheets/<id>.jpg`
 > (9 frames of one video, time top left). Fill the JSON schema printed by
-> `<VPY> <skill>/scripts/gemini.py prompt`, judging only what the frames show. Write it
+> `python3 "$VPY" <skill>/scripts/gemini.py prompt`, judging only what the frames show. Write it
 > to `creator-teardowns/<handle>/video/<id>.look-ai.json` with `"_source": "sheet"`.
 > Reply with one line per video: id, font_class, closest_google_font.
 

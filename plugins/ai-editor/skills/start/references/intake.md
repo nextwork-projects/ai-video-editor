@@ -39,6 +39,7 @@ was skipped). Keep these calls and their order.
 |---|---|---|
 | `sound` | Sound effects and music? | subtle sound effects, no music / no sound effects / sound effects and I'll add music myself |
 | `behind` | Let graphics sit behind you? (screenshots and logos tuck behind your head and shoulders) | Yes / No, keep them beside and above me |
+| `past_edit` | Have a raw take and the version you posted? I can learn how you cut. | No, use the default cut / Yes, I'll give both paths (run the taste skill's "Learn from a past edit", then save `true`) |
 
 Save each call's answers as soon as they come in, all in one command (values are JSON), for example
 `python3 "$P" set 'audience="developers who use Claude"' 'goal="follow"' 'names=[{"name": "Jev", "domain": "typesafe.ai"}]'`.
@@ -57,8 +58,11 @@ python3 "$P" set avoid '{"emoji": true, "stock": true, "icons": true, "colors": 
 python3 "$P" set captions '{"on": true, "style": "creator"}'   # creator | bold | karaoke | minimal; "on": false for none
 python3 "$P" set sound '{"sfx": true, "music": false}'
 python3 "$P" set behind true                              # false: cards stay beside and above, no cutout step
+python3 "$P" set past_edit false                          # true once taste learn.py has run on their edit
 ```
 
-If the user says "just edit it" or "use the defaults", save nothing and go on: every answer has a
-default (vertical, no creator unless named, the editorial look, emoji, stock and icons avoided,
-the creator's captions, subtle sound).
+If the user says "just edit it" or "use the defaults", run `python3 "$P" defaults` and go on. It
+saves every unanswered style question as its default (vertical, no creator unless named, the
+editorial look, emoji, stock and icons avoided, the creator's captions, subtle sound, nothing
+behind, no past edit), so they are not asked again. Saving nothing left every style id missing and
+start asked them all again on the next video.
