@@ -254,11 +254,11 @@ def read_alpha(path, frame, w, h):
 
 
 def move_hint(c):
-    """The field that moves or shrinks a behind card: its beat's "box" (images.json for the user's picture)."""
+    """The field that moves or shrinks a behind card: its "box" (plan.py takes it from the beat in visuals.json
+    or the picture's entry in images.json)."""
     word = c.get("trigger_word") or f"{c['start']:.1f} s"
-    where = "images.json" if str(c.get("src") or "").startswith("images/") and not c.get("format") else "visuals.json"
-    return (f"move or shrink it: give the '{word}' beat a smaller \"box\": [x, y, w, h] (% of the frame) in {where}, "
-            "beside the head or higher, or plan with --behind off")
+    return (f"move or shrink it: give the '{word}' beat a smaller \"box\": [x, y, w, h] (% of the frame) in "
+            "visuals.json or images.json, beside the head or higher, or plan with --behind off")
 
 
 def verify(plan, edit, w, h):
@@ -474,8 +474,7 @@ def demo():
         with contextlib.redirect_stdout(buf):
             assert verify(pl, e, 108, 192) == 1
         assert "through the face" in buf.getvalue() and "'repo' beat" in buf.getvalue() and '"box"' in buf.getvalue() \
-            and "visuals.json" in buf.getvalue(), buf.getvalue()
-        assert "images.json" in move_hint({"start": 1, "src": "images/dashboard.png"})
+            and "visuals.json or images.json" in buf.getvalue(), buf.getvalue()
     # The Modal image installs the lock's pins (hashes and all), never an unpinned package.
     import re
     import tempfile
