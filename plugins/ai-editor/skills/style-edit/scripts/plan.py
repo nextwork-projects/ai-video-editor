@@ -1740,6 +1740,22 @@ def treat_captions(plan, edit_dir, meta, floors=None):
 STEPS = (None,) + TREATS
 
 
+def contrast_summary(changed, chunks, worst=3):
+    """treat_captions' pages as one line: how many got each treatment, and the lowest contrasts they reach."""
+    if not changed:
+        return ""
+    by = {}
+    for _, t, _ in changed:
+        by[t] = by.get(t, 0) + 1
+    low = sorted((got, i) for i, _, got in changed if got)[:worst]
+    late = sum(1 for _, _, got in changed if not got)
+    return (f"captions: {len(changed)} of {len(chunks)} pages treated for contrast ("
+            + ", ".join(f"{n} {t}" for t, n in sorted(by.items(), key=lambda kv: -kv[1])) + ")"
+            + (f"; lowest reached: " + ", ".join(f"{got}:1 '{chunks[i]['text']}' at {chunks[i]['start']:.1f} s"
+                                                 for got, i in low) if low else "")
+            + (f"; {late} from the last render check" if late else ""))
+
+
 def contrast_floors(edit_dir, out):
     """{page start: treat}: the caption pages the last render check (check<tag>.json, caption_contrast.low_at)
     read under CONTRAST_TARGET get one treatment past the one that render drew (the plan at `out`). Kept in
@@ -2065,6 +2081,12 @@ def demo_contrast():
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
         pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
         assert treat_captions(pl, d, None, {"1.00": "stroke"}) == [(0, "stroke", None)]
+    # the real-footage test printed 94 lines, one per page; now one line with the count and the worst three
+    ch = [{"text": f"w{i}", "start": float(i)} for i in range(10)]
+    got = contrast_summary([(i, "backing" if i % 3 else "stroke", 9.0 - i / 2) for i in range(9)] + [(9, "stroke", None)], ch)
+    assert got.count("\n") == 0 and "10 of 10 pages" in got and "6 backing" in got and "4 stroke" in got, got
+    assert "5.0:1 'w8'" in got and "'w5'" not in got and "1 from the last render check" in got, got
+    assert contrast_summary([], ch) == ""
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
@@ -2129,10 +2151,10 @@ def main():
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
     out = Path(a.out) if a.out else edit_dir / "plan.json"
-    for i, t, got in treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)):
-        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast " +
-              (f"(reaches {got}:1 on the footage behind it)" if got else "(the last render check read it too low)"),
-              file=sys.stderr)
+    line = contrast_summary(treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)),
+                            plan["captions"]["chunks"])
+    if line:
+        print(line, file=sys.stderr)
     if a.no_sfx or (prof.get("sound") or {}).get("sfx") is False:
         plan["sfx"] = []
     if (edit_dir / ".sfx" / "music.wav").exists() and (prof.get("sound") or {}).get("music") is not False:
