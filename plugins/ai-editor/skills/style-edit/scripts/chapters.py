@@ -10,8 +10,9 @@ Each phrase is found in cut.transcript.json (else words.json), after the previou
 re-cut re-times every chapter. The first chapter is always 0:00.
 
 Writes edits/NAME/chapters.txt ("0:00 title" lines). With --intro, also description.txt: the intro,
-a blank line, the chapters. Exit 1 on a failed check: fewer than 3 chapters, the first not at 0:00,
-a chapter under 10 s, times out of order, a < or > (YouTube rejects them in descriptions).
+a blank line, the chapters; without it an older description.txt is removed (its chapters would be stale).
+Exit 1 on a failed check, writing nothing: fewer than 3 chapters, the first not at 0:00, a chapter
+under 10 s, times out of order, a < or > (YouTube rejects them in descriptions).
 """
 import argparse
 import json
@@ -81,10 +82,15 @@ def load_words(edit):
 def write(edit, words, chapters, total, intro=None):
     times = chapter_times(words, chapters)
     text = "\n".join(f"{stamp(t)} {title}" for t, title in times) + "\n"
+    p = problems(times, total)
+    if p:                     # a failed check writes nothing: no file YouTube would reject is left to paste
+        return text, p
     (edit / "chapters.txt").write_text(text, encoding="utf-8")
     if intro:
         (edit / "description.txt").write_text(f"{intro.strip()}\n\n{text}", encoding="utf-8")
-    return text, problems(times, total)
+    else:
+        (edit / "description.txt").unlink(missing_ok=True)
+    return text, p
 
 
 def demo():
@@ -110,6 +116,12 @@ def demo():
         assert text == "0:00 Intro\n0:30 What it is\n1:01 When not to\n" and p == []
         assert (d / "description.txt").read_text() == "A plain intro.\n\n" + text
         assert round(duration(d, words), 2) == 61.4, "no cut.mp4: the last word's end"
+        # a passing run without --intro removes the old description.txt (its chapters would be stale)
+        write(d, words, [["Hi", "Intro"], ["So firstly", "Start"], ["now here's", "End"]], 90)
+        assert (d / "chapters.txt").read_text().endswith("1:01 End\n") and not (d / "description.txt").exists()
+        # a failed check writes nothing: the last good chapters.txt stays, no description.txt appears
+        _, p = write(d, words, [["Hi", "Intro"], ["So firstly", "Too short"]], 90, "intro")
+        assert p and (d / "chapters.txt").read_text().endswith("1:01 End\n") and not (d / "description.txt").exists()
     print("demo ok")
 
 
@@ -128,9 +140,12 @@ def main():
     words = load_words(edit)
     text, p = write(edit, words, json.loads(cp.read_text(encoding="utf-8")), duration(edit, words), a.intro)
     print(text, end="")
-    print(f"-> {edit / 'chapters.txt'}" + (f" and {edit / 'description.txt'}" if a.intro else ""))
+    if not p:
+        print(f"-> {edit / 'chapters.txt'}" + (f" and {edit / 'description.txt'}" if a.intro else ""))
     for x in p:
         print("FAIL ", x)
+    if p:
+        print("nothing written: fix chapters.json and run again")
     sys.exit(1 if p else 0)
 
 

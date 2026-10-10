@@ -206,8 +206,8 @@ card frame on a laptop); `--no-render` skips them. If the raw take moved, pass `
 ## YouTube chapters
 
 Offered for a 16:9 video at step 9, in the question box: add chapters for the YouTube description
-(Recommended), or skip. On yes, read `cut.transcript.json` and pick one chapter per section: the
-words spoken where it starts and a short title from the speaker's own words. Write
+(Recommended), or skip. On yes, read `captions.txt` (the cut's words; never the JSON) and pick one chapter
+per section: the words spoken where it starts and a short title from the speaker's own words. Write
 `edits/<name>/chapters.json` as `[["words spoken", "title"], ...]`, then:
 
 ```bash
@@ -215,5 +215,6 @@ python3 "$S/chapters.py" edits/<name> [--intro "a plain description draft"]
 ```
 
 It times each chapter off the cut (a re-cut re-times them) and writes `chapters.txt`, plus
-`description.txt` with `--intro`. YouTube's rules are checked: first at 0:00, at least 3, each at
-least 10 s, in order. On a FAIL, merge or move chapters and run it again. Hand over the file's path.
+`description.txt` with `--intro` (a run without it removes an older one). YouTube's rules are checked:
+first at 0:00, at least 3, each at least 10 s, in order. A FAIL writes nothing: merge or move chapters
+and run it again. Hand over the file's path.
