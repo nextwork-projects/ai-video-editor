@@ -43,7 +43,7 @@ against:
 
 | part | default | measured (3 styles) |
 |---|---|---|
-| zooms | punch to 1.18, eased by the renderer (0.16 s, never a one-frame snap), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
+| zooms | push to 1.18, eased 0.8 s each way (sine.inOut, PRINCIPLES "Smooth before varied"), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
 | long sentences | a zoom change on the word nearest the middle of any stretch over 5 s (`zoom.max_hold_s`) | (the render check WARNs at 6 s with nothing moving) |
 | motion | `smooth` personality, median shot 2.4 s | 2.4 / 2.4 / 3.98 s |
 | captions | 3 words, 5.5% type, y 66%, lower case, weight 800, white, no stroke (plan.py adds one where the footage needs it) | 1 / 3 / 3 words; 4.7 / 5.5 / 6.5%; y 62 / 66 / 75% |

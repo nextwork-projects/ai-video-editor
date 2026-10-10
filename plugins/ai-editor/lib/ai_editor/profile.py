@@ -200,20 +200,20 @@ def resolve_look(style, prof=None, warn=print):
 
 
 # ---------- no creator: the default style ----------
-# The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Motion"): the smooth
-# personality, punch zooms the renderer eases (0.16 s power2.out, never a one-frame snap), captions the footage
-# decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor was
-# built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
-# creator teardown): punch zooms in all three, scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 a minute; median shot 2.4 /
-# 2.4 / 3.98 s; 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three.
+# The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Smooth before varied"):
+# the smooth personality, push zooms eased 0.8 s each way on sine.inOut (a camera move, never a step), captions the
+# footage decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor
+# was built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
+# creator teardown): scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 zooms a minute; median shot 2.4 / 2.4 / 3.98 s;
+# 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three. The three measured
+# punch zooms; the default pushes, because check.py render judges a punch by its one-frame travel.
 # max_hold_s: a sentence longer than this still gets a zoom change (plan.py place_zooms), so nothing holds still
-# past check.py's 6 s. A push (eased over 0.8 s) was tried first: on a talking head the render check reads the
-# speaker's own movement during a slow 1.12 push as a surge (6 WARNs on the sample take).
+# past check.py's 6 s.
 DEFAULT_STYLE = {
     "handle": "default",
     "pace": {"median_shot_s": 2.4, "max_pause_s": 0.25},
     "motion": "smooth",
-    "zoom": {"per_min": 9.5, "kind": "punch", "scale": 1.18, "duration_s": 0.0, "on": "sentence_start", "max_hold_s": 5.0},
+    "zoom": {"per_min": 9.5, "kind": "push", "scale": 1.18, "duration_s": 0.8, "on": "sentence_start", "max_hold_s": 5.0},
     "captions": {"present": True, "words_per_caption": 3, "y_pct": 66, "size_pct": 5.5, "case": "lower",
                  "weight": 800, "color": "#FFFFFF", "stroke": False, "box": False, "animation": "pop"},
 }
@@ -334,6 +334,9 @@ def demo():
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
         assert json.loads(out.read_text())["handle"] == "default"
+        # the recommended path passes the editor's own smoothness check: a push eased at least 0.8 s (check.py
+        # PUSH_MIN_S), never a punch of 0.0 s that the render check reads as a one-frame snap
+        assert st["zoom"]["kind"] == "push" and st["zoom"]["duration_s"] >= 0.8, st["zoom"]
         # captions off in the profile, but an audio-only podcast clip keeps them: its words are the picture
         save({"captions": {"on": False}})
         (Path(d) / "clip.json").write_text(json.dumps({"audio_only": True}))
@@ -411,7 +414,7 @@ def main():
     elif len(a) >= 2 and a[0] == "style":
         out, style = write_style(a[1], out=a[3] if len(a) > 3 and a[2] == "--out" else None)
         print(f"{out}: {style['handle']}, " + (f"parts from {style['blend']}" if style.get("blend") else
-                                              "no creator: the default style (smooth zooms about every 6 s, 3-word captions)"))
+                                              "no creator: the default style (smooth zooms, a move at least every 5 s, 3-word captions)"))
     else:
         print(__doc__)
         sys.exit(2)
