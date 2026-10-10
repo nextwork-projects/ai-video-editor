@@ -69,6 +69,8 @@ EDGE_IN = (0.008, 0.025)   # strip inside a card's edge (share of its width/heig
 EDGE_ROWS = 0.06       # content in more than this share of the strip's length = runs into the edge
 CORNER = 0.12          # strip ends skipped: rounded corners show the footage
 CAP_EDGE = 0.015       # captions this close to the frame's side are cut off by it
+CAP_DRAWN = 40         # a caption pixel differs from the footage under it by this much (0-255, any channel);
+                       # the same footage text on the render and the cut differs by under 20 after encoding
 from plan import CONTRAST_MIN as CONTRAST_FAIL, CONTRAST_TARGET   # noqa: E402  WCAG 1.4.3 for large text; one line for plan and check
 CONTRAST_WARN = 4.5    # WCAG AA for body text: the margin moving footage needs
 ZOOM_MIN_LOG = 0.03    # a zoom changing log-scale less than this (3%) is too small to judge
@@ -386,9 +388,11 @@ def caption_fill(frame, colours, ys, font_px, text):
     return slice(r0, r1), fill, bool(xs.min() < CAP_EDGE * W or xs.max() > (1 - CAP_EDGE) * W)
 
 
-def caption_lines(frame, colours, y, font_px):
+def caption_lines(frame, colours, y, font_px, behind=None):
     """How many lines of caption text sit round row y (the page's centre, Captions.tsx translateY -50%):
-    bands of caption-coloured glyphs (blobs a letter tall) within two font sizes of it."""
+    bands of caption-coloured glyphs (blobs a letter tall) within two font sizes of it. behind: the footage
+    as drawn under the caption (the cut through the zoom); a pixel the footage already has (white text on a
+    screen in the shot) is the footage's, not the caption's."""
     import cv2
     import numpy as np
     H, W = frame.shape[:2]
@@ -400,6 +404,8 @@ def caption_lines(frame, colours, y, font_px):
     near = np.zeros(f.shape[:2], bool)
     for c in colours:
         near |= np.abs(f - c).max(axis=2) < min(60, max(8, 0.4 * float(np.abs(typical - c).max())))
+    if behind is not None:
+        near &= np.abs(f - behind[lo:hi].astype(np.int16)).max(axis=2) > CAP_DRAWN
     n, lab, stats, _ = cv2.connectedComponentsWithStats(near.astype(np.uint8))
     near = np.isin(lab, [i for i in range(1, n) if 0.3 * font_px <= stats[i, cv2.CC_STAT_HEIGHT] <= 1.3 * font_px])
     # a line of words: glyphs joined across their gaps, running through the middle of the frame
@@ -798,7 +804,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         small_b.append(sb_)
         up = [i for i in range(len(cards)) if first[i] - 3 <= n <= last[i]]
         if n in page_frames:
-            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch) for y in cap_ys)
+            under = None if split else cv2.warpAffine(cut, np.float32(footage_affine(t, plan, W, H)), (W, H))
+            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch, under) for y in cap_ys)
             if nl > (cs.get("max_lines") or 1):
                 wrapped.append((t, page_frames[n]["text"], nl))
         need = up or n in sframes or n in cap_frames
@@ -1300,6 +1307,13 @@ def demo():
     cv2.putText(two, "ads", (230, 650), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
     white = [np.array([255, 255, 255.])]
     assert caption_lines(one, white, 600, 40) == 1 and caption_lines(two, white, 600, 40) == 2
+    # the sample at 9.87 s: one caption line over a screen in the shot whose own white text sits a line lower
+    # read as "drawn on 2 lines". The footage under it has that text too, so it is not the caption's
+    shot = np.full((960, 540, 3), 90, np.uint8)
+    cv2.putText(shot, "on the screen", (110, 650), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    page = shot.copy()
+    cv2.putText(page, "down competitor ads", (40, 590), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    assert caption_lines(page, white, 600, 40) == 2 and caption_lines(page, white, 600, 40, shot) == 1
     # rhythm counter, measure_edit's synthetic clip
     f = np.full((120, 36, 64), 40, np.float32)
     base = np.random.default_rng(0).uniform(0, 80, (36, 64)).astype(np.float32)
