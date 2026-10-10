@@ -1477,7 +1477,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
     width, height = SIZES[aspect]
-    fps = round(meta["fps"]) or 30
+    fps = source_fps(meta["fps"])
     duration = meta["duration"]
     visuals = anti_generic(list(visuals), profile)
     cap = dict(style.get("captions") or {})
@@ -1491,7 +1491,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import profile as prof_mod
     head = {"video": meta["video"], "width": width, "height": height, "fps": fps,
-            "durationInFrames": int(duration * fps),
+            "durationInFrames": round(duration * fps),
             "look": pick_look(style, profile, prof_mod),
             "motion": pick_motion(style)}
     pace = (style.get("pace") or {}) if took(style, "pace") else {}
@@ -1583,6 +1583,16 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
                             "control_first_graphic_s": ((style.get("hook") or {}).get("control") or {}).get("first_graphic_s")}
     return {**out, "captions": {"style": cap, "chunks": chunks}, "zooms": zooms, "card_gap_s": gap,
             "cards": scene_parts(cards, words, edit_dir), **extra}
+
+
+def source_fps(fps):
+    """The plan's frame rate: the source's own (29.97 stays 29.97003), so frame n of the plan is frame n of
+    the cut. Rounding a 29.97 source to 30 drew 1997 frames from its 1996 and put the render a frame off
+    the cut by the end (quality.py reads the cut frame by frame against the render; matte.py names its
+    cutout frames by the cut's own frame numbers)."""
+    if not fps:
+        return 30
+    return round(fps) if abs(fps - round(fps)) < 1e-3 else round(fps, 5)
 
 
 def probe(video):
@@ -1825,7 +1835,10 @@ def demo():
     meta = {"video": "cut.mp4", "width": 3840, "height": 2160, "fps": 29.97, "duration": t}
     imgs = [{"src": "images/n.png", "word": "Notion"}]
     p = build(style, words, meta, imgs)
-    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 30), p
+    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 29.97), p
+    # the source's real rate: the real-footage test's 29.97 cut (1996 frames, 66.5998 s) planned at 30 drew 1997
+    assert source_fps(30000 / 1001) == 29.97003 and source_fps(30.0) == 30 and source_fps(25) == 25 and source_fps(0) == 30
+    assert round(66.599813 * source_fps(30000 / 1001)) == 1996 and int(66.599813 * 30) == 1997
     chunks = p["captions"]["chunks"]
     assert all(len(c["words"]) <= 3 for c in chunks)
     assert chunks[0]["text"] == "SO THIS IS" and chunks[1]["text"] == "HOW I EDIT", chunks[:2]

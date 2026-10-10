@@ -902,7 +902,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     events = sorted(set(hard + jump + [i for a, b in moves for i in range(a, b + 1)]))
     moving = np.zeros(nfr, bool)
     for i in events:
-        moving[max(0, i - fps // 4):i + fps // 4] = True
+        moving[max(0, i - int(fps // 4)):i + int(fps // 4)] = True
     for i, c in enumerate(cards):
         d = series[i]["d"]
         for k, v in enumerate(d):

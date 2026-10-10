@@ -73,7 +73,8 @@ def pool(edit, plan):
     and their frame number, so any plan of the same cut reuses them."""
     import hashlib
     st = (Path(edit) / plan["video"]).stat()
-    key = hashlib.sha1(f"{st.st_size}-{st.st_mtime_ns}".encode()).hexdigest()[:8]
+    rate = "" if float(plan.get("fps", 30)).is_integer() else f"-{plan['fps']}"   # frame n means another time at 29.97
+    key = hashlib.sha1(f"{st.st_size}-{st.st_mtime_ns}{rate}".encode()).hexdigest()[:8]
     return f"cutout/{plan['width']}x{plan['height']}-{key}"
 
 
@@ -438,6 +439,7 @@ def demo():
         assert kept(p2, e) == []          # not every frame is there yet: check.py plan says to run matte.py
         (e / "cut.mp4").write_bytes(b"a new cut")   # a new cut never reuses the old matte
         assert pool(e, p1) != cuts[0]["src"] and missing(p1, e)[1] == [[8, 115]]
+        assert pool(e, {**p1, "fps": 29.97003}) != pool(e, p1)   # a plan at the source's 29.97: its own frames
     # refine: a flat grey wall, an orange disc with a soft edge. The edge's colour must come out orange
     # (no grey bleed), and alpha must be firm inside and zero on the open wall.
     h, w = 200, 200
