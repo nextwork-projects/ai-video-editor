@@ -6,6 +6,8 @@
     python3 profile.py set <key.path>=<value> ...  several answers in one call, one line out;
                                                   each value parsed as JSON if it can be
     python3 profile.py set <key.path> <value>     one answer (the older form)
+    python3 profile.py defaults                   "use the defaults": every unanswered style question saved as its
+                                                  default, so `missing --style` stops asking them
     python3 profile.py style <edits/NAME> [--out]  blend the profile's creators into edits/NAME/style.json
                                                   (no creators: the default style, DEFAULT_STYLE)
     python3 profile.py demo                       self-check
@@ -46,7 +48,8 @@ QUESTIONS = STYLE_QUESTIONS + VIDEO_QUESTIONS
 DEFAULTS = {"platform": "tiktok", "aspect": "9:16", "creators": [], "liked_videos": [], "brand": {"use_creator": True},
             "assets_dir": "", "names": [], "avoid": {"emoji": True, "stock": True, "icons": True, "colors": []},
             "captions": {"on": True, "style": "creator"}, "sound": {"sfx": True, "music": False},
-            "behind": False}   # unanswered: off, so no plan needs the cutout step until the user says yes
+            "behind": False,   # unanswered: off, so no plan needs the cutout step until the user says yes
+            "past_edit": False}
 ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "youtube": "16:9"}
 # Fonts every AI tool reaches for, and the default geometric / neo grotesks that read as AI-made as a
 # heading. Swapped for the preset's face unless the user's brand names them.
@@ -76,6 +79,15 @@ def save(prof):
     raw["aspect"] = ASPECT.get(raw.get("platform"), raw.get("aspect", "9:16"))
     path().write_text(json.dumps(raw, indent=1))
     return path()
+
+
+def save_defaults():
+    """Every unanswered style question saved as its default: the answer "use the defaults" (or a style step
+    finished on the recommended options) is an answer, so start never asks it again. Video questions stay."""
+    have = json.loads(path().read_text()) if path().exists() else {}
+    new = [q for q in STYLE_QUESTIONS if q not in have]
+    save({**have, **{q: DEFAULTS[q] for q in new}})
+    return new
 
 
 def missing(group=QUESTIONS):
@@ -329,6 +341,12 @@ def demo():
         assert missing() == list(QUESTIONS) and missing(VIDEO_QUESTIONS) == ["audience", "names"]
         save({"platform": "youtube", "creators": [{"handle": "a"}]})
         assert load()["aspect"] == "16:9" and "creators" not in missing() and "audience" in missing()
+        # the real-footage test: setup finished on "use the defaults", which saved nothing, so start's
+        # `missing --style` printed all 10 style ids and asked them again. Defaults are saved as answers
+        assert save_defaults() == [q for q in STYLE_QUESTIONS if q not in ("platform", "creators")]
+        assert missing(STYLE_QUESTIONS) == [] and missing(VIDEO_QUESTIONS) == ["audience", "names"]
+        assert load()["platform"] == "youtube" and load()["creators"] == [{"handle": "a"}], "answers kept"
+        assert save_defaults() == [] and all(q in DEFAULTS for q in STYLE_QUESTIONS)
         # no creators (the recommended answer): the default style is written, never an exit
         save({"creators": [], "captions": {"style": "karaoke"}})
         out, st = write_style(d, out=Path(d) / "style.json")
@@ -403,6 +421,9 @@ def main():
     elif a and a[0] == "missing":
         group = {"--style": STYLE_QUESTIONS, "--video": VIDEO_QUESTIONS}.get(a[1] if len(a) > 1 else "", QUESTIONS)
         print("\n".join(missing(group)) or "(all answered)")
+    elif a == ["defaults"]:
+        new = save_defaults()
+        print(f"saved the defaults for {', '.join(new)} -> {path()}" if new else "(all style questions answered)")
     elif len(a) >= 2 and a[0] == "set":
         pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
         bad = [x for x, p in zip(a[1:], pairs) if len(p) != 2 or not p[0]]
