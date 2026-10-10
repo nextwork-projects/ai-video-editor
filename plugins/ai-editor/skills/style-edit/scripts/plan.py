@@ -1791,8 +1791,8 @@ def contrast_floors(edit_dir, out):
     stamp = f"{ck.name}@{ck.stat().st_mtime:.0f}" if ck.exists() else None
     if low and out.exists() and stamp not in doc["read"]:
         # a plain page keeps its glow unless the render read it under CONTRAST_MIN (fail_at): a WARN is its look
-        fail = ((json.loads(ck.read_text()).get("render") or {}).get("caption_contrast") or {}).get("fail_at") or []
-        cap = json.loads(out.read_text())["captions"]
+        fail = ((json.loads(ck.read_text(encoding="utf-8")).get("render") or {}).get("caption_contrast") or {}).get("fail_at") or []
+        cap = json.loads(out.read_text(encoding="utf-8"))["captions"]
         order = steps_of(cap.get("style") or {})
         for c in cap["chunks"]:
             hit = lambda ts: any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for t in ts)
@@ -2129,8 +2129,8 @@ def demo_contrast():
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
         (d / "plan.json").write_text(json.dumps({"captions": {"style": plain, "chunks": [
-            {"start": 1.0, "end": 2.0, "treat": "glow"}, {"start": 2.0, "end": 3.0, "treat": "glow"}, {"start": 3.0, "end": 4.0, "treat": "shadow"}]}}))
-        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5, 2.5, 3.5], "fail_at": [2.5]}}}))
+            {"start": 1.0, "end": 2.0, "treat": "glow"}, {"start": 2.0, "end": 3.0, "treat": "glow"}, {"start": 3.0, "end": 4.0, "treat": "shadow"}]}}), encoding="utf-8")
+        (d / "check.json").write_text(json.dumps({"render": {"caption_contrast": {"low_at": [1.5, 2.5, 3.5], "fail_at": [2.5]}}}), encoding="utf-8")
         assert contrast_floors(d, d / "plan.json") == {"2.00": "stroke", "3.00": "glow"}   # a WARN keeps the glow
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"

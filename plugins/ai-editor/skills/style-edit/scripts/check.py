@@ -594,7 +594,7 @@ def google_fonts(remotion=None):
     if remotion is None:
         from edit import REMOTION as remotion
     idx = Path(remotion) / "node_modules/@remotion/google-fonts/dist/esm/index.mjs"
-    return set(re.findall(r"fontFamily: '([^']+)'", idx.read_text())) if idx.exists() else None
+    return set(re.findall(r"fontFamily: '([^']+)'", idx.read_text(encoding="utf-8"))) if idx.exists() else None
 
 
 def font_findings(plan, fonts):

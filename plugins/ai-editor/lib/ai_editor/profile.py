@@ -358,7 +358,7 @@ def demo():
         save({"creators": [], "captions": {"style": "karaoke"}})
         out, st = write_style(d, out=Path(d) / "style.json")
         assert out.exists() and st["zoom"]["per_min"] >= 6 and st["captions"]["effect"] == "karaoke", st
-        assert json.loads(out.read_text())["handle"] == "default"
+        assert json.loads(out.read_text(encoding="utf-8"))["handle"] == "default"
         save({"creators": [], "captions": {"on": True, "style": "creator"}})   # the recommended answer: plain white TikTok Sans
         cap = write_style(d, out=Path(d) / "style.json")[1]["captions"]
         assert cap["font_match"] == "TikTok Sans" and cap["size_pct"] < 5.5 and 600 <= cap["weight"] <= 700, cap
