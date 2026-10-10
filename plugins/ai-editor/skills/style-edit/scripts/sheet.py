@@ -70,7 +70,7 @@ def labels(plan):
 def build(stills, plan, out):
     from PIL import Image, ImageDraw, ImageFont
     lab = stills / "labels.json"     # edit.py stills --at writes its own labels: the moments asked for
-    names = json.loads(lab.read_text()) if lab.exists() else labels(plan)
+    names = json.loads(lab.read_text(encoding="utf-8")) if lab.exists() else labels(plan)
     files = [(n, stills / f"{n}.png") for n in names if (stills / f"{n}.png").exists()]
     if not files:
         sys.exit(f"ERROR: no stills in {stills}")
@@ -135,7 +135,7 @@ def demo():
         # edit.py stills --at: its labels.json names the tiles
         (d / "at").mkdir()
         Image.new("RGB", (540, 960), (30, 30, 200)).save(d / "at" / "t0015.40.png")
-        (d / "at" / "labels.json").write_text(json.dumps({"t0015.40": "15.40s  card 1 logo 'x'"}))
+        (d / "at" / "labels.json").write_text(json.dumps({"t0015.40": "15.40s  card 1 logo 'x'"}), encoding="utf-8")
         assert build(d / "at", plan, d / "at" / "sheet.png")["tiles"] == ["1  15.40s  card 1 logo 'x'"]
     print("demo ok")
 
@@ -152,7 +152,7 @@ def main():
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
     stills = edit / (a.dir or f"stills{plan_path.stem[len('plan'):]}")
-    r = build(stills, json.loads(plan_path.read_text()), stills / "sheet.png")
+    r = build(stills, json.loads(plan_path.read_text(encoding="utf-8")), stills / "sheet.png")
     print(json.dumps(r))
 
 

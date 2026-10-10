@@ -2211,12 +2211,12 @@ def demo_beats():
     words.sort(key=lambda w: w["start"])
     with tempfile.TemporaryDirectory() as t:
         d = Path(t)
-        (d / "captions.json").write_text(json.dumps(words))
+        (d / "captions.json").write_text(json.dumps(words), encoding="utf-8")
         (d / "visuals.json").write_text(json.dumps([{"word": "Duolingo", "nth": 1, "kind": "logo", "brand": "Duolingo"},
-                                                    {"word": "Duolingo", "nth": 2, "kind": "logo", "brand": "Duolingo"}]))
+                                                    {"word": "Duolingo", "nth": 2, "kind": "logo", "brand": "Duolingo"}]), encoding="utf-8")
         (d / "plan.json").write_text(json.dumps({"cards": [
             {"anim": {"type": "logo"}, "lane": "logo", "start": 15.32, "end": 16.3, "trigger_word": "Duolingo", "box": [40, 50, 20, 11]},
-            {"anim": {"type": "logo"}, "lane": "logo", "start": 16.9, "end": 17.9, "trigger_word": "Duolingo", "box": [40, 50, 20, 11]}]}))
+            {"anim": {"type": "logo"}, "lane": "logo", "start": 16.9, "end": 17.9, "trigger_word": "Duolingo", "box": [40, 50, 20, 11]}]}), encoding="utf-8")
 
         def run(*a):
             o = io.StringIO()
@@ -2227,17 +2227,17 @@ def demo_beats():
         assert "card:0  15.32-16.30 s  logo  'Duolingo'@1  box 40,50,20,11  <- visuals.json[0]" in out, out
         assert "'Duolingo'@2" in out and "visuals.json[1]" in out, out
         run("beat", t, "0:15", "box=[40,17,20,11]", "props.label=Duolingo")   # 0.32 s before the card: the card it means
-        vis = json.loads((d / "visuals.json").read_text())
+        vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
         assert vis[0]["box"] == [40, 17, 20, 11] and vis[0]["props"] == {"label": "Duolingo"} and "box" not in vis[1], vis
         run("beat", t, "card:1", "hold_s=2.5")
         run("beat", t, "Duolingo@1", "props=null")
-        vis = json.loads((d / "visuals.json").read_text())
+        vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
         assert vis[1]["hold_s"] == 2.5 and "props" not in vis[0], vis
-        (d / "fill.json").write_text(json.dumps([{"word": "reference", "nth": 1, "kind": "anim", "type": "flow", "props": {}}]))
+        (d / "fill.json").write_text(json.dumps([{"word": "reference", "nth": 1, "kind": "anim", "type": "flow", "props": {}}]), encoding="utf-8")
         run("beat", t, "--add", str(d / "fill.json"))
-        assert [b["word"] for b in json.loads((d / "visuals.json").read_text())] == ["reference", "Duolingo", "Duolingo"]
+        assert [b["word"] for b in json.loads((d / "visuals.json").read_text(encoding="utf-8"))] == ["reference", "Duolingo", "Duolingo"]
         run("beat", t, "card:1", "--drop")
-        assert [b.get("nth") for b in json.loads((d / "visuals.json").read_text())] == [1, 1]
+        assert [b.get("nth") for b in json.loads((d / "visuals.json").read_text(encoding="utf-8"))] == [1, 1]
         try:
             run("beat", t, "9:00", "box=[1,1,1,1]")
             raise AssertionError("no exit")
@@ -2248,7 +2248,7 @@ def demo_beats():
         os.utime(d / "plan.json", (1, 1))
         keep_rendered(d / "plan.json")
         assert (d / "render.plan.json").read_bytes() == (d / "plan.json").read_bytes()
-        (d / "plan.json").write_text("{}")
+        (d / "plan.json").write_text("{}", encoding="utf-8")
         keep_rendered(d / "plan.json")
         assert (d / "render.plan.json").read_bytes() != b"{}"
 
@@ -2264,7 +2264,7 @@ def beat_cmd(argv):
     ap.add_argument("--plan", default="plan.json")
     a = ap.parse_args(argv)
     edit = Path(a.edit).resolve()
-    rd = lambda n, d: json.loads((edit / n).read_text()) if (edit / n).exists() else d
+    rd = lambda n, d: json.loads((edit / n).read_text(encoding="utf-8")) if (edit / n).exists() else d
     words = rd("captions.json", None) or rd("words.json", [])
     plan = rd(a.plan, {"cards": []})
     sources = [(n, rd(n, [])) for n in BEAT_FILES]
@@ -2282,14 +2282,14 @@ def beat_cmd(argv):
         vis = dict(sources)["visuals.json"]
         at = lambda b: (said(words, b.get("word") or "")[b.get("nth", 1) - 1:] or [math.inf])[0]
         for f in a.add:
-            for b in json.loads(Path(f).read_text()):
+            for b in json.loads(Path(f).read_text(encoding="utf-8")):
                 if at(b) == math.inf:
                     print(f"warning: '{b.get('word')}' (time {b.get('nth', 1)}) is never said in this cut; added anyway, plan.py will skip it",
                           file=sys.stderr)
                 k = next((i for i, x in enumerate(vis) if at(x) > at(b)), len(vis))
                 vis.insert(k, b)
                 changed.append(f"added {b.get('kind')} {b.get('type') or b.get('brand') or ''} on '{b.get('word')}'".replace("  ", " "))
-        (edit / "visuals.json").write_text(json.dumps(vis, indent=1))
+        (edit / "visuals.json").write_text(json.dumps(vis, indent=1), encoding="utf-8")
     elif a.ref:
         hits = find_beats(a.ref, plan, words, sources)
         if not hits:
@@ -2310,7 +2310,7 @@ def beat_cmd(argv):
             changed.append(f"{name}[{i}] '{items[i].get('word')}': " + json.dumps(items[i]))
         for name, items in sources:
             if any(n == name for n, _ in hits):
-                (edit / name).write_text(json.dumps(items, indent=1))
+                (edit / name).write_text(json.dumps(items, indent=1), encoding="utf-8")
     else:
         sys.exit("give a beat (card:3, 0:15, word@2) with key=value or --drop, or --add FILE")
     for line in changed:
@@ -2380,7 +2380,7 @@ def main():
             print(f"behind cards: run matte.py {edit_dir}" + (f" --plan {out.name}" if out.name != "plan.json" else "")
                   + " (it cuts only the frames not cut yet)", file=sys.stderr)
     keep_rendered(out)
-    out.write_text(json.dumps(plan, indent=1))
+    out.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     from ai_tells import check_plan as ai_tells, for_brand   # the AI-made look (references/ai-tells.md)
     for f in for_brand(ai_tells(plan, visuals), prof.get("brand")):
         print(f"{'error' if f['level'] == 'BAN' else 'warning'}: AI tell '{f['tell']}': {f['where']} -> {f['fix']}", file=sys.stderr)

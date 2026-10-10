@@ -929,7 +929,7 @@ def patch(edit, plan_path, plan, pub, tag, ranges=None, run=None, bundle_to=None
     if ranges:
         spans = [[secs(a), secs(b)] for a, _, b in (r.partition("-") for r in ranges)]
     elif snap.exists():
-        spans, why = changed_ranges(json.loads(snap.read_text()), plan)
+        spans, why = changed_ranges(json.loads(snap.read_text(encoding="utf-8")), plan)
         if spans is None:
             sys.exit(f"the change is not local ({why} changed): render in full (edit.py render {edit})")
         if not spans:
@@ -1001,17 +1001,17 @@ def demo_patch():
              "-c:a", "aac" if ext == "mp4" else "pcm_s16le", str(out)], check=True)
         mk(t / "render.mp4", "red", 300, "mp4")
         plan["fps"] = 30000 / 1001
-        (t / "plan.json").write_text(json.dumps(plan))
+        (t / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
         # no record of the rendered plan: patch asks for a range
         try:
             patch(t, t / "plan.json", plan, t, "")
             raise AssertionError("no exit")
         except SystemExit as e:
             assert "--range" in str(e.code), e.code
-        (t / "render.plan.json").write_text(json.dumps(plan))
+        (t / "render.plan.json").write_text(json.dumps(plan), encoding="utf-8")
         moved = json.loads(json.dumps(plan))
         moved["cards"][0]["box"] = [40, 17, 20, 11]
-        (t / "plan.json").write_text(json.dumps(moved))
+        (t / "plan.json").write_text(json.dumps(moved), encoding="utf-8")
         asked = []
 
         def fake(cmd, log, stall, **k):
@@ -1021,7 +1021,7 @@ def demo_patch():
             return 0
         patch(t, t / "plan.json", moved, t, "", run=fake, bundle_to=lambda a, b: None)
         assert asked == [(44, 135)], asked          # 1.5-4.5 s at 29.97 fps
-        assert json.loads((t / "render.plan.json").read_text()) == moved
+        assert json.loads((t / "render.plan.json").read_text(encoding="utf-8")) == moved
         n = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
                             "stream=nb_read_frames", "-of", "csv=p=0", str(t / "render.mp4")], capture_output=True, text=True).stdout
         assert int(n) == 300, n
@@ -1232,7 +1232,7 @@ def main():
             frames, folder = frames_at(plan, a.at), edit / f"stills{tag}-at"
             shutil.rmtree(folder, ignore_errors=True)
             folder.mkdir()
-            (folder / "labels.json").write_text(json.dumps(at_labels(plan, frames)))
+            (folder / "labels.json").write_text(json.dumps(at_labels(plan, frames)), encoding="utf-8")
         else:
             frames, folder = still_frames(plan), edit / f"stills{tag}"
         node("stills", pub, plan_path, folder, *[f"{k}={v}" for k, v in frames.items()])
