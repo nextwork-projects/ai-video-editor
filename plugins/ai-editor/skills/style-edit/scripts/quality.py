@@ -239,6 +239,16 @@ def scene_land(c, words, k, lead=None):
     return word, c["start"] + (0 if cut else 0.31 * k)
 
 
+def card_diff(a, behind):
+    """Per pixel, how far a card's box on the render is from the footage under it: the least over the
+    candidate footage frames (this one, and one either side), so a render a frame off the cut reads 0 where
+    there is no card."""
+    import cv2
+    import numpy as np
+    blur = cv2.GaussianBlur(a, (5, 5), 0)
+    return np.min([cv2.absdiff(blur, cv2.GaussianBlur(b, (5, 5), 0)).max(axis=2) for b in behind], axis=0)
+
+
 def landing(area, f0, fps):
     """(frame it landed, first-frame verdict) from a card's ink area per frame, area[0] = frame f0-3.
     verdict: None, 'flash' (whole then gone) or 'whole' (no entrance)."""
@@ -793,9 +803,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     series = {i: {"area": [], "bbox": [], "d": [], "prev": None} for i in range(len(cards))}
     small_r, small_b, kept, caps = [], [], {}, []
     prev_r = prev_b = None
+    cut, cut_next = None, next(behind, None)
     for n, frame in enumerate(stream(video, "null", W, H, fps)):
         t = n / fps
-        cut = next(behind, None)
+        cut_prev, cut, cut_next = cut, cut_next, next(behind, None)
         if cut is None:
             break
         sr_ = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 36), interpolation=cv2.INTER_AREA).astype(np.float32)
@@ -811,11 +822,13 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         need = up or n in sframes or n in cap_frames
         if not need:
             continue
-        if split:
+        nb = []      # the footage one frame either side: where the render lands a frame off the cut (a 29.97 fps
+        if split:    # source drawn at 30), a card's box would otherwise read the footage's own change as the card
             bg = ground
         else:
             zm = np.float32(footage_affine(t, plan, W, H))
             bg = cv2.warpAffine(cut, zm, (W, H))
+            nb = [cv2.warpAffine(c_, zm, (W, H)) for c_ in (cut_prev, cut_next) if c_ is not None and up]
             # a behind card: the speaker's cutout over it is the speaker, not the card (and its refined
             # edge differs a little from the raw camera), so his pixels read as footage here
             k = any(cards[i].get("layer") == "behind" for i in up) and \
@@ -835,8 +848,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             x0, y0, x1, y1 = boxes[i]
             if x1 <= x0 or y1 <= y0:
                 continue
-            a, b = frame[y0:y1, x0:x1], bg[y0:y1, x0:x1]
-            diff = cv2.absdiff(cv2.GaussianBlur(a, (5, 5), 0), cv2.GaussianBlur(b, (5, 5), 0)).max(axis=2)
+            diff = card_diff(frame[y0:y1, x0:x1], [b_[y0:y1, x0:x1] for b_ in [bg] + nb])
             ink = diff > INK_DIFF["split" if split else "overlay"]
             r0, r1 = max(0, cap_rows[0] - y0), max(0, cap_rows[1] - y0)
             ink[r0:r1] = False                      # the caption is not the card
@@ -1264,6 +1276,14 @@ def demo():
     assert landing(flash, 30, 30)[1] == "flash"
     assert landing([0, 0, 0] + [1000] * 25, 30, 30)[1] == "whole"
     assert landing([900, 900, 900] + [1000] * 25, 30, 30) == (None, None)
+    # the sample's 'Duolingo' logo (15.32 s): the screen in the shot changes from blue to cream as the logo starts,
+    # and the render sits one frame behind the cut there. Against this frame of the cut alone the box read 3036 px
+    # of "ink" on the logo's first frame, then 1259: a flash. Against the footage frames either side it reads 0
+    blue, cream = np.full((40, 80, 3), (230, 120, 20), np.uint8), np.full((40, 80, 3), (200, 235, 245), np.uint8)
+    assert (card_diff(blue, [cream]) > 40).sum() == 3200 and (card_diff(blue, [cream, blue]) > 40).sum() == 0
+    logo = blue.copy()
+    logo[10:30, 30:50] = (60, 200, 90)
+    assert 300 < (card_diff(logo, [cream, blue]) > 40).sum() <= 500
     # scene_land: planned 0.3 x k early (k 1.35), word 5.0, so start 5.0 - 0.1 - 0.405; half done at start + 0.31 k
     k = 1.35
     sc = {"trigger_word": "Notion,", "start": round(5.0 - 0.1 - 0.3 * k, 3)}
