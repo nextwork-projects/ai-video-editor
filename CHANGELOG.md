@@ -32,6 +32,11 @@ What changed for every user, newest first.
     Test: `verify_cut.py demo`.
   - A kept span under 0.2 s at the head of the take is dropped. `decisions.json` had started with a
     one-frame flash (0.0-0.033 s) and a jump to 0.43 s. Test: `test_build_timeline.py`.
+  - `read_cut.py chunks` writes no prompt for a chunk with no kept line (a long cut block) and says
+    which it skipped. Each reader now sees the cut blocks between sentences in its chunk; before,
+    only lines with a time reached a reader. A verifier sees only the lines around its finding, in
+    order, not every cut block in the take. `verify` names any reader-N.json that is missing, and
+    `-h` prints the help. Test: `read_cut.py demo`.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
   question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
