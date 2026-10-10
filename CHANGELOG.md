@@ -16,6 +16,8 @@ What changed for every user, newest first.
   `wait` never returns on them; Stop puts them back into the reopened round. The note's time is
   always the playhead, read at save: scrubbing, a transcript word, a pin or a key moves it, typing
   or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
+- The review page has a dark mode. It follows the system setting until you pick light or dark with
+  the switch in the header, and remembers the pick in that browser.
 
 ## ai-editor 2.2.0 (2026-10-09)
 

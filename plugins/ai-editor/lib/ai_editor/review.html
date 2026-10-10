@@ -1,8 +1,21 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>review</title>
+<script>try{const t=localStorage.getItem('review-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
 /* stone, monochrome: black marks only the current thing */
-:root{--page:#FAFAF9;--panel:#FFFFFF;--line:#E7E5E4;--line2:#D6D3D1;--chip:#F5F5F4;--ink:#0C0A09;--ink2:#44403C;--body:#57534E;--muted:#78716C;--quiet:#A8A29E;--film:#1C1917;--sh:#0C0A0914 0 1px 2px}
+:root{--page:#FAFAF9;--panel:#FFFFFF;--raise:#FFFFFF;--line:#E7E5E4;--line2:#D6D3D1;--chip:#F5F5F4;--hover:#EFEEEC;
+  --ink:#0C0A09;--ink-hover:#000000;--onink:#FFFFFF;--strong:#000000;--ink2:#44403C;--body:#57534E;--muted:#78716C;--quiet:#A8A29E;
+  --film:#1C1917;--range:#0C0A0924;--shade:#0C0A098C;--zone:#FAFAF9E6;--sendoff:#D6D3D1;--sendarrow:#FFFFFF;
+  --sh:0 1px 2px #0C0A0914;--pop:0 8px 30px #0C0A0914;color-scheme:light}
+/* dark: the OS setting until the user picks with the header switch (html[data-theme]) */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--page:#100E0E;--panel:#161413;--raise:#2A2725;--line:rgba(255,255,255,.10);--line2:rgba(255,255,255,.18);--chip:rgba(255,255,255,.06);--hover:rgba(255,255,255,.09);
+  --ink:#F2F0EB;--ink-hover:#FFFFFF;--onink:#100E0E;--strong:#F2F0EB;--ink2:rgba(242,240,235,.82);--body:rgba(242,240,235,.72);--muted:rgba(242,240,235,.58);--quiet:rgba(242,240,235,.45);
+  --film:#000000;--range:rgba(242,240,235,.22);--shade:#0C0A098C;--zone:#FAFAF9E6;--sendoff:rgba(255,255,255,.12);--sendarrow:rgba(242,240,235,.55);
+  --sh:0 1px 2px rgba(0,0,0,.6);--pop:0 8px 30px rgba(0,0,0,.6);color-scheme:dark}}
+:root[data-theme=dark]{--page:#100E0E;--panel:#161413;--raise:#2A2725;--line:rgba(255,255,255,.10);--line2:rgba(255,255,255,.18);--chip:rgba(255,255,255,.06);--hover:rgba(255,255,255,.09);
+  --ink:#F2F0EB;--ink-hover:#FFFFFF;--onink:#100E0E;--strong:#F2F0EB;--ink2:rgba(242,240,235,.82);--body:rgba(242,240,235,.72);--muted:rgba(242,240,235,.58);--quiet:rgba(242,240,235,.45);
+  --film:#000000;--range:rgba(242,240,235,.22);--shade:#0C0A098C;--zone:#FAFAF9E6;--sendoff:rgba(255,255,255,.12);--sendarrow:rgba(242,240,235,.55);
+  --sh:0 1px 2px rgba(0,0,0,.6);--pop:0 8px 30px rgba(0,0,0,.6);color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--page);color:var(--ink);font:13px/16px system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased;font-synthesis:none}
 body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -15,12 +28,12 @@ button:disabled{cursor:default}
 .seg{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--chip)}
 .seg>button{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:9px;font-size:14px;line-height:18px;color:var(--muted);white-space:nowrap}
 .seg>button:hover:not(:disabled):not(.on){color:var(--ink)}
-.seg>button.on{background:#fff;box-shadow:var(--sh);color:#000;font-weight:600}
+.seg>button.on{background:var(--raise);box-shadow:var(--sh);color:var(--strong);font-weight:600}
 .seg>button small{font-size:13px;line-height:16px;color:var(--muted);font-weight:400}
 
 header{height:64px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 28px}
 .brand{width:260px;display:flex;align-items:baseline;gap:10px;flex-shrink:0;min-width:0}
-.brand b{font-size:17px;line-height:22px;font-weight:600;letter-spacing:-.01em;color:#000}
+.brand b{font-size:17px;line-height:22px;font-weight:600;letter-spacing:-.01em;color:var(--strong)}
 .brand span{font-size:14px;line-height:18px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stages{gap:6px}
 #stages>button{gap:8px;padding:7px 14px;color:var(--quiet);font-weight:400}
@@ -28,14 +41,16 @@ header{height:64px;flex-shrink:0;display:flex;align-items:center;justify-content
 #stages>button.on .n{font-weight:600}
 #stages>button.done{color:var(--muted)}
 #stages>button:disabled{color:var(--quiet)}
-#stages>button.on{color:#000;font-weight:600}#stages>button.on small{font-weight:400}
-.status{width:260px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--muted)}
+#stages>button.on{color:var(--strong);font-weight:600}#stages>button.on small{font-weight:400}
+.status{min-width:260px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--muted)}
 .status i{width:8px;height:8px;border-radius:4px;background:var(--quiet);flex-shrink:0}
 .status.work{color:var(--ink)}.status.work i{background:var(--ink)}
-#howbtn{width:26px;height:26px;border-radius:13px;display:grid;place-items:center;color:var(--muted);margin-left:6px}
-#howbtn:hover{background:var(--chip);color:var(--ink)}
+#howbtn,.themebtn{width:26px;height:26px;border-radius:13px;display:grid;place-items:center;color:var(--muted);flex-shrink:0}
+#howbtn:hover,.themebtn:hover{background:var(--chip);color:var(--ink)}
+.status .themebtn{margin-left:6px}
+.mtheme{display:none}
 .mhead,#mapprove{display:none}
-#how{display:none;position:fixed;top:56px;right:20px;z-index:20;width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 80px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 8px 30px #0C0A0914}
+#how{display:none;position:fixed;top:56px;right:20px;z-index:20;width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--pop)}
 #how.open{display:block}
 #how ol{margin:0 0 16px;padding:0;list-style:none;display:grid;gap:12px}
 #how li{font-size:14px;line-height:20px;color:var(--body)}
@@ -49,7 +64,7 @@ main{flex:1;min-height:0;display:flex;gap:20px;padding:0 20px 20px}
 #cmprow{display:none;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0}
 body.canCompare #cmprow{display:flex}
 #cmprow .hint{display:flex;align-items:center;gap:12px;color:var(--muted)}
-#ver2{border:1px solid var(--line);background:#fff;border-radius:10px;padding:5px 8px;font-size:13px}
+#ver2{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:5px 8px;font-size:13px}
 .stagewrap{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px}
 #stage{flex:1;min-height:0;display:flex;gap:36px;container-type:size}
 #pair{display:flex;gap:24px;justify-content:center;height:100%;flex:1;min-width:0}
@@ -59,26 +74,26 @@ body.withTx .pl{width:min(46cqw,calc(100cqh * var(--arw) / var(--arh)))}
 body.compare .pl{width:min(calc((100cqw - 24px) / 2),calc((100cqh - 26px) * var(--arw) / var(--arh)))}
 .pl figcaption{display:none;align-items:baseline;gap:8px;font-size:13px;line-height:16px;color:var(--quiet);height:18px}
 .pl figcaption b{font-size:14px;line-height:18px;font-weight:600;color:var(--muted)}
-#p1 figcaption{color:var(--muted)}#p1 figcaption b{color:#000}
+#p1 figcaption{color:var(--muted)}#p1 figcaption b{color:var(--strong)}
 body.compare .pl figcaption{display:flex}
 #p2{display:none}body.compare #p2{display:flex}
 .player{position:relative;width:100%;aspect-ratio:var(--arw)/var(--arh);border-radius:16px;overflow:hidden;background:var(--film)}
 body.compare #p1 .player{outline:2px solid var(--ink);outline-offset:3px}
 video{width:100%;height:100%;display:block;object-fit:contain;background:var(--film);cursor:pointer}
-#oldbadge{display:none;position:absolute;top:12px;left:12px;padding:5px 10px;border-radius:9px;background:#fff;font-size:13px;z-index:2}
+#oldbadge{display:none;position:absolute;top:12px;left:12px;padding:5px 10px;border-radius:9px;background:var(--panel);font-size:13px;z-index:2}
 .player:fullscreen video{object-fit:contain}
 .sz{display:none}
 .player.safe .sz{display:block;position:absolute;pointer-events:none}
-.sz i{position:absolute;background:#0C0A098C}
+.sz i{position:absolute;background:var(--shade)}
 .sz .zt{left:0;right:0;top:0;height:14%}.sz .zb{left:0;right:0;bottom:0;height:22%}
 .sz .zl{left:0;top:14%;width:6%;height:64%}.sz .zr{right:0;top:14%;width:14%;height:64%}
-.sz b{position:absolute;left:6%;top:14%;width:80%;height:64%;border:1px dashed #FAFAF9E6}
+.sz b{position:absolute;left:6%;top:14%;width:80%;height:64%;border:1px dashed var(--zone)}
 
 /* the transcript beside a cut: struck words were cut, the line playing now is highlighted */
 #tx{display:none;flex:1;min-width:0;flex-direction:column;gap:18px;padding-top:6px;min-height:0}
 body.withTx #tx{display:flex}
 .txhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 14px}
-.txhead b{font-size:15px;line-height:18px;font-weight:600;color:#000}
+.txhead b{font-size:15px;line-height:18px;font-weight:600;color:var(--strong)}
 .txhead span{color:var(--muted);text-align:right}
 #txlines{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:18px;padding-bottom:40vh;scrollbar-width:thin}
 .ln{display:flex;gap:16px;padding:0 14px;border-radius:12px}
@@ -90,15 +105,15 @@ body.withTx #tx{display:flex}
 .lw span{cursor:pointer;border-radius:5px}
 .lw span:hover{text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:4px}
 .lw s{color:var(--quiet);text-decoration-thickness:1px}
-.lw .now{background:var(--ink);color:#fff;padding:0 4px}
-.lw .pz{font-size:13px;line-height:20px;color:var(--quiet);border:1px solid var(--line);background:#fff;border-radius:6px;padding:0 6px}
+.lw .now{background:var(--ink);color:var(--onink);padding:0 4px}
+.lw .pz{font-size:13px;line-height:20px;color:var(--quiet);border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:0 6px}
 
 .transport{height:44px;flex-shrink:0;display:flex;align-items:center;gap:14px;padding-right:8px}
-#play{width:40px;height:40px;border-radius:20px;background:var(--ink);display:grid;place-items:center;flex-shrink:0}
+#play{width:40px;height:40px;border-radius:20px;background:var(--ink);color:var(--onink);display:grid;place-items:center;flex-shrink:0}
 .tbtn{font-size:14px;line-height:18px;color:var(--body);white-space:nowrap}
 .tbtn:hover{color:var(--ink)}
 #time{display:flex;align-items:baseline;gap:6px;padding-left:6px;font-size:15px;line-height:18px;white-space:nowrap}
-#time b{font-weight:600;color:#000}#time span{color:var(--quiet)}
+#time b{font-weight:600;color:var(--strong)}#time span{color:var(--quiet)}
 .grow{flex:1;display:flex;justify-content:center;min-width:0}
 #vtabs>button{font-size:13px;line-height:16px;padding:5px 12px}
 #vtabs:empty{display:none}
@@ -106,23 +121,23 @@ body.withTx #tx{display:flex}
 #safebtn{display:none}body.vertical #safebtn{display:inline}
 
 /* the scrubber: split at cut points (or chapters), numbered note pins above, tracks under it */
-.timeline{flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px 18px;display:flex;flex-direction:column;gap:8px}
+.timeline{flex-shrink:0;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px 18px;display:flex;flex-direction:column;gap:8px}
 .trow{display:flex;align-items:center;gap:12px}
 .trow>.tl{display:none;width:60px;flex-shrink:0;color:var(--muted);font-size:12px;line-height:16px}
 .timeline.tracked{padding-bottom:14px}
 .timeline.tracked .trow>.tl{display:block}
 .trow>div{flex:1;min-width:0;position:relative}
 #pins{height:26px}
-.pin{position:absolute;top:0;width:24px;height:24px;margin-left:-12px;border-radius:8px;border:1px solid var(--line2);background:#fff;color:var(--ink);font-size:12px;line-height:16px;font-weight:600;display:grid;place-items:center}
-.pin.cur{background:var(--ink);border-color:var(--ink);color:#fff}
+.pin{position:absolute;top:0;width:24px;height:24px;margin-left:-12px;border-radius:8px;border:1px solid var(--line2);background:var(--panel);color:var(--ink);font-size:12px;line-height:16px;font-weight:600;display:grid;place-items:center}
+.pin.cur{background:var(--ink);border-color:var(--ink);color:var(--onink)}
 .pin.fixed{background:var(--chip);border-color:var(--line);color:var(--quiet)}
 .pin.todo{border:1.5px solid var(--ink)}
 #bar{height:14px;cursor:pointer;touch-action:none;user-select:none}
 .sg{position:absolute;top:3px;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
 .sg i{display:block;height:100%;background:var(--ink)}
-.range{position:absolute;top:-3px;bottom:-3px;background:#0C0A0924;border-radius:4px;pointer-events:none}
-#knob{position:absolute;top:-2px;width:14px;height:18px;margin-left:-7px;border-radius:7px;border:2px solid var(--ink);background:#fff;pointer-events:none}
-#hover{position:absolute;top:-30px;padding:2px 7px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;transform:translateX(-50%);display:none;pointer-events:none;white-space:nowrap}
+.range{position:absolute;top:-3px;bottom:-3px;background:var(--range);border-radius:4px;pointer-events:none}
+#knob{position:absolute;top:-2px;width:14px;height:18px;margin-left:-7px;border-radius:7px;border:2px solid var(--ink);background:var(--panel);pointer-events:none}
+#hover{position:absolute;top:-30px;padding:2px 7px;border-radius:6px;background:var(--ink);color:var(--onink);font-size:12px;transform:translateX(-50%);display:none;pointer-events:none;white-space:nowrap}
 #ticks{height:16px;font-size:12px;line-height:16px;color:var(--quiet)}
 #ticks span{position:absolute;top:0;white-space:nowrap;overflow:hidden}
 #ticks span.cur{color:var(--ink)}
@@ -136,20 +151,20 @@ body.withTx #tx{display:flex}
 .mini{display:none}
 
 /* the panel: notes and Claude's work, the composer at its foot */
-aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:20px;display:flex;flex-direction:column;overflow:hidden}
+aside{width:400px;flex-shrink:0;background:var(--panel);border:1px solid var(--line);border-radius:20px;display:flex;flex-direction:column;overflow:hidden}
 .phead{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;flex-shrink:0;gap:8px}
 .phead span{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mhead2{display:none}
 #list{flex:1;min-height:0;overflow:auto;padding:8px 20px 16px;display:flex;flex-direction:column;gap:16px;scrollbar-width:thin}
 .claude{display:flex;flex-direction:column;gap:10px;padding-top:4px}
 .claude>div{display:flex;flex-direction:column;gap:4px}
-.claude b{font-size:13px;line-height:16px;font-weight:600;color:#000}
+.claude b{font-size:13px;line-height:16px;font-weight:600;color:var(--strong)}
 .claude p{margin:0;font-size:14px;line-height:21px;color:var(--ink2)}
 .claude a{color:var(--ink);text-underline-offset:3px;text-decoration-color:var(--line2)}
 .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
 .steps li{display:flex;align-items:center;gap:10px;color:var(--muted)}
-.steps li .ic{width:16px;flex-shrink:0;display:flex;justify-content:center}
-.steps li.now{color:#000;font-weight:600}
+.steps li .ic{width:16px;flex-shrink:0;display:flex;justify-content:center;color:var(--quiet)}
+.steps li.now{color:var(--strong);font-weight:600}
 .steps li.now .ic i{width:7px;height:7px;border-radius:4px;background:var(--ink);animation:pulse 1.2s ease-in-out infinite}
 .steps li.pb{padding-left:26px;font-weight:400;color:var(--body)}
 .steps li.pb em{width:120px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex-shrink:0}
@@ -158,28 +173,28 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
 .since{font-size:12px;line-height:16px;color:var(--quiet)}
 .note{display:flex;flex-direction:column;align-items:flex-end;gap:6px;cursor:pointer}
 .bub{width:316px;max-width:100%;display:flex;gap:12px;padding:10px;border-radius:14px;background:var(--chip)}
-.note:hover .bub{background:#EFEEEC}
+.note:hover .bub{background:var(--hover)}
 .thumb{width:40px;height:71px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--line)}
 .thumb.wide{width:64px;height:36px;border-radius:7px}
 .nb{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .nh{display:flex;align-items:center;gap:8px;min-width:0}
-.tchip{background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 7px;font-size:12px;line-height:16px;font-weight:600;color:#000;white-space:nowrap;flex-shrink:0}
+.tchip{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:2px 7px;font-size:12px;line-height:16px;font-weight:600;color:var(--strong);white-space:nowrap;flex-shrink:0}
 .q{flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nb p{margin:0;font-size:14px;line-height:20px;color:#000;overflow-wrap:anywhere}
+.nb p{margin:0;font-size:14px;line-height:20px;color:var(--strong);overflow-wrap:anywhere}
 .nb .cardm{font-size:12px;line-height:16px;color:var(--muted)}
 .att{display:flex;gap:6px;flex-wrap:wrap}
-.att a{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:12px;line-height:16px;color:var(--body);text-decoration:none}
+.att a{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12px;line-height:16px;color:var(--body);text-decoration:none}
 .att img{width:28px;height:28px;border-radius:6px;object-fit:cover}
 .nmeta{font-size:12px;line-height:16px;color:var(--muted)}
 .reply{align-self:stretch;display:flex;gap:8px;padding:2px 24px 0 0}
-.reply .ic{width:16px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.reply .ic{color:var(--ink);width:16px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .reply .ic i{width:9px;height:1.6px;border-radius:1px;background:var(--muted)}
 .reply .ic u{width:7px;height:7px;border-radius:4px;border:1.5px solid var(--ink)}
 .reply>div{flex:1;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:20px;color:var(--ink2)}
-.obtn{align-self:flex-start;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:500;color:#000}
+.obtn{align-self:flex-start;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13px;font-weight:500;color:var(--strong)}
 .obtn:hover{border-color:var(--line2)}
 .note{position:relative}
-.acts{display:none;position:absolute;top:-10px;right:8px;gap:12px;padding:3px 10px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:var(--sh)}
+.acts{display:none;position:absolute;top:-10px;right:8px;gap:12px;padding:3px 10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--sh)}
 .note:hover .acts,.note:focus-within .acts{display:flex}
 @media (hover:none){.acts{display:flex;position:static;align-self:flex-end;border:0;box-shadow:none;padding:0;background:none}}
 .acts button{font-size:12px;line-height:16px;color:var(--muted)}
@@ -200,24 +215,24 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
 #ta{border:0;background:transparent;resize:none;outline:none;padding:0;font-size:14px;line-height:18px;min-height:18px;max-height:120px;color:var(--ink)}
 #ta::placeholder{color:var(--quiet)}
 .crow{display:flex;align-items:center;gap:8px}
-#clock{display:flex;align-items:center;gap:6px;padding:5px 9px;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:13px;line-height:16px;font-weight:600;color:#000;white-space:nowrap}
+#clock{display:flex;align-items:center;gap:6px;padding:5px 9px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:13px;line-height:16px;font-weight:600;color:var(--strong);white-space:nowrap}
 #clock.pinned{border-color:var(--ink)}
-#picbtn{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex-shrink:0}
+#picbtn{width:30px;height:30px;border-radius:10px;color:var(--muted);display:grid;place-items:center;flex-shrink:0}
 #picbtn:hover{background:var(--chip)}
-#scope{display:none;border:1px solid var(--line);background:#fff;border-radius:10px;padding:5px 8px;font-size:13px;max-width:180px}
-#savebtn{width:30px;height:30px;border-radius:15px;background:var(--line2);display:grid;place-items:center;flex-shrink:0;margin-left:auto}
-#savebtn.ready{background:var(--ink)}
+#scope{display:none;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:5px 8px;font-size:13px;max-width:180px}
+#savebtn{width:30px;height:30px;border-radius:15px;background:var(--sendoff);color:var(--sendarrow);display:grid;place-items:center;flex-shrink:0;margin-left:auto}
+#savebtn.ready{background:var(--ink);color:var(--onink)}
 #pics{display:flex;gap:8px;flex-wrap:wrap}#pics:empty{display:none}
 #pics span{position:relative}#pics img{height:52px;border-radius:8px;border:1px solid var(--line);display:block}
-#pics button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;line-height:20px}
+#pics button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:var(--onink);font-size:12px;line-height:20px}
 .actions{display:flex;gap:8px}
-.actions button{height:42px;border-radius:12px;font-size:14px;line-height:18px;font-weight:500;padding:0 18px;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:10px;border:1px solid var(--line);background:var(--page);color:#000}
-.actions button.primary{flex:1;background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
-.actions button.primary:hover:not(:disabled){background:#000}
+.actions button{height:42px;border-radius:12px;font-size:14px;line-height:18px;font-weight:500;padding:0 18px;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:10px;border:1px solid var(--line);background:var(--page);color:var(--strong)}
+.actions button.primary{flex:1;background:var(--ink);border-color:var(--ink);color:var(--onink);font-weight:600}
+.actions button.primary:hover:not(:disabled){background:var(--ink-hover)}
 .actions button:not(.primary):hover:not(:disabled){border-color:var(--line2)}
-.actions button:disabled:not(.primary){color:var(--quiet);background:#fff}
+.actions button:disabled:not(.primary){color:var(--quiet);background:var(--panel)}
 .actions button.primary:disabled{opacity:.5}
-#send i{width:10px;height:10px;border-radius:2px;background:#fff;display:none}
+#send i{width:10px;height:10px;border-radius:2px;background:var(--onink);display:none}
 #send.stop i{display:block}
 
 @media (max-width:1180px){aside{width:340px}.bub{width:100%}.brand,.status{width:auto}}
@@ -226,10 +241,11 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
   body{height:auto;min-height:100vh;overflow:auto}
   header{height:auto;padding:12px 16px}
   .brand,#stages,.status{display:none}
-  .mhead{display:flex;flex-direction:column;gap:1px}
-  .mhead b{font-size:15px;line-height:18px;font-weight:600;color:#000}.mhead span{font-size:12px;color:var(--muted)}
-  #mapprove{display:flex;align-items:center;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:14px;font-weight:500;color:#000}
-  #mapprove.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  .mhead{display:flex;flex-direction:column;gap:1px;flex:1}
+  .mtheme{display:grid;margin-right:10px}
+  .mhead b{font-size:15px;line-height:18px;font-weight:600;color:var(--strong)}.mhead span{font-size:12px;color:var(--muted)}
+  #mapprove{display:flex;align-items:center;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);font-size:14px;font-weight:500;color:var(--strong)}
+  #mapprove.primary{background:var(--ink);border-color:var(--ink);color:var(--onink)}
   #mapprove:disabled{color:var(--quiet)}
   main{flex-direction:column;padding:0;gap:0}
   .left{gap:0;flex:none}
@@ -255,8 +271,8 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
   aside::before{content:'';display:block;width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto}
   .phead{display:none}
   .mhead2{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0}
-  .mhead2 div{display:flex;align-items:baseline;gap:6px}.mhead2 b{font-size:15px;line-height:18px;font-weight:600;color:#000}.mhead2 span{color:var(--muted)}
-  #msend{height:32px;padding:0 12px;border-radius:10px;background:var(--ink);color:#fff;font-size:13px;font-weight:600}
+  .mhead2 div{display:flex;align-items:baseline;gap:6px}.mhead2 b{font-size:15px;line-height:18px;font-weight:600;color:var(--strong)}.mhead2 span{color:var(--muted)}
+  #msend{height:32px;padding:0 12px;border-radius:10px;background:var(--ink);color:var(--onink);font-size:13px;font-weight:600}
   #msend:disabled{background:var(--chip);color:var(--quiet)}
   #list{padding:12px 16px;gap:12px}
   .bub{width:300px}.thumb{display:none}
@@ -271,8 +287,8 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
 <header>
  <div class="brand"><b>review</b><span id="name"></span></div>
  <div class="seg" id="stages"><button id="st1" data-go="cut"></button><button id="st2" data-go="edit"></button></div>
- <div class="status" id="statusbox"><i></i><span id="listen"></span><button id="howbtn" aria-label="how this works and shortcuts" title="how this works (?)"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="8.3"/><path d="M7.7 7.6a2.4 2.4 0 1 1 3.3 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.4" r=".4" fill="currentColor"/></svg></button></div>
- <div class="mhead"><b id="mstage"></b><span id="msub"></span></div><button id="mapprove"></button>
+ <div class="status" id="statusbox"><i></i><span id="listen"></span><button class="themebtn"></button><button id="howbtn" aria-label="how this works and shortcuts" title="how this works (?)"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="8.3"/><path d="M7.7 7.6a2.4 2.4 0 1 1 3.3 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.4" r=".4" fill="currentColor"/></svg></button></div>
+ <div class="mhead"><b id="mstage"></b><span id="msub"></span></div><button class="themebtn mtheme"></button><button id="mapprove"></button>
 </header>
 <section id="how" aria-label="how this works"><ol>
  <li><b>1. Watch and note</b>Pause where something is off and leave a note. It is pinned to that moment, with the frame. Paste or drop an image to show what you mean.</li>
@@ -319,10 +335,10 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
  <div class="pfoot">
   <div id="box"><textarea id="ta" rows="1" aria-label="note"></textarea><div id="pics"></div>
    <input type="file" id="picin" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
-   <div class="crow"><button id="clock" title="the note is saved at the playhead. i and o mark a range; click to clear it."><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.8" fill="none" stroke="#0C0A09" stroke-width="1.4"/><path d="M7 4v3.2l2 1.3" fill="none" stroke="#0C0A09" stroke-width="1.4" stroke-linecap="round"/></svg><span id="boxat" class="num">0:00.0</span></button>
-    <button id="picbtn" aria-label="attach an image" title="attach an image (or paste or drop one)"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M13 7.5l-5.3 5.3a3.2 3.2 0 01-4.5-4.5l5.6-5.6a2.1 2.1 0 013 3l-5.5 5.5a1 1 0 01-1.5-1.5L9.9 4.6" fill="none" stroke="#78716C" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+   <div class="crow"><button id="clock" title="the note is saved at the playhead. i and o mark a range; click to clear it."><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 4v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="boxat" class="num">0:00.0</span></button>
+    <button id="picbtn" aria-label="attach an image" title="attach an image (or paste or drop one)"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M13 7.5l-5.3 5.3a3.2 3.2 0 01-4.5-4.5l5.6-5.6a2.1 2.1 0 013 3l-5.5 5.5a1 1 0 01-1.5-1.5L9.9 4.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
     <select id="scope" aria-label="which videos the note is for"></select>
-    <button id="savebtn" aria-label="save note" title="save note (enter)"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12V2M3 6l4-4 4 4" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+    <button id="savebtn" aria-label="save note" title="save note (enter)"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12V2M3 6l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
   <div class="actions"><button id="send"><i></i><span></span></button><button id="approve"></button></div>
  </div>
 </aside>
@@ -333,7 +349,7 @@ const SPEEDS=[0.5,1,1.25,1.5,2],FPS=30,STAGE={cut:'The cut',edit:'The edit'};
 const KEYS=[['Play or pause','space'],['Back or forward 5 s','j l'],['Back or forward 1 s','← →'],['One frame',', .'],['Slower or faster','[ ]'],
  ['Write a note','c'],['Mark a range','i o'],['Save note','enter'],['Cancel','esc'],['Full screen','f'],['Mute','m'],['Safe zone (vertical)','z'],['This help','?']];
 $('keys').innerHTML=KEYS.map(([a,k])=>`<div><span>${a}</span><span>${k.split(' ').map(x=>'<kbd>'+x+'</kbd>').join('&nbsp;&nbsp;')}</span></div>`).join('');
-const TICK='<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="COL" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const TICK='<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 let S=null,view=null,alt='',cmp=null,mode='watch',loaded2='',inT=null,outT=null,loaded='',dragging=false,showChecked=false,tab='notes';
 const DATA={};   // round key -> its transcript, segments and tracks (review.py round_data)
 let speed=1;try{speed=+localStorage.getItem('review-speed')||1}catch(e){}
@@ -411,7 +427,7 @@ function steps(){
   [['st1','cut'],['st2','edit']].forEach(([id,st],i)=>{
     const done=approved(st),viewing=view&&view.stage===st,rs=(S.rounds||[]).filter(r=>r.stage===st);
     $(id).className=(viewing?'on':'')+(done?' done':'');$(id).setAttribute('aria-current',viewing?'page':'false');
-    $(id).innerHTML=`<span class="n">${done&&!viewing?TICK.replace('COL','#A8A29E'):i+1}</span>${STAGE[st]}${viewing&&rs.length?`<small>round ${view.round}</small>`:''}`;
+    $(id).innerHTML=`<span class="n">${done&&!viewing?TICK:i+1}</span>${STAGE[st]}${viewing&&rs.length?`<small>round ${view.round}</small>`:''}`;
     $(id).disabled=!has(st);
   });
 }
@@ -519,7 +535,7 @@ function noteHtml(c){
   if(c.moved&&!old)h+=`<span class="nmeta">${c.moved==='words'?`Moved from ${fmtx(c.t_was)} to where the same words are said`:`Same time as in the last round. The cut changed, so check it`}</span>`;
   if(nv)h+=`<span class="nmeta">${c.alt==='*'?(nv===1?'Both':'All')+' versions':esc(c.alt||mainName(viewRound()))+' only'}</span>`;
   if(old||c.reply){
-    const st=c.status,ic=st==='fixed'?TICK.replace('COL','#0C0A09'):st==='wontfix'?'<i></i>':'<u></u>';
+    const st=c.status,ic=st==='fixed'?TICK:st==='wontfix'?'<i></i>':'<u></u>';
     const lead=st==='fixed'?`Fixed in round ${view.stage===c.stage&&old?view.round:c.round+1}`:st==='wontfix'?'Left as is':'Still open';
     const btns=[];
     if(old&&live&&st==='wontfix')btns.push(`<button class="obtn" data-anyway="${c.id}">Fix it anyway</button>`);
@@ -538,7 +554,7 @@ function workHtml(){
   if(p==='approve')return `<div class="claude"><div><b>Claude</b><p>${S.stage==='cut'?'The cut is approved. Claude is styling it.':'Approved. The edit is finished.'}</p></div></div>`;
   if(p!=='send'&&!live)return '';
   const head=p==='send'?(act.length?`Making round ${S.round+1}.`:picked?`Claude has your notes and is starting round ${S.round+1}.`:'Notes sent. Waiting for Claude to pick them up.'):'Still coming in this round:';
-  const li=act.map(x=>x.done?`<li><span class="ic">${TICK.replace('COL','#A8A29E')}</span>${esc(x.text)}</li>`
+  const li=act.map(x=>x.done?`<li><span class="ic">${TICK}</span>${esc(x.text)}</li>`
     :`<li class="now"><span class="ic"><i></i></span>${esc(x.text)}</li>`+(x.pct!=null?`<li class="pb"><em><i style="width:${x.pct}%"></i></em>${x.pct}%</li>`:'')).join('');
   const sent=e&&e.type==='send'?e.at:null;
   return `<div class="claude"><div><b>Claude</b><p>${esc(head)}</p></div>${li?`<ol class="steps">${li}</ol>`:''}${sent&&p==='send'?`<span class="since" data-since="${esc(sent)}">Working for ${dur((Date.now()-new Date(sent))/1000)}</span>`:''}</div>`;
@@ -606,7 +622,7 @@ $('pins').addEventListener('pointerdown',e=>{const b=e.target.closest('.pin');if
 // player
 const toggle=()=>{v.paused?v.play():v.pause()};
 v.addEventListener('click',toggle);v2.addEventListener('click',toggle);$('play').onclick=toggle;
-const icon=()=>{$('play').innerHTML=v.paused?'<svg width="14" height="14" viewBox="0 0 14 14"><path d="M3.5 1.5v11l9-5.5z" fill="#fff"/></svg>':'<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="1" width="3.5" height="12" rx="1" fill="#fff"/><rect x="8.5" y="1" width="3.5" height="12" rx="1" fill="#fff"/></svg>';};
+const icon=()=>{$('play').innerHTML=v.paused?'<svg width="14" height="14" viewBox="0 0 14 14"><path d="M3.5 1.5v11l9-5.5z" fill="currentColor"/></svg>':'<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="1" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="8.5" y="1" width="3.5" height="12" rx="1" fill="currentColor"/></svg>';};
 v.addEventListener('play',icon);v.addEventListener('pause',icon);icon();
 $('back').onclick=()=>v.currentTime-=5;$('fwd').onclick=()=>v.currentTime+=5;
 function setSpeed(x){speed=x;v.playbackRate=x;try{localStorage.setItem('review-speed',x)}catch(e){}$('speed').textContent=x+'x'}
@@ -683,5 +699,13 @@ document.addEventListener('keydown',e=>{
 });
 $('howbtn').onclick=e=>{e.stopPropagation();$('how').classList.toggle('open')};
 document.addEventListener('click',e=>{if(!e.target.closest('#how'))$('how').classList.remove('open')});
+// light or dark: the OS setting until the user picks; the pick is remembered in this browser
+const MOON='<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></svg>';
+const SUN='<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9L13 13M3 13l1.1-1.1M11.9 4.1L13 3"/></svg>';
+const OS=matchMedia('(prefers-color-scheme: dark)'),isDark=()=>{const t=document.documentElement.dataset.theme;return t?t==='dark':OS.matches};
+function themeIcon(){const d=isDark();document.querySelectorAll('.themebtn').forEach(b=>{b.innerHTML=d?SUN:MOON;b.title=d?'Light mode':'Dark mode';b.setAttribute('aria-label',b.title)})}
+document.querySelectorAll('.themebtn').forEach(b=>b.onclick=e=>{e.stopPropagation();const t=isDark()?'light':'dark';document.documentElement.dataset.theme=t;
+  try{localStorage.setItem('review-theme',t)}catch(err){}themeIcon()});
+OS.addEventListener('change',themeIcon);themeIcon();
 load();setInterval(load,3000);
 </script></body></html>

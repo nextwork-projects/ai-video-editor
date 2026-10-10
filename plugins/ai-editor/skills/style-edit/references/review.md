@@ -123,7 +123,8 @@ through, the line playing now highlighted (built from `decisions.json` and `word
 add up to the video). The timeline is split at the cut points, or at `chapters.txt` on the edit, and
 the edit adds Cards / Zooms / Captions tracks from `plan.json`. A missing file leaves that part out.
 **Compare** plays an earlier round (or another version) beside this one, in sync. The **Rounds** tab
-replays every earlier render. The timeline has a pin per note, and last round's notes
+replays every earlier render. The page follows the system's light or dark setting; the switch beside
+the help button picks one and the browser remembers it. The timeline has a pin per note, and last round's notes
 pinned where `--new-t` put them. A vertical render gets a **safe zone** button (`z`) that shades
 where the app's buttons and text sit (plan.py's `SAFE` for 9:16). The cut stage links to
 `cut-check.html` (the transcript, cut words struck through) when it exists. Shortcuts: space,
