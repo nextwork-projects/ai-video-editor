@@ -31,7 +31,7 @@ was skipped). Keep these calls and their order.
 | `brand` | Colours and fonts for the graphics? | use the creator's look (no creator: the clean editorial look) / my brand colours (paste hex codes) and font / a logo file too (give the path) |
 | `assets_dir` | Do you have your own photos, screenshots or b-roll for this? | no, find real screenshots and logos / yes, this folder: (path) |
 | `avoid` | Anything you never want on screen? (multi-select) | emoji, stock photos, generic icons (all three on by default) / a colour (hex) / other (free text) |
-| `captions` | Captions? | like the creator (no creator: "clean, 3 words at a time", saved the same way) / bold, a few words at a time / karaoke, the line fills as you speak / minimal / no captions |
+| `captions` | Captions? | like the creator (no creator: "plain white, TikTok Sans", saved the same way) / plain white, TikTok Sans (over a creator's too: `plain`) / bold, a few words at a time / karaoke, the line fills as you speak / minimal / no captions |
 
 **Style call 3: sound and layout (setup)**
 
@@ -55,7 +55,7 @@ python3 "$P" set brand '{"use_creator": true}'           # or {"colors": ["#F2EE
 python3 "$P" set assets_dir '"/Users/me/Pictures/screens"'
 python3 "$P" set names '[{"name": "Jev", "domain": "typesafe.ai"}, {"name": "Claude", "domain": "claude.com"}]'
 python3 "$P" set avoid '{"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"]}'
-python3 "$P" set captions '{"on": true, "style": "creator"}'   # creator | bold | karaoke | minimal; "on": false for none
+python3 "$P" set captions '{"on": true, "style": "creator"}'   # creator | plain | bold | karaoke | minimal; "on": false for none
 python3 "$P" set sound '{"sfx": true, "music": false}'
 python3 "$P" set behind true                              # false: cards stay beside and above, no cutout step
 python3 "$P" set past_edit false                          # true once taste learn.py has run on their edit

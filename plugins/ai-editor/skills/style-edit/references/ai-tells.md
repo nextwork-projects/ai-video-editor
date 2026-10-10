@@ -83,6 +83,7 @@ Sources (numbered in the lists below):
 - Why: as above; fine for small UI labels, a tell on anything read as a heading.
 - Detect: look `font` or captions `font_match` in the blocklist. Captions measured from the creator are theirs: keep.
 - Instead: the creator's face for captions; UI labels may stay grotesk.
+- Not a tell: TikTok Sans, the platform's own face and the default `plain` captions (not in `GROTESK`).
 
 **`one-accent-word`** WARN, code
 - Tell: one word in a headline set in italic, bold or the accent colour (`*five cents*`).

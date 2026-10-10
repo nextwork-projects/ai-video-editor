@@ -29,6 +29,30 @@ What changed for every user, newest first.
 - Sound cues start on the frame the renderer plays them. A cue between frames played up to half a
   frame early, so the cue check missed most of a short pop ("pop cue -28 dB: not heard"). Test:
   `plan.py demo`.
+- Out of the box, captions are plain white TikTok Sans: weight 600, 4.2% of the frame's long side (was
+  5.5% at 800), case as spoken, no stroke, box, shadow, highlight or pop. It is the default with no
+  creator and a new `plain` captions answer (`profile.py` `PLAIN_CAPTIONS`); a creator's measured
+  captions and your taste still win. Where the footage is too bright, a page gets a soft shadow, then a
+  feathered glow, and a stroke or backing only where it would read under 3.3:1. `check.py` warns on a
+  caption or look font Google Fonts does not have (the render would draw Inter), and a font that fails
+  to load now stops the render with its name. Tests: `profile.py demo`, `plan.py demo`, `check.py demo`.
+- The review page is redesigned (direction B): a light stone page with a stage switch and a quiet
+  status line; on the cut, the transcript beside the video with cut words and pauses struck and the
+  line playing now highlighted; notes as bubbles with the frame, time and words, Claude's answers
+  and its work steps under them; a composer whose clock follows the playhead; a timeline split at
+  cut points or chapters with numbered note pins, and Cards / Zooms / Captions tracks on the edit;
+  Compare plays two rounds side by side; Stop while Claude works; a bottom sheet on phones.
+  `review.py` writes `review/data-<stage><round>.json` for it. Test: `review.py demo`.
+- Notes keep working while Claude works on a round: they are queued for the next round and open on
+  it when it lands, moved to where their words are said on the new cut, with a new frame still.
+  `wait` never returns on them; Stop puts them back into the reopened round. The note's time is
+  always the playhead, read at save: scrubbing, a transcript word, a pin or a key moves it, typing
+  or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
+- The review page has a dark mode. It follows the system setting until you pick light or dark with
+  the switch in the header, and remembers the pick in that browser.
+- Review notes can be edited in place while they are unsent or queued for the next round: the text
+  (click it, Enter saves, Esc cancels), the moment (move to playhead: new frame still and words), which
+  versions it is for, and its images. Once Claude has the round they are read-only. Test: `review.py demo`.
 
 ## ai-editor 2.2.0 (2026-10-09)
 

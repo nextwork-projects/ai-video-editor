@@ -46,11 +46,14 @@ against:
 | zooms | push to 1.18, eased 0.8 s each way (sine.inOut, PRINCIPLES "Smooth before varied"), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
 | long sentences | a zoom change on the word nearest the middle of any stretch over 5 s (`zoom.max_hold_s`) | (the render check WARNs at 6 s with nothing moving) |
 | motion | `smooth` personality, median shot 2.4 s | 2.4 / 2.4 / 3.98 s |
-| captions | 3 words, 5.5% type, y 66%, lower case, weight 800, white, no stroke (plan.py adds one where the footage needs it) | 1 / 3 / 3 words; 4.7 / 5.5 / 6.5%; y 62 / 66 / 75% |
+| captions | `plain` (`PLAIN_CAPTIONS`): TikTok Sans 600, white, 4.2% type, case as spoken, no stroke, box, shadow, highlight or animation (each page cuts on); 3 words, y 66%. plan.py adds a soft shadow where the footage needs it, more only where that is not enough | 1 / 3 / 3 words; 4.7 / 5.5 / 6.5%; y 62 / 66 / 75% |
 
 A slow push (0.8 s) was tried first: on a talking head the render check read the speaker's own
 movement during the push as a surge. The profile's caption and sound answers lay over the default
-as over a creator's style. Cards still come from visuals.json (step 3).
+as over a creator's style, and `plain` lays this caption look over a creator's. The size and font are the
+owner's call (plain white, TikTok Sans, not too big), not the measured median. TikTok Sans is on Google Fonts
+(SIL OFL 1.1) and loads like every other face; `check.py` WARNs on a font Google Fonts does not have, and a font
+that fails to load stops the render. Cards still come from visuals.json (step 3).
 
 ## What plan.py does
 
@@ -62,7 +65,8 @@ as over a creator's style. Cards still come from visuals.json (step 3).
   look would read under 4.7:1 (`CONTRAST_TARGET`: the render check's 4.5:1 WARN line plus 0.2, since
   the plan's estimate runs a little above what the render check reads), that page gets a soft
   shadow, then a thin stroke, then a backing, whichever is first to reach 4.7:1 (printed per
-  caption). After a render, `check.py render` lists the pages it read under 4.7:1 in `check.json`;
+  caption). Plain captions (the default) get a shadow, then a glow (a wide feathered shadow), and keep
+  the glow while it reads at 3.3:1 (`PLAIN_MIN`); only a page that would fail gets the stroke or backing. After a render, `check.py render` lists the pages it read under 4.7:1 in `check.json`;
   the next plan.py run gives each one the next step and keeps it in `contrast.json`.
 - **Layout per card:** overlay first: every card floats over the footage in the free space round
   the head; a beat asking for `"layout": "scene"` gets a full-frame cut-away with a designed

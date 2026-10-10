@@ -73,6 +73,20 @@ python3 "$R" edits/<name> status "rendering" --log edits/<name>/render.log
 `--log` shows the last `N/M` in that file as a progress bar (Remotion prints `Rendered 812/3255`), so
 write the render's output to a log. Never make up a percent.
 
+While Claude works the user can keep adding notes. They are queued for the next round (`"queued": true`)
+and `wait` does not see them. `round` makes them open notes of the new round: each moves to where its
+words are said on the new cut when both rounds have the cut's transcript (`"moved": "words"`, old time
+in `t_was`), else it keeps its time (`"moved": "time"` when the length changed: check it), with a new
+frame still and the words said there. The next `wait` hands them over like any note.
+
+The user can edit any note they wrote while it is unsent or queued: its text, its moment (moved to the
+playhead with a new frame still and words), its version scope and its images. Same note id, with an
+`edited` time; `wait` prints the final text. Once Claude has the round its notes are read-only (`/edit`
+answers 409); a change then is a new note or **fix it anyway**.
+
+The page has a **Stop** button while Claude works. When the user presses it, the round's notes open
+again (queued notes join them) and the next `status` exits 3 with `STOPPED`: stop the work, say so in one line, run `wait`.
+
 Answer every note, then open the round with the new render:
 
 ```bash
@@ -109,7 +123,13 @@ the ones still in play again with `alt`.
 
 ## On the page
 
-Round tabs replay every earlier render. The timeline has a pin per note, and last round's notes
+The cut stage shows the transcript beside the video: every word, cut words and removed pauses struck
+through, the line playing now highlighted (built from `decisions.json` and `words.raw.json` when they
+add up to the video). The timeline is split at the cut points, or at `chapters.txt` on the edit, and
+the edit adds Cards / Zooms / Captions tracks from `plan.json`. A missing file leaves that part out.
+**Compare** plays an earlier round (or another version) beside this one, in sync. The **Rounds** tab
+replays every earlier render. The page follows the system's light or dark setting; the switch beside
+the help button picks one and the browser remembers it. The timeline has a pin per note, and last round's notes
 pinned where `--new-t` put them. A vertical render gets a **safe zone** button (`z`) that shades
 where the app's buttons and text sit (plan.py's `SAFE` for 9:16). The cut stage links to
 `cut-check.html` (the transcript, cut words struck through) when it exists. Shortcuts: space,
