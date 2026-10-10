@@ -11,6 +11,11 @@ What changed for every user, newest first.
   cut points or chapters with numbered note pins, and Cards / Zooms / Captions tracks on the edit;
   Compare plays two rounds side by side; Stop while Claude works; a bottom sheet on phones.
   `review.py` writes `review/data-<stage><round>.json` for it. Test: `review.py demo`.
+- Notes keep working while Claude works on a round: they are queued for the next round and open on
+  it when it lands, moved to where their words are said on the new cut, with a new frame still.
+  `wait` never returns on them; Stop puts them back into the reopened round. The note's time is
+  always the playhead, read at save: scrubbing, a transcript word, a pin or a key moves it, typing
+  or not (the click-to-hold on the clock is gone). Test: `review.py demo`.
 
 ## ai-editor 2.2.0 (2026-10-09)
 

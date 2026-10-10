@@ -73,8 +73,14 @@ python3 "$R" edits/<name> status "rendering" --log edits/<name>/render.log
 `--log` shows the last `N/M` in that file as a progress bar (Remotion prints `Rendered 812/3255`), so
 write the render's output to a log. Never make up a percent.
 
+While Claude works the user can keep adding notes. They are queued for the next round (`"queued": true`)
+and `wait` does not see them. `round` makes them open notes of the new round: each moves to where its
+words are said on the new cut when both rounds have the cut's transcript (`"moved": "words"`, old time
+in `t_was`), else it keeps its time (`"moved": "time"` when the length changed: check it), with a new
+frame still and the words said there. The next `wait` hands them over like any note.
+
 The page has a **Stop** button while Claude works. When the user presses it, the round's notes open
-again and the next `status` exits 3 with `STOPPED`: stop the work, say so in one line, run `wait`.
+again (queued notes join them) and the next `status` exits 3 with `STOPPED`: stop the work, say so in one line, run `wait`.
 
 Answer every note, then open the round with the new render:
 

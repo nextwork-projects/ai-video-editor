@@ -319,7 +319,7 @@ aside{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);bor
  <div class="pfoot">
   <div id="box"><textarea id="ta" rows="1" aria-label="note"></textarea><div id="pics"></div>
    <input type="file" id="picin" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
-   <div class="crow"><button id="clock" title="the note's moment follows the playhead. click to hold it here."><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.8" fill="none" stroke="#0C0A09" stroke-width="1.4"/><path d="M7 4v3.2l2 1.3" fill="none" stroke="#0C0A09" stroke-width="1.4" stroke-linecap="round"/></svg><span id="boxat" class="num">0:00.0</span></button>
+   <div class="crow"><button id="clock" title="the note is saved at the playhead. i and o mark a range; click to clear it."><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.8" fill="none" stroke="#0C0A09" stroke-width="1.4"/><path d="M7 4v3.2l2 1.3" fill="none" stroke="#0C0A09" stroke-width="1.4" stroke-linecap="round"/></svg><span id="boxat" class="num">0:00.0</span></button>
     <button id="picbtn" aria-label="attach an image" title="attach an image (or paste or drop one)"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M13 7.5l-5.3 5.3a3.2 3.2 0 01-4.5-4.5l5.6-5.6a2.1 2.1 0 013 3l-5.5 5.5a1 1 0 01-1.5-1.5L9.9 4.6" fill="none" stroke="#78716C" stroke-width="1.4" stroke-linecap="round"/></svg></button>
     <select id="scope" aria-label="which videos the note is for"></select>
     <button id="savebtn" aria-label="save note" title="save note (enter)"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12V2M3 6l4-4 4 4" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
@@ -334,7 +334,7 @@ const KEYS=[['Play or pause','space'],['Back or forward 5 s','j l'],['Back or fo
  ['Write a note','c'],['Mark a range','i o'],['Save note','enter'],['Cancel','esc'],['Full screen','f'],['Mute','m'],['Safe zone (vertical)','z'],['This help','?']];
 $('keys').innerHTML=KEYS.map(([a,k])=>`<div><span>${a}</span><span>${k.split(' ').map(x=>'<kbd>'+x+'</kbd>').join('&nbsp;&nbsp;')}</span></div>`).join('');
 const TICK='<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="COL" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-let S=null,view=null,alt='',cmp=null,mode='watch',loaded2='',inT=null,outT=null,held=null,loaded='',dragging=false,showChecked=false,tab='notes';
+let S=null,view=null,alt='',cmp=null,mode='watch',loaded2='',inT=null,outT=null,loaded='',dragging=false,showChecked=false,tab='notes';
 const DATA={};   // round key -> its transcript, segments and tracks (review.py round_data)
 let speed=1;try{speed=+localStorage.getItem('review-speed')||1}catch(e){}
 const fmt=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0')};
@@ -448,10 +448,11 @@ function render(){
   const nv=(vr.alts||[]).length;
   $('pmeta').textContent='Round '+view.round+' · '+(!isCur()?'read only':working?'still plays':nv?(nv+1)+' versions':ago(vr.at||S.at||Date.now()));
   $('oldbadge').style.display=isCur()?'none':'block';$('oldbadge').textContent='Older round, read only';
-  // the composer: open while the round is with the user
-  ta.disabled=!live;box.classList.toggle('off',!live);
-  ta.placeholder=working?'Notes open again when round '+(S.round+1)+' lands':!isCur()?'Older round, read only':p==='approve'?(S.stage==='cut'?'The cut is approved':'Approved'):view.round>1?'Leave a note on round '+view.round+'...':'Leave a note at this moment...';
-  const sc=$('scope');sc.style.display=nv&&live?'block':'none';
+  // the composer: open until approve. While Claude works, a note waits for the next round
+  const canNote=isCur()&&p!=='approve';
+  ta.disabled=!canNote;box.classList.toggle('off',!canNote);
+  ta.placeholder=p==='send'?'Add a note for the next round...':!isCur()?'Older round, read only':p==='approve'?(S.stage==='cut'?'The cut is approved':'Approved'):view.round>1?'Leave a note on round '+view.round+'...':'Leave a note at this moment...';
+  const sc=$('scope');sc.style.display=nv&&canNote?'block':'none';
   if(nv)sc.innerHTML=`<option value="">${esc(lab(alt))} only</option><option value="*">${nv===1?'Both':'All'} versions</option>`;
   renderVer();renderTx();renderBar();renderTracks();renderList();boxTime();
 }
@@ -507,7 +508,7 @@ function tickTx(){
   if(l){let w=null;l.words.forEach(x=>{if(+x.dataset.t<=t)w=x});if(w)w.classList.add('now')}
 }
 function noteHtml(c){
-  const old=c.round!==view.round,t=here(c),live=isCur()&&!pending(),nv=(viewRound().alts||[]).length;
+  const old=c.round!==view.round&&!c.queued,t=here(c),live=isCur()&&(!pending()||!!c.queued),nv=(viewRound().alts||[]).length;
   const tm=c.t_end!=null&&!old?fmtx(c.t)+'–'+fmtx(c.t_end):fmtx(t);
   const thumb=old?'':`<img class="thumb${S.vertical?'':' wide'}" src="/frames/${encodeURIComponent(c.frame)}" alt="" loading="lazy">`;
   const imgs=(c.images||[]).length?`<div class="att">${c.images.map((x,i)=>`<a href="/frames/${encodeURIComponent(x)}" target="_blank" rel="noopener"><img src="/frames/${encodeURIComponent(x)}" alt="">Image ${i+1}</a>`).join('')}</div>`:'';
@@ -515,6 +516,7 @@ function noteHtml(c){
   const moved=old&&c.new_t!=null&&fmt(c.new_t)!==fmt(c.t)?` (${fmt(c.t)} in round ${c.round})`:'';
   let h=`<div class="note${old?' old':''}" data-t="${t}" data-old="${old?1:0}"><div class="bub">${thumb}<div class="nb"><div class="nh"><span class="tchip num">${tm}</span>${c.words?`<span class="q">"${esc(c.words)}"</span>`:''}</div>
     ${c.text?`<p>${esc(c.text)}</p>`:''}${card}${imgs}</div></div>`;
+  if(c.moved&&!old)h+=`<span class="nmeta">${c.moved==='words'?`Moved from ${fmtx(c.t_was)} to where the same words are said`:`Same time as in the last round. The cut changed, so check it`}</span>`;
   if(nv)h+=`<span class="nmeta">${c.alt==='*'?(nv===1?'Both':'All')+' versions':esc(c.alt||mainName(viewRound()))+' only'}</span>`;
   if(old||c.reply){
     const st=c.status,ic=st==='fixed'?TICK.replace('COL','#0C0A09'):st==='wontfix'?'<i></i>':'<u></u>';
@@ -568,6 +570,8 @@ function renderList(){
   h+=mine.map(noteHtml).join('');
   if(!mine.length&&!prev.length)h+=`<p class="empty">${isCur()?'No notes yet. Pause where something is off and leave a note.':'No notes on this round.'}</p>`;
   if(isCur())h+=workHtml();
+  const queued=isCur()?S.comments.filter(c=>c.queued&&c.stage===S.stage&&onAlt(c)).sort((a,b)=>a.t-b.t):[];
+  if(queued.length)h+=`<p class="sub">For the next round</p>`+queued.map(noteHtml).join('');
   if(isCur()&&!p&&mine.length)h+=`<span class="unsent">${plural(mine.length,'note')}, not sent yet</span>`;
   const keepScroll=$('list').scrollTop;$('list').innerHTML=h;$('list').scrollTop=isCur()&&p?$('list').scrollHeight:keepScroll;
 }
@@ -633,14 +637,15 @@ bar.addEventListener('pointermove',e=>{const h=$('hover'),t=at(e),r=bar.getBound
   h.style.display='block';h.style.left=(e.clientX-r.left)+'px';h.textContent=fmtx(t);if(dragging){v.currentTime=t;tick()}});
 bar.addEventListener('pointerup',()=>dragging=false);bar.addEventListener('pointerleave',()=>{if(!dragging)$('hover').style.display='none'});
 
-// notes: the clock follows the playhead (scrub, step or seek and it updates); click it to hold the moment
-function noteSpan(){const a=inT??held??v.currentTime,b=inT!==null?(outT??v.currentTime):null;return b===null?[a,null]:[Math.min(a,b),Math.max(a,b)]}
-function boxTime(){const[a,b]=noteSpan();$('boxat').textContent=b!==null?fmtx(a)+'–'+fmtx(b):fmtx(a);$('clock').classList.toggle('pinned',held!==null||inT!==null);
+// notes: the clock is always the playhead (scrub, a transcript word, a pin, a skip, a key, play), typing or not.
+// The note's time is read at save. Only an i/o range is marked: the clock shows it and a click on it clears it.
+function noteSpan(){const a=inT??v.currentTime,b=inT!==null?(outT??v.currentTime):null;return b===null?[a,null]:[Math.min(a,b),Math.max(a,b)]}
+function boxTime(){const[a,b]=noteSpan();$('boxat').textContent=b!==null?fmtx(a)+'–'+fmtx(b):fmtx(a);$('clock').classList.toggle('pinned',inT!==null);
   $('savebtn').classList.toggle('ready',!!(ta.value.trim()||pics.length)&&!ta.disabled)}
-v.addEventListener('timeupdate',boxTime);v.addEventListener('seeked',boxTime);
-$('clock').onclick=()=>{if(inT!==null){inT=outT=null;renderBar()}else held=held===null?v.currentTime:null;boxTime()};
+['timeupdate','seeking','seeked','play','pause','loadedmetadata'].forEach(e=>v.addEventListener(e,boxTime));
+$('clock').onclick=()=>{if(inT!==null){inT=outT=null;renderBar()}boxTime()};
 function openBox(){if(ta.disabled)return;v.pause();ta.focus()}
-function closeBox(){pics=[];showPics();ta.value='';grow();ta.blur();inT=outT=held=null;if(S)renderBar();boxTime()}
+function closeBox(){pics=[];showPics();ta.value='';grow();ta.blur();inT=outT=null;if(S)renderBar();boxTime()}
 const grow=()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px'};
 ta.addEventListener('input',()=>{grow();boxTime()});
 ta.addEventListener('focus',()=>v.pause());
@@ -657,7 +662,7 @@ async function save(){const text=ta.value.trim();if(ta.disabled||(!text&&!pics.l
   const[t,te]=noteSpan(),nv=(viewRound().alts||[]).length;
   await post('/comment',{t,t_end:te,text,images:pics,alt:nv&&$('scope').value==='*'?'*':alt||null});closeBox();await load()}
 $('savebtn').onclick=save;
-ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();save()}if(e.key==='Escape'){ta.blur();inT=outT=held=null;renderBar();boxTime()}});
+ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();save()}if(e.key==='Escape'){ta.blur();inT=outT=null;renderBar();boxTime()}});
 const sendOrStop=async()=>{await post('/event',{type:pending()==='send'?'stop':'send'});load()};
 $('send').onclick=sendOrStop;$('msend').onclick=sendOrStop;
 const approve=async()=>{await post('/event',{type:'approve'});load()};
@@ -669,12 +674,12 @@ document.addEventListener('keydown',e=>{
   else if(k==='ArrowLeft'){e.preventDefault();v.currentTime-=1}else if(k==='ArrowRight'){e.preventDefault();v.currentTime+=1}
   else if(k===','){v.pause();v.currentTime-=1/FPS}else if(k==='.'){v.pause();v.currentTime+=1/FPS}
   else if(k==='['||k===']'){const i=SPEEDS.indexOf(speed)+(k===']'?1:-1);setSpeed(SPEEDS[Math.max(0,Math.min(SPEEDS.length-1,i))])}
-  else if(k==='i'){inT=v.currentTime;outT=null;held=null;renderBar();boxTime()}
+  else if(k==='i'){inT=v.currentTime;outT=null;renderBar();boxTime()}
   else if(k==='o'&&inT!==null){outT=v.currentTime;renderBar();boxTime()}
   else if(k==='c'){e.preventDefault();openBox()}
   else if(k==='z'&&S.vertical)$('safebtn').click();
   else if(k==='?')$('howbtn').click();else if(k==='f')$('full').click();else if(k==='m')$('mute').click();
-  else if(k==='Escape'){inT=outT=held=null;$('how').classList.remove('open');renderBar();boxTime()}
+  else if(k==='Escape'){inT=outT=null;$('how').classList.remove('open');renderBar();boxTime()}
 });
 $('howbtn').onclick=e=>{e.stopPropagation();$('how').classList.toggle('open')};
 document.addEventListener('click',e=>{if(!e.target.closest('#how'))$('how').classList.remove('open')});
