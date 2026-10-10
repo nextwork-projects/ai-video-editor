@@ -6,6 +6,18 @@ What changed for every user, newest first.
 
 ## ai-editor 2.2.0 (2026-10-09)
 
+- Review-page notes now reach your taste. After send or approve, Claude picks the notes that are
+  preferences, asks the scope once for the round, and runs `review.py learn`, which saves them with
+  `taste.py add` and marks the rest one-off. Each note in review.json records what happened to it
+  (`taste`: rule id, `video-only`, `suggested`, `one-off`). `wait` ends with the command, `round`
+  lists notes not learned yet, and `taste.py report` marks rules that came from review notes.
+  `improve.py collect` reads every `*/review.json` under edits, clips and product: notes marked
+  would-help-everyone and rules repeated across videos. Tests: `review.py demo`, `improve.py demo`.
+- Each review round keeps its own copy of its video in `<edit>/review/` (`v-cut1.mp4`,
+  `v-edit2-wide.mp4`), so a new render to the same `cut.mp4` no longer changes what an earlier
+  round's tab replays. Test: `review.py demo`.
+- After an approve, the review page footer says the round is approved, not "Claude is working on
+  your notes". Test: `review.py demo` (runs the page's `listenText` in node).
 - Fixes from a real-footage test of this release:
   - `learn.py` measures your pauses from the audio of both files (build_timeline.py's threshold and
     silencedetect), at every join, not from word gaps. Whisper stretches word ends over pauses, so a

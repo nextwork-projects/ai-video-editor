@@ -15,6 +15,9 @@ product video). Notes save with the edit, never in the plugin:
     python3 review.py <folder> resolve <id> fixed|wontfix|open [--reply "..."] [--new-t 12.3]
     python3 review.py <folder> round --video v2.mp4 [--stage cut|edit] [--transcript ..] [--plan ..] [--note ".."]
     python3 review.py <folder> alt <name> --video other.mp4 [--transcript ..]   another video in this round
+    python3 review.py <folder> learn --scope style|video|everyone --rule <id> <section> "<rule>" [key=value] ...
+                                     the round's preference notes into the user's taste (taste.py add); --none if
+                                     none. Each note records it: "taste": rule id | video-only | suggested | one-off
     python3 review.py demo                         self-check on a generated 6 s clip
 
 `wait` exits when the user presses send or approve, and prints every note of the round: its time,
@@ -33,6 +36,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -365,6 +369,18 @@ def serve(folder, port=0, open_browser=True):
 
 
 # ---------------------------------------------------------------- cli
+def keep(folder, video, stage, rnd, name=None):
+    """A copy of the round's video in <folder>/review/, so the next render (written to the same cut.mp4)
+    never changes what an earlier round's tab replays. A copy, not a hardlink: ffmpeg and Remotion rewrite
+    the file in place, and a hardlink would change with it."""
+    src = Path(video).resolve()
+    dst = folder / "review" / f"v-{stage}{rnd}{'-' + re.sub(r'[^\w-]', '_', name) if name else ''}{src.suffix}"
+    if src != dst.resolve():
+        # ponytail: a full copy per round; a copy-on-write clone (APFS cp -c, btrfs reflink) if disk use matters
+        shutil.copyfile(src, dst)
+    return str(dst)
+
+
 def cmd_start(a, folder):
     (folder / "review").mkdir(parents=True, exist_ok=True)
     rj = folder / "review.json"
@@ -373,6 +389,7 @@ def cmd_start(a, folder):
              video=str(Path(a.video).resolve()), note=a.note or "", sent=False, alts=[],
              transcript=str(Path(a.transcript).resolve()) if a.transcript else None,
              plan=str(Path(a.plan).resolve()) if a.plan else None, vertical=probe(a.video), label=a.name)
+    d["video"] = keep(folder, a.video, d["stage"], d["round"])
     log_round(d)
     save(rj, d)
     print(f"{rj}: {stage_name(d['stage'])}, round {d['round']}")
@@ -384,7 +401,7 @@ def cmd_round(a, folder):
             d["stage"], d["round"] = a.stage, 1
         else:
             d["round"] += 1
-        d["video"] = str(Path(a.video).resolve())
+        d["video"] = keep(folder, a.video, d["stage"], d["round"])
         d["vertical"] = probe(a.video)
         if a.transcript:
             d["transcript"] = str(Path(a.transcript).resolve())
@@ -400,6 +417,9 @@ def cmd_round(a, folder):
     still = [str(c["id"]) for c in d["comments"]
              if c["status"] == "open" and c["stage"] == d["stage"] and c["round"] < d["round"]]
     print(f"{stage_name(d['stage'])}, round {d['round']}" + (f"; still open: {', '.join(still)}" if still else ""))
+    unlearned = [str(c["id"]) for c in d["comments"] if "taste" not in c and (c["stage"], c["round"]) != (d["stage"], d["round"])]
+    if unlearned:
+        print(f"notes not learned yet: {', '.join(unlearned)}. Run `learn` (see `wait`'s last line)")
     if not running(folder):
         print("the page is not running: start it with `serve`")
 
@@ -437,7 +457,7 @@ def cmd_alt(a, folder):
     """Add (or replace) another video in this round: the other aspect, another clip."""
     def f(d):
         d["alts"] = [x for x in d.get("alts") or [] if x["name"] != a.name] + [
-            {"name": a.name, "video": str(Path(a.video).resolve()),
+            {"name": a.name, "video": keep(folder, a.video, d["stage"], d["round"], a.name),
              "transcript": str(Path(a.transcript).resolve()) if a.transcript else None}]
         log_round(d)
         return d
@@ -481,13 +501,63 @@ def cmd_wait(folder, poll=1.0):
         print(f"#{c['id']} {span} ({c['t']}s){ver}{card}: {c['text']}\n    said: \"{c['words']}\""
               f"\n    frame: {folder / 'review' / c['frame']}"
               + "".join(f"\n    image: {folder / 'review' / x}" for x in c.get("images") or []))
+    if cs:
+        print(f"LEARN: pick the notes that are preferences, ask the scope once for all of them, then run:\n"
+              f"  python3 {Path(__file__).resolve()} {folder} learn --scope style|video|everyone"
+              f" --rule <id> <section> \"<rule>\" [key=value] ...   (no preferences: learn --none)")
     return e["type"]
+
+
+def learned_round(d):
+    """The round `wait` last handed over: the one `learn` acts on."""
+    e = next((e for e in reversed(d["events"]) if e["handled"]), None)
+    return (e["stage"], e["round"]) if e else (d["stage"], d["round"])
+
+
+def cmd_learn(a, folder):
+    """Review notes into the user's taste: each --rule note saved with taste.add (scope asked once for the
+    batch), every other note of the round marked one-off, and each note records what happened to it."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ai_editor import taste
+    rules = {}
+    for r in a.rule or []:
+        if len(r) not in (3, 4) or not r[0].isdigit() or (len(r) == 4 and "=" not in r[3]):
+            sys.exit(f"--rule takes <id> <section> \"<rule>\" [key=value], got {r}")
+        rules[int(r[0])] = r[1:]
+    if not rules and not a.none:
+        sys.exit("give --rule for each preference note, or --none")
+    if rules and not a.scope:
+        sys.exit("--scope style|video|everyone: ask the user once for the batch")
+
+    def f(d):
+        stage, rnd = learned_round(d)
+        known = {c["id"]: c for c in d["comments"]}
+        if set(rules) - set(known):
+            sys.exit(f"no note {', '.join(map(str, sorted(set(rules) - set(known))))}")
+        out = []
+        for c in d["comments"]:
+            if c["id"] in rules:
+                section, rule, *kv = rules[c["id"]]
+                setting, _, raw = kv[0].partition("=") if kv else (None, "", "")
+                value = taste.parse(raw) if setting else None
+                scope = f"video:{d['name']}" if a.scope == "video" else "all"
+                status, r = taste.add(section, rule, setting, value, scope, folder, source="review")
+                c.update(rule=rule, taste={"style": r["id"], "video": "video-only"}.get(a.scope, "suggested"))
+                if a.scope == "everyone":
+                    taste.suggest(c["text"], rule, f"review note ({r['section']})", note=f"{d['name']}#{c['id']}")
+                out.append(f"#{c['id']} -> {status} rule #{r['id']} {r['section']}: {rule}"
+                           + (" (this video only)" if a.scope == "video" else " (+ suggested to everyone)"
+                              if a.scope == "everyone" else ""))
+            elif (c["stage"], c["round"]) == (stage, rnd) and "taste" not in c:
+                c["taste"] = "one-off"
+        return out
+    for line in update(folder / "review.json", f) or ["no preference notes: all marked one-off"]:
+        print(line)
 
 
 def demo():
     import contextlib
     import io
-    import shutil
     import tempfile
     tmp = Path(tempfile.mkdtemp(prefix="review_demo_"))
     vid = tmp / "v.mp4"
@@ -555,8 +625,17 @@ def demo():
         raise AssertionError("a note after send")
     except urllib.error.HTTPError as e:
         assert e.code == 409
-    # round 2 on the styled edit: the card under a note comes with it, Claude's answer shows
-    cmd_round(ns(video=str(vid), stage="edit", transcript=None, plan=str(pl), note=None, name=None), folder)
+    assert "LEARN:" in out.splitlines()[-2] and f"{folder} learn --scope style|video|everyone" in out, out
+    # round 2 on the styled edit: the card under a note comes with it, Claude's answer shows.
+    # The cut's note was never learned: round says so, then learn --none marks it one-off
+    o = io.StringIO()
+    with contextlib.redirect_stdout(o):
+        cmd_round(ns(video=str(vid), stage="edit", transcript=None, plan=str(pl), note=None, name=None), folder)
+    assert "notes not learned yet: 1." in o.getvalue(), o.getvalue()
+    learn = lambda **k: cmd_learn(ns(**{"scope": None, "rule": None, "none": False, **k}), folder)
+    with contextlib.redirect_stdout(io.StringIO()):
+        learn(none=True)
+    assert load(folder / "review.json")["comments"][0]["taste"] == "one-off"
     cmd_resolve(ns(id=1, status="fixed", reply="cut it", new_t=0.9), folder)
     c2 = post("/comment", {"t": 4.0, "t_end": 5.0, "text": "card smaller"})
     assert c2["card"]["trigger_word"] == "later" and c2["stage"] == "edit" and c2["round"] == 1, c2
@@ -579,9 +658,40 @@ def demo():
     assert st["text"] == "rendering" and st["pct"] == 75 and not st["done"], st
     post("/event", {"type": "approve"})
     out = waited()
-    assert out.startswith("APPROVE: demo the edit, round 1, 3 notes.") and f"also wide: {vid.resolve()}" in out, out
+    assert out.startswith("APPROVE: demo the edit, round 1, 3 notes.") and f"also wide: {folder / 'review' / 'v-edit1-wide.mp4'}" in out, out
     assert f"#{c4['id']} 0:01.0 (1.0s) [all videos]: on all of them" in out, out
     assert f"#{c3['id']} 0:05.1 (5.1s) [wide] [card 0 image 'later']: louder here" in out, out
+    # learn: the preference notes go to taste (scope asked once a batch), every note records what happened
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ai_editor import taste
+    taste.HOME = tmp / "home"
+    o = io.StringIO()
+    with contextlib.redirect_stdout(o):
+        learn(scope="style", rule=[[str(c2["id"]), "visuals", "Cards fill the space they have"]])
+        learn(scope="video", rule=[[str(c3["id"]), "sound", "Sound louder on this one", "sfx_db=-6"]])
+        learn(scope="everyone", rule=[[str(c4["id"]), "captions", "Captions stay inside the safe zone"]])
+    cs = {c["id"]: c for c in load(folder / "review.json")["comments"]}
+    rid = next(r["id"] for r in taste.load_rules() if r["rule"] == "Cards fill the space they have")
+    assert cs[c2["id"]]["taste"] == rid and cs[c3["id"]]["taste"] == "video-only", cs
+    assert cs[c4["id"]]["taste"] == "suggested" and cs[c4["id"]]["rule"] == "Captions stay inside the safe zone", cs
+    assert "Cards fill the space they have" in taste.load_md()["Visuals"] and "sfx_db" not in taste.read_json()
+    sug = [json.loads(x) for x in (tmp / "home" / "suggestions.jsonl").read_text().splitlines()]
+    assert sug[-1]["note"] == taste.note_key(f"demo#{c4['id']}") and sug[-1]["what"] == "on all of them", sug
+    assert "from a review note" in taste.report() and "3 came from review-page notes" in taste.report(), taste.report()
+    # every round replays its own video: the next render overwriting the same file changes no earlier tab
+    rs = load(folder / "review.json")["rounds"]
+    assert [Path(r["video"]).name for r in rs] == ["v-cut1.mp4", "v-edit1.mp4"], rs
+    size = vid.stat().st_size
+    vid.write_bytes(b"the next render")
+    assert len(get("/video?k=cut-1").read()) == size and len(get("/video?k=edit-1&alt=wide").read()) == size
+    # the footer after a pick-up: an approve says approved, a send says Claude is working (node runs the page's own function)
+    js = re.search(r"^function listenText\(S\)\{.*?\n\}", HTML.read_text(), re.M | re.S)
+    assert js, "review.html has no listenText()"
+    if shutil.which("node"):
+        ev = lambda t, n: {"listening": False, "sent": True, "events": [{"type": t, "stage": "edit", "handled": True}]}
+        o = subprocess.run(["node", "-e", js.group(0) + "for(const s of " + json.dumps([ev("approve", 0), ev("send", 1)])
+                            + ")console.log(listenText(s))"], capture_output=True, text=True, check=True).stdout
+        assert o.splitlines() == ["approved", "Claude is working on your notes"], o
     srv.shutdown()
     srv.server_close()
     shutil.rmtree(tmp, ignore_errors=True)
@@ -625,6 +735,10 @@ def main():
     s.add_argument("status", choices=["fixed", "wontfix", "open"])
     s.add_argument("--reply")
     s.add_argument("--new-t", type=float, help="where the note's moment is in the new render")
+    s = sp.add_parser("learn", help="save the round's preference notes to the user's taste")
+    s.add_argument("--scope", choices=["style", "video", "everyone"], help="asked once for the batch")
+    s.add_argument("--rule", nargs="+", action="append", metavar="ARG", help='<id> <section> "<rule>" [key=value]')
+    s.add_argument("--none", action="store_true", help="no note in this round is a preference")
     a = ap.parse_args()
     folder = Path(a.folder).resolve()
     if getattr(a, "stage", None) == "edit":  # an edit round reads the edit folder's own files
@@ -657,6 +771,8 @@ def main():
         cmd_alt(a, folder)
     elif a.cmd == "status":
         cmd_status(a, folder)
+    elif a.cmd == "learn":
+        cmd_learn(a, folder)
 
 
 if __name__ == "__main__":
