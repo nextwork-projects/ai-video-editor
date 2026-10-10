@@ -37,6 +37,7 @@ from plan import GAP_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, OVERLA
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
+OVERLAY_FILL = 0.7     # share of its own box an overlay diagram must draw across
 WORD_S = 1.2           # a caption up longer than this per word is a misheard word held on screen
 TAIL_S = 0.3           # a caption held longer than this past its last word
 STATIC_S = 6.0         # nothing changes on screen for longer than this (no style pace given)
@@ -220,9 +221,15 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                                    "reusing every frame already cut)"))
             continue
         ink = aspect == "9:16" and explain_ink(c, W, H)
-        if ink and (ink[1] - ink[0] < INK_MIN_W or abs((ink[0] + ink[1]) / 2 - 50) > CENTRE_INK):
-            out.append(finding("FAIL", c["start"], f"{name} draws {ink[0]:.0f}-{ink[1]:.0f}% of the width "
-                               f"(under {INK_MIN_W}% wide or off centre): small and lopsided on a phone", PLAN_FIX))
+        if ink:
+            # wide and centred on the frame, or (an overlay diagram in its own box beside the head) filling that box, centred in it
+            frame_ok = ink[1] - ink[0] >= INK_MIN_W and abs((ink[0] + ink[1]) / 2 - 50) <= CENTRE_INK
+            bx, _, bw, _ = c["box"] if c.get("layout") != "scene" and c.get("box") else (0, 0, 0, 0)
+            box_ok = bw > 0 and ink[1] - ink[0] >= OVERLAY_FILL * bw and abs((ink[0] + ink[1]) / 2 - (bx + bw / 2)) <= CENTRE_INK
+            if not (frame_ok or box_ok):
+                out.append(finding("FAIL", c["start"], f"{name} draws {ink[0]:.0f}-{ink[1]:.0f}% of the width "
+                                   f"(under {INK_MIN_W}% wide or off centre" + (f", and under {OVERLAY_FILL:.0%} of its box at "
+                                   f"{bx:.0f}-{bx + bw:.0f}%" if bw else "") + "): small and lopsided on a phone", PLAN_FIX))
         if c.get("layout") == "scene" or spread(c):
             continue    # a full-frame cut-away, or logos laid round the head: the renderer keeps them clear
         cl, ct, cr = l, top, r
