@@ -282,7 +282,7 @@ def cmd_kinds(a):
     files = sorted((outdir / "video").glob("*.graphics.json"))
     if not files:
         sys.exit("no video/*.graphics.json. Run graphics.py measure first.")
-    docs = {f: json.loads(f.read_text()) for f in files}
+    docs = {f: json.loads(f.read_text(encoding="utf-8")) for f in files}
     todo = [(f, g) for f, d in docs.items() for g in d["graphics"]
             if g.get("crop") and (a.force or g.get("kind_source") != "model")]
     total = 0
@@ -300,7 +300,7 @@ def cmd_kinds(a):
                          kind_source="model")
         print(f"  {k + len(batch)}/{len(todo)} crops, {tokens} tokens", file=sys.stderr)
     for f, d in docs.items():
-        f.write_text(json.dumps(d, indent=1))
+        f.write_text(json.dumps(d, indent=1), encoding="utf-8")
     print(f"{total} input tokens, about ${total / 1e6 * 0.30:.4f} at most on the paid tier (free tier: $0)",
           file=sys.stderr)
     from graphics import merge as gmerge
@@ -313,12 +313,12 @@ def cmd_merge(a):
     files = sorted((outdir / "video").glob("*.look-ai.json"))
     if not files:
         sys.exit("no video/*.look-ai.json yet. Run `look`, or the fallback sheet pass.")
-    rows = [json.loads(f.read_text()) for f in files]
+    rows = [json.loads(f.read_text(encoding="utf-8")) for f in files]
     source = mode(r.get("_source") for r in rows) or MODEL
     sp = outdir / "style.json"
-    style = apply(json.loads(sp.read_text()) if sp.exists() else {"handle": slug(a.handle)},
+    style = apply(json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"handle": slug(a.handle)},
                   merge_rows(rows, source))
-    sp.write_text(json.dumps(style, indent=2))
+    sp.write_text(json.dumps(style, indent=2), encoding="utf-8")
     from look import write_summary
     print(write_summary(outdir))
     print(f"-> {sp}")
@@ -338,7 +338,7 @@ def cmd_look(a):
         views = {}
         vj = outdir / "videos.json"
         if vj.exists():
-            views = {v["id"]: v.get("view_count") or v.get("like_count") or 0 for v in json.loads(vj.read_text())["videos"]}
+            views = {v["id"]: v.get("view_count") or v.get("like_count") or 0 for v in json.loads(vj.read_text(encoding="utf-8"))["videos"]}
         ids = sorted(have, key=lambda i: -views.get(i, 0))[:a.top]
     def one(vid):
         """Tokens spent on one video (a thread: the work is an HTTP call)."""
@@ -355,7 +355,7 @@ def cmd_look(a):
             return 0
         resp, model = call(key, body(data, a.fps))
         look, tokens = parse(resp)
-        out.write_text(json.dumps({**look, "_source": model, "_tokens": tokens}, indent=2))
+        out.write_text(json.dumps({**look, "_source": model, "_tokens": tokens}, indent=2), encoding="utf-8")
         print(f"{vid} {tokens} tokens: {look['font_class']}, {look['caption_animation']}, "
               f"{look['motion_personality']}", file=sys.stderr)
         return tokens

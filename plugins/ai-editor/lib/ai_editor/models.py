@@ -110,7 +110,7 @@ def demo():
         assert whisper_dir("small") is None and whisper_dir("medium") is None
         for f in WHISPER["tiny"][1]:
             (DIR / "faster-whisper-tiny").mkdir(exist_ok=True)
-            (DIR / "faster-whisper-tiny" / f).write_text("x")
+            (DIR / "faster-whisper-tiny" / f).write_text("x", encoding="utf-8")
         assert whisper_dir("tiny") == DIR / "faster-whisper-tiny"
         assert sha256(DIR / "faster-whisper-tiny" / "config.json") == hashlib.sha256(b"x").hexdigest()
         # a download says which file in plain words, never the pinned URL with its commit hash

@@ -46,7 +46,7 @@ WIN_X, CONTROL_LO = 2.0, 0.5
 # ---------- per video ----------
 
 def load(p):
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def role(v):
@@ -520,15 +520,15 @@ def build(outdir, at=None):
                         "differs": [sentence(c) for c in sorted(comp, key=lambda c: not c["verdict"].endswith("every winner"))
                                     if c["verdict"].startswith("differs")]}
     style["ai_tells"] = {k: v for k, v in tells.items() if k != "look_checked"}
-    (outdir / "style.json").write_text(json.dumps(style, indent=2))
-    (outdir / "report.json").write_text(json.dumps({"hooks": hooks, "compare": comp, "ai_tells": tells}, indent=1))
+    (outdir / "style.json").write_text(json.dumps(style, indent=2), encoding="utf-8")
+    (outdir / "report.json").write_text(json.dumps({"hooks": hooks, "compare": comp, "ai_tells": tells}, indent=1), encoding="utf-8")
     try:   # look.md was written before graphics, sound and the tells: rewrite it from the final style.json
         from look import write_summary
         write_summary(outdir)
     except Exception as e:
         print(f"  look.md not rewritten: {e}", file=sys.stderr)
     out = outdir / "teardown.html"
-    out.write_text(page(style.get("handle") or outdir.name, outdir, style, videos, hooks, comp, tells, gfx_rows))
+    out.write_text(page(style.get("handle") or outdir.name, outdir, style, videos, hooks, comp, tells, gfx_rows), encoding="utf-8")
     return out, style, comp
 
 
@@ -641,16 +641,16 @@ def demo():
         from PIL import Image
         Image.new("RGB", (100, 60), "white").save(od / "graphics" / "v1_0.jpg")
         (od / "videos.json").write_text(json.dumps({"videos": [{"id": "v1", "view_count": 9000, "vs_median": 3.0,
-                                                                 "webpage_url": "https://example.com/v1"}]}))
+                                                                 "webpage_url": "https://example.com/v1"}]}), encoding="utf-8")
         (od / "video" / "v1.graphics.json").write_text(json.dumps({"id": "v1", "duration_s": 2.0, "width": 360, "height": 640,
             "graphics": [{"t_in": 0.4, "t_out": 1.6, "hold_s": 1.2, "box": [0.1, 0.1, 0.8, 0.3], "kind": "real screenshot",
                           "what": "a pricing page", "crop": "graphics/v1_0.jpg",
-                          "entrance": {"kind": "slide", "from": "bottom", "ease": "power3.out", "duration_s": 0.3}}]}))
+                          "entrance": {"kind": "slide", "from": "bottom", "ease": "power3.out", "duration_s": 0.3}}]}), encoding="utf-8")
         (od / "style.json").write_text(json.dumps({"handle": "demo", "graphics": {"entrances": [
             {"kind": "slide", "ease": "power3.out", "share_pct": 100, "n": 1, "duration_s": 0.3, "overshoot": 0.0,
-             "fade": False, "from": "bottom", "distance_pct": 60}]}}))
+             "fade": False, "from": "bottom", "distance_pct": 60}]}}), encoding="utf-8")
         out, style, _ = build(od, FakeTells)
-        text = out.read_text()
+        text = out.read_text(encoding="utf-8")
         assert "<title>@demo teardown</title>" in text and "a pricing page" in text and "data:image/jpeg;base64," in text
         assert "What to take" in text and "power3.out" in text and chr(0x2014) not in text
         assert style["winners"]["n_winners"] == 1 and "hook" in style

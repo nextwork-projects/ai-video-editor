@@ -77,7 +77,7 @@ def apply_overrides(plan, edit_dir, plan_name=None):
     f = Path(edit_dir) / "overrides.json"
     if not f.exists():
         return plan
-    ov = json.loads(f.read_text())
+    ov = json.loads(f.read_text(encoding="utf-8"))
     if plan_name and ov.get("plan") and ov["plan"] != plan_name:
         print(f"warning: overrides.json is for {ov['plan']}, not {plan_name}: not applied", file=sys.stderr)
         return plan
@@ -127,7 +127,7 @@ def regions(plan, edit_dir):
     from plan import SAFE, free_regions, head_during
     aspect = "9:16" if plan["height"] > plan["width"] else "16:9"
     fj = Path(edit_dir) / "face.json"
-    face = json.loads(fj.read_text()) if fj.exists() else None
+    face = json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else None
     l, t, r, b = SAFE[aspect]
     cap_y = plan["captions"]["style"].get("y_pct", 74)
     for c in plan["cards"]:
@@ -150,10 +150,10 @@ class Session:
 
     def overrides(self):
         p = self.ov_path()
-        return json.loads(p.read_text()) if p.exists() else {"plan": self.plan_name, "cards": {}, "words": {}, "sfx": {}}
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"plan": self.plan_name, "cards": {}, "words": {}, "sfx": {}}
 
     def state(self):
-        plan = json.loads((self.edit / self.plan_name).read_text())
+        plan = json.loads((self.edit / self.plan_name).read_text(encoding="utf-8"))
         plan = apply_overrides(plan, self.edit, self.plan_name)
         face = regions(plan, self.edit)
         imgs = sorted(f"images/{p.name}" for p in (self.edit / "images").glob("*") if p.suffix.lower() in IMAGE_EXT)
@@ -176,11 +176,11 @@ class Session:
                 to = ch["to"]
             else:
                 raise ValueError(kind)
-            self.ov_path().write_text(json.dumps(ov, indent=1))
+            self.ov_path().write_text(json.dumps(ov, indent=1), encoding="utf-8")
             row = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "source": "preview", "plan": self.plan_name,
                    "change": f"{kind}.{ch.get('action', 'set')}", "target": key, "from": ch.get("from"), "to": to,
                    "what": ch.get("text", "")}
-            with open(self.edit / "corrections.jsonl", "a") as f:
+            with open(self.edit / "corrections.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
             self.changes.append(row)
 
@@ -190,7 +190,7 @@ class Session:
                    "at": datetime.datetime.now().isoformat(timespec="seconds")}
         for c in self.changes:
             summary["by_kind"][c["change"]] = summary["by_kind"].get(c["change"], 0) + 1
-        (self.edit / "preview-done.json").write_text(json.dumps(summary, indent=1))
+        (self.edit / "preview-done.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
         return summary
 
     def media(self, rel):
@@ -199,7 +199,7 @@ class Session:
         target = (self.edit / rel).resolve()
         if not target.is_relative_to(self.edit) or not target.is_file():
             return None
-        plan_video = json.loads((self.edit / self.plan_name).read_text())["video"]
+        plan_video = json.loads((self.edit / self.plan_name).read_text(encoding="utf-8"))["video"]
         proxy = self.edit / f".render{self.tag}" / rel
         if rel == plan_video and proxy.exists() and proxy.stat().st_mtime >= target.stat().st_mtime:
             return proxy
@@ -350,8 +350,8 @@ def serve(edit, plan_name, port, open_page):
 
 def apply_cmd(edit, plan_name):
     p = edit / plan_name
-    plan = apply_overrides(json.loads(p.read_text()), edit, plan_name)
-    p.write_text(json.dumps(plan, indent=1))
+    plan = apply_overrides(json.loads(p.read_text(encoding="utf-8")), edit, plan_name)
+    p.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     print(f"{p}: overrides applied, {len(plan['cards'])} cards, {len(plan.get('sfx') or [])} cues")
 
 
@@ -379,7 +379,7 @@ def demo():
         "cards": {"jev@0.500": {"start": 1.5, "end": 4.0, "box": [3, 40, 30, 20], "marks": None},
                   "cheap@5.000": {"deleted": True}},
         "words": {"0.000": "Jev", "1.000": ""},
-        "sfx": {"0.600": -6}}))
+        "sfx": {"0.600": -6}}), encoding="utf-8")
     got = apply_overrides(base(), d, "plan.json")
     c = got["cards"]
     assert len(c) == 1 and c[0]["start"] == 1.5 and c[0]["box"] == [3, 40, 30, 20] and c[0]["override"] == "jev@0.500", c
@@ -392,10 +392,10 @@ def demo():
     assert again == got, "apply_overrides must be idempotent"
     assert apply_overrides(base(), d, "plan-split.json")["cards"][0]["start"] == 0.5   # another plan's overrides stay out
     s = Session(d, "plan.json")
-    (d / "plan.json").write_text(json.dumps(base()))
+    (d / "plan.json").write_text(json.dumps(base()), encoding="utf-8")
     s.change({"kind": "word", "key": "0.400", "from": "is", "to": "was", "action": "fix", "text": "caption 'is' -> 'was'"})
-    assert json.loads((d / "overrides.json").read_text())["words"]["0.400"] == "was"
-    row = json.loads((d / "corrections.jsonl").read_text().splitlines()[-1])
+    assert json.loads((d / "overrides.json").read_text(encoding="utf-8"))["words"]["0.400"] == "was"
+    row = json.loads((d / "corrections.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert row["change"] == "word.fix" and row["from"] == "is" and row["to"] == "was"
     st = s.state()
     assert st["plan"]["cards"][0]["_regions"] and st["overrideCount"] == 6, st["overrideCount"]
@@ -403,7 +403,7 @@ def demo():
     assert s.media("../../etc/passwd") is None
     # the server: 127.0.0.1 only, and every request (page, state, media, writes) needs the URL's token
     import urllib.request, urllib.error
-    (d / "app.js").write_text("// bundle")
+    (d / "app.js").write_text("// bundle", encoding="utf-8")
     srv, url, token = make_server(s, d / "app.js", 0)
     assert srv.server_address[0] == "127.0.0.1" and f"?t={token}" in url and len(token) >= 32, url
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -415,11 +415,11 @@ def demo():
                 return r.status, r.headers.get("Set-Cookie") or ""
         except urllib.error.HTTPError as e:
             return e.code, ""
-    before = (d / "overrides.json").read_text()
+    before = (d / "overrides.json").read_text(encoding="utf-8")
     for path, data in (("/", None), ("/app.js", None), ("/api/state", None), ("/api/state?t=wrong", None),
                        ("/api/change", b'{"kind": "word", "key": "0.000", "to": "x"}'), ("/api/done", b"{}")):
         assert hit(path, data)[0] == 403, path
-    assert (d / "overrides.json").read_text() == before, "a request without the token wrote"
+    assert (d / "overrides.json").read_text(encoding="utf-8") == before, "a request without the token wrote"
     code, cookie = hit(f"/?t={token}")
     assert code == 200 and "HttpOnly" in cookie and "SameSite=Strict" in cookie, cookie
     jar = {"Cookie": cookie.split(";")[0]}
@@ -444,7 +444,7 @@ def main():
     a = ap.parse_args(args)
     edit = Path(a.edit).resolve()
     ov = edit / "overrides.json"
-    plan_name = a.plan or (json.loads(ov.read_text()).get("plan") if ov.exists() else None) or "plan.json"
+    plan_name = a.plan or (json.loads(ov.read_text(encoding="utf-8")).get("plan") if ov.exists() else None) or "plan.json"
     if cmd == "apply":
         return apply_cmd(edit, plan_name)
     serve(edit, plan_name, a.port, not a.no_open)

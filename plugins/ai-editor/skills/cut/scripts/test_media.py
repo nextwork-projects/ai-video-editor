@@ -86,7 +86,7 @@ def test_real_renders():
                 assert frames[-1][1] == total, (name, frames, total)    # the last span runs to the end
                 ed = d / f"{src.stem}-{run}"
                 ed.mkdir()
-                (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": frames}))
+                (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": frames}), encoding="utf-8")
                 # the second run renders through a temp folder with a ' in its name
                 quoted = d / "it's tmp"
                 quoted.mkdir(exist_ok=True)
@@ -113,12 +113,12 @@ def test_music_bed():
            "-i", f"aevalsrc='{tone}+{bed}':s=48000:d=7", "-c:v", "libx264", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k", "-shortest", src)
         (ed / "words.raw.json").write_text(json.dumps(
-            [{"text": f"w{i}", "start": a, "end": b, "type": "word"} for i, (a, b, _) in enumerate(WORDS)]))
+            [{"text": f"w{i}", "start": a, "end": b, "type": "word"} for i, (a, b, _) in enumerate(WORDS)]), encoding="utf-8")
         r = subprocess.run([sys.executable, HERE / "build_timeline.py", src, ed, "--max-pause", "0.3"],
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
         assert "music bed" in r.stdout, r.stdout
-        spans = json.loads((ed / "decisions.json").read_text())
+        spans = json.loads((ed / "decisions.json").read_text(encoding="utf-8"))
         for a, b, _ in WORDS:    # every word whole inside one kept span
             assert any(s["start"] <= a + 1e-6 and b <= s["end"] + 1e-6 for s in spans), (a, b, spans)
         kept = sum(s["end"] - s["start"] for s in spans)
@@ -136,13 +136,13 @@ def test_mistimed_word_is_not_clipped():
         ff("-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=4.5", "-f", "lavfi", "-i", f"aevalsrc='{tone}':s=48000:d=4.5",
            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", src)
         (ed / "words.raw.json").write_text(json.dumps(
-            [{"text": f"w{i}", "start": a, "end": b, "type": "word"} for i, (a, b) in enumerate(labels)]))
+            [{"text": f"w{i}", "start": a, "end": b, "type": "word"} for i, (a, b) in enumerate(labels)]), encoding="utf-8")
         r = subprocess.run([sys.executable, HERE / "build_timeline.py", src, ed], capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
-        spans = json.loads((ed / "decisions.json").read_text())
+        spans = json.loads((ed / "decisions.json").read_text(encoding="utf-8"))
         assert spans[0]["start"] <= 1.0 + 1e-6, (spans, r.stdout)        # the whole first word plays
         assert "0 still in speech" in r.stdout, r.stdout
-        assert json.loads((ed / "report.json").read_text())["splices_in_speech"] == []
+        assert json.loads((ed / "report.json").read_text(encoding="utf-8"))["splices_in_speech"] == []
 
 
 def test_scribe_network_error_is_a_message():
