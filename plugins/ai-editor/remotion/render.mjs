@@ -3,7 +3,7 @@
 //   node render.mjs stills <publicDir> <plan.json> <outDir> name=frame ...
 //   node render.mjs bench  <publicDir> <plan.json>            -> JSON: laptop seconds per frame
 //   node render.mjs local  <publicDir> <plan.json> <out.mp4> [--draft] [--concurrency=N]
-//   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to> [--concurrency=N]   frames from..to inclusive
+//   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to> [--draft] [--concurrency=N]   frames from..to inclusive
 //   node render.mjs bundle <publicDir> <outDir>               a bundle folder another machine renders from (Modal)
 //
 // <publicDir> can also be a bundle folder made by `bundle` (it holds bundle.js): nothing is bundled again.
@@ -58,6 +58,19 @@ const hwOpts = (composition, scale) => (flags.draft && process.platform === "dar
   ? { hardwareAcceleration: "if-possible", crf: null,
       videoBitrate: `${Math.round(12 * (composition.width * composition.height * scale * scale) / (1080 * 1920))}M` }
   : {};
+
+// "Rendered N/M" at most once a second while frames come in: edit.py's stall watchdog reads it, and so does
+// the review page's progress bar (review.py --log).
+const progress = (total) => {
+  let shown = -1, at = 0;
+  return ({ renderedFrames }) => {
+    const now = Date.now();
+    if (renderedFrames !== shown && (now - at >= 1000 || renderedFrames >= total)) {
+      shown = renderedFrames; at = now;
+      console.log(`Rendered ${renderedFrames}/${total}`);
+    }
+  };
+};
 
 async function prepare(publicDir, planPath) {
   const inputProps = readPlan(planPath);
@@ -118,22 +131,18 @@ async function local(publicDir, planPath, out) {
   const { serveUrl, composition, inputProps } = await prepare(publicDir, planPath);
   const t0 = Date.now();
   const scale = flags.draft ? 2 / 3 : 1;
-  let last = -1;
   // Rendering straight to mp4 puts the AAC encoder's start-up padding in front of the sound, so the
   // audio lands 43 ms after the picture. Render PCM audio in an mkv, then encode AAC once, trimmed
   // to the video: the same path the GitHub join takes, sample-aligned with the cut.
   const tmp = out.replace(/\.mp4$/i, "") + ".tmp.mkv";
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: tmp,
     enforceAudioTrack: true, concurrency: concurrency(), scale, ...hwOpts(composition, scale), timeoutInMilliseconds: TIMEOUT_MS,
-    onProgress: ({ progress }) => {
-      const p = Math.floor(progress * 10);
-      if (p !== last) { last = p; process.stdout.write(`${p * 10}% `); }
-    } });
+    onProgress: progress(composition.durationInFrames) });
   const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-i", tmp, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
     "-shortest", "-movflags", "+faststart", out], { stdio: "inherit" });
   fs.rmSync(tmp, { force: true });
   if (r.status !== 0) throw new Error(`ffmpeg could not write ${out}`);
-  console.log(`\nrendered ${out} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  console.log(`rendered ${out} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 
 // One slice of the video, for the GitHub workflow's parallel render. The join step concatenates them.
@@ -144,7 +153,7 @@ async function chunk(publicDir, planPath, out, from, to) {
   // gap. The join encodes the audio to AAC once.
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: out,
     frameRange: [Number(from), Number(to)], enforceAudioTrack: true, concurrency: concurrency(),
-    timeoutInMilliseconds: TIMEOUT_MS });
+    scale: flags.draft ? 2 / 3 : 1, timeoutInMilliseconds: TIMEOUT_MS, onProgress: progress(Number(to) - Number(from) + 1) });
   console.log(`rendered ${out} (frames ${from}-${to}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 

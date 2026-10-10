@@ -23,9 +23,10 @@ On the frame each card has settled (the same moment as its still):
               (its stroke, else the footage; full size), a text card's text against its ground
   generic     the AI-default look: near-black panel + one neon accent, a blue-purple gradient,
               emoji, or a card that is mostly stock icons
-On each zoom move (frames round its start and end, the face band, ORB + a similarity fit frame to frame):
-  zoom snap   one frame carries most of the change (an instant step, not a move)
-  zoom jerk   the zoom's speed reverses or surges again mid-move (a smooth move rises and falls once)
+On each zoom move (frames round its start and end): the render's face band against the cut behind it, frame by
+frame (ORB + a similarity fit), so the camera's own movement cancels and only the drawn zoom is measured:
+  zoom snap   off the planned curve, with one frame carrying most of the change (an instant step, not a move)
+  zoom jerk   off the planned curve some other way (it reverses or surges where the plan eases)
 An audio clip's cover (plan "cover"): moving where its planned push carries its edge COVER_MIN_PX_S or more,
 and through each sentence's punch; its push measured on the render from the first frame to the last.
 On the audio: integrated loudness and true peak (ffmpeg ebur128), and every sound cue's level
@@ -68,12 +69,16 @@ EDGE_IN = (0.008, 0.025)   # strip inside a card's edge (share of its width/heig
 EDGE_ROWS = 0.06       # content in more than this share of the strip's length = runs into the edge
 CORNER = 0.12          # strip ends skipped: rounded corners show the footage
 CAP_EDGE = 0.015       # captions this close to the frame's side are cut off by it
+CAP_DRAWN = 40         # a caption pixel differs from the footage under it by this much (0-255, any channel);
+                       # the same footage text on the render and the cut differs by under 20 after encoding
 from plan import CONTRAST_MIN as CONTRAST_FAIL, CONTRAST_TARGET   # noqa: E402  WCAG 1.4.3 for large text; one line for plan and check
 CONTRAST_WARN = 4.5    # WCAG AA for body text: the margin moving footage needs
 ZOOM_MIN_LOG = 0.03    # a zoom changing log-scale less than this (3%) is too small to judge
 SNAP_SHARE = 0.6       # one frame carrying this share of a zoom's change is a snap. A 0.16 s power2.out punch
                        # puts 39% in its first frame at 30 fps; an instant punch puts 100%
-JERK_SHARE = 0.3       # a second speed peak (or a reversal) over this share of the first: the move surges
+FOLLOW_SHARE = 0.5     # the render's zoom off its planned curve by half the move: not the planned ease. Handheld
+                       # footage with motion blur misfits by up to 0.36 of a 1.18 move (the sample take, 26.8 s); a
+                       # 0.16 s punch drawn where a 0.8 s push was planned is 0.6 off
 COVER_MIN_PX_S = 0.5   # an audio clip's cover: its edge travelling this many output px a second is moving
                        # (about one px every two seconds; slower reads as a still picture)
 DARK_V, DARK_SHARE = 0.2, 0.45          # near-black panel: value under 0.2, low colour, 45%+ of the card
@@ -234,6 +239,16 @@ def scene_land(c, words, k, lead=None):
     return word, c["start"] + (0 if cut else 0.31 * k)
 
 
+def card_diff(a, behind):
+    """Per pixel, how far a card's box on the render is from the footage under it: the least over the
+    candidate footage frames (this one, and one either side), so a render a frame off the cut reads 0 where
+    there is no card."""
+    import cv2
+    import numpy as np
+    blur = cv2.GaussianBlur(a, (5, 5), 0)
+    return np.min([cv2.absdiff(blur, cv2.GaussianBlur(b, (5, 5), 0)).max(axis=2) for b in behind], axis=0)
+
+
 def landing(area, f0, fps):
     """(frame it landed, first-frame verdict) from a card's ink area per frame, area[0] = frame f0-3.
     verdict: None, 'flash' (whole then gone) or 'whole' (no entrance)."""
@@ -383,9 +398,11 @@ def caption_fill(frame, colours, ys, font_px, text):
     return slice(r0, r1), fill, bool(xs.min() < CAP_EDGE * W or xs.max() > (1 - CAP_EDGE) * W)
 
 
-def caption_lines(frame, colours, y, font_px):
+def caption_lines(frame, colours, y, font_px, behind=None):
     """How many lines of caption text sit round row y (the page's centre, Captions.tsx translateY -50%):
-    bands of caption-coloured glyphs (blobs a letter tall) within two font sizes of it."""
+    bands of caption-coloured glyphs (blobs a letter tall) within two font sizes of it. behind: the footage
+    as drawn under the caption (the cut through the zoom; a list: this frame and one either side); a pixel
+    the footage already has (white text on a screen in the shot) is the footage's, not the caption's."""
     import cv2
     import numpy as np
     H, W = frame.shape[:2]
@@ -397,6 +414,8 @@ def caption_lines(frame, colours, y, font_px):
     near = np.zeros(f.shape[:2], bool)
     for c in colours:
         near |= np.abs(f - c).max(axis=2) < min(60, max(8, 0.4 * float(np.abs(typical - c).max())))
+    for b in ([] if behind is None else behind if isinstance(behind, list) else [behind]):
+        near &= np.abs(f - b[lo:hi].astype(np.int16)).max(axis=2) > CAP_DRAWN
     n, lab, stats, _ = cv2.connectedComponentsWithStats(near.astype(np.uint8))
     near = np.isin(lab, [i for i in range(1, n) if 0.3 * font_px <= stats[i, cv2.CC_STAT_HEIGHT] <= 1.3 * font_px])
     # a line of words: glyphs joined across their gaps, running through the middle of the frame
@@ -624,31 +643,65 @@ def zoom_steps(frames):
     return out
 
 
-def zoom_verdict(steps, planned=0.0):
-    """None (smooth, or too small to judge), "snap" or "jerk" for one zoom move's per-frame log-scale steps.
-    planned: the move's log-scale; a frame jumping most of it while the move nets nothing (out and straight
-    back in) is a snap too."""
-    tot = sum(steps)
-    if abs(tot) < ZOOM_MIN_LOG:
-        return "snap" if planned >= ZOOM_MIN_LOG and steps and max(map(abs, steps)) > SNAP_SHARE * planned else None
-    v = [x if tot > 0 else -x for x in steps]       # speed along the move
-    peak = max(v)
-    if peak > SNAP_SHARE * abs(tot):
-        return "snap"
-    if min(v) < -JERK_SHARE * peak:
-        return "jerk"
-    i = v.index(peak)       # a smooth move: speed rises to one peak and falls; a second surge is jerk
-    if any(v[j] - min(v[min(j, i):max(j, i) + 1]) > JERK_SHARE * peak for j in range(len(v)) if j != i):
-        return "jerk"
-    return None
-
-
-def zoom_moves(video, plan, w=270, h=480):
-    """[(t, kind, steps, planned log-scale)] for every zoom move on the render: in at start, back out at end.
-    A move under a full-frame scene is hidden (not judged); one just before a scene is read up to its start."""
+def zoom_scales(render, behind, y0, y1):
+    """Log-scale of the footage on each render frame against the cut behind it at the same frame (ORB matches, a
+    RANSAC similarity fit; the render's head band y0:y1 only, so cards and captions stay out). The camera's own
+    movement is in both frames, so what is left is the zoom drawn over it. None where the fit fails."""
+    import cv2
     import numpy as np
+    orb, bf = cv2.ORB_create(1000), cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    out = []
+    for c, r in zip(behind, render):
+        mask = np.zeros(r.shape, np.uint8)
+        mask[y0:y1] = 255
+        (ka, da), (kb, db) = orb.detectAndCompute(c, None), orb.detectAndCompute(r, mask)
+        m = bf.match(da, db) if da is not None and db is not None else []
+        M = None
+        if len(m) >= 8:
+            M, _ = cv2.estimateAffinePartial2D(np.float32([ka[x.queryIdx].pt for x in m]),
+                                               np.float32([kb[x.trainIdx].pt for x in m]), method=cv2.RANSAC)
+        out.append(float(np.log(np.hypot(M[0, 0], M[1, 0]))) if M is not None else None)
+    return out
+
+
+def zoom_verdict(series, want, planned):
+    """None (the render follows the planned curve, or the move is too small to judge), "snap" or "jerk" for one
+    zoom move. series: zoom_scales (None = not measured); want: the planned log-scale at each frame
+    (check.footage_affine); planned: the move's log-scale. A 3-frame median drops a one-frame misfit; a render
+    off the plan by more than FOLLOW_SHARE of the move is a fault: a snap when one frame jumps SNAP_SHARE of it."""
+    pts = [(v, w) for v, w in zip(series, want) if v is not None]
+    if abs(planned) < ZOOM_MIN_LOG or len(pts) < 3:
+        return None
+    v = [x for x, _ in pts]
+    v = [v[0]] + [sorted(v[i - 1:i + 2])[1] for i in range(1, len(v) - 1)] + [v[-1]]
+    if max(abs(a - w) for a, (_, w) in zip(v, pts)) <= FOLLOW_SHARE * abs(planned):
+        return None
+    return "snap" if max(abs(b - a) for a, b in zip(v, v[1:])) > SNAP_SHARE * abs(planned) else "jerk"
+
+
+def zoom_fix(kind, style_kind=None):
+    """The fix for a zoom WARN; never the setting already in use."""
+    if "push" in (kind, style_kind):
+        return ("render again (edit.py render); if it stays, the renderer is not drawing the planned ease: "
+                "look at that move in the render and the frames round it")
+    return "set \"kind\": \"push\" under \"zoom\" in style.json (an eased move of 0.8 s or more), then plan and render again"
+
+
+def zoom_moves(video, plan, w=270, h=480, behind=None, cuts=()):
+    """[(t, kind, scales, wanted, planned log-scale)] for every zoom move on the render: in at start, back out at
+    end. behind: (cut.mp4, its proxy filter), read over the same frames. A move under a full-frame scene is
+    hidden (not judged); one just before a scene is read up to its start. Frames within 2 of a jump cut in the
+    footage are not measured (the two files can land a frame apart there)."""
+    import numpy as np
+    from check import footage_affine
     fps = plan["fps"]
     scenes = [(c["start"], c["end"]) for c in plan.get("cards") or [] if c.get("layout") == "scene"]
+
+    def grab(src, vf, a, d):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", str(src), "-vf",
+                              f"{vf}fps={fps},scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+        return np.frombuffer(raw, np.uint8)[: len(raw) // (w * h) * w * h].reshape(-1, h, w)
+
     out = []
     for z in plan["zooms"]:
         e = max(0.8, z.get("ease_s") or 0) if z.get("kind") == "push" and z.get("ease_s") else 0.16
@@ -657,13 +710,15 @@ def zoom_moves(video, plan, w=270, h=480):
                 continue
             a = max(0.0, t - 0.1)
             d = min([e + 0.25] + [s0 - a for s0, _ in scenes if s0 > t])
-            raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", str(video), "-vf",
-                                  f"fps={fps},scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
-            fr = np.frombuffer(raw, np.uint8)[: len(raw) // (w * h) * w * h].reshape(-1, h, w)
+            fr = grab(video, "", a, d)
+            cut = grab(behind[0], behind[1] + ",", a, d) if behind else fr
+            n = min(len(fr), len(cut))
             o = (z.get("origin") or [50, 30])[1] / 100
-            band = fr[:, int(max(0, o) * h):int(min(1, o + 0.3) * h)]     # the head down from its top (the origin): not cards, not captions
-            if len(band) >= 3:
-                out.append((round(t, 2), z.get("kind", "punch"), zoom_steps(list(band)), math.log(z.get("scale") or 1)))
+            if n >= 3:   # the head down from its top (the origin): not cards, not captions
+                sc = zoom_scales(fr[:n], cut[:n], int(max(0, o) * h), int(min(1, o + 0.3) * h))
+                sc = [None if any(abs(a + k / fps - c) <= 2.5 / fps for c in cuts) else v for k, v in enumerate(sc)]
+                want = [math.log(footage_affine(a + k / fps, plan, w, h)[0][0]) for k in range(n)]
+                out.append((round(t, 2), z.get("kind", "punch"), sc, want, math.log(z.get("scale") or 1)))
     return out
 
 
@@ -748,9 +803,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     series = {i: {"area": [], "bbox": [], "d": [], "prev": None} for i in range(len(cards))}
     small_r, small_b, kept, caps = [], [], {}, []
     prev_r = prev_b = None
+    cut, cut_next = None, next(behind, None)
     for n, frame in enumerate(stream(video, "null", W, H, fps)):
         t = n / fps
-        cut = next(behind, None)
+        cut_prev, cut, cut_next = cut, cut_next, next(behind, None)
         if cut is None:
             break
         sr_ = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 36), interpolation=cv2.INTER_AREA).astype(np.float32)
@@ -759,17 +815,21 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         small_b.append(sb_)
         up = [i for i in range(len(cards)) if first[i] - 3 <= n <= last[i]]
         if n in page_frames:
-            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch) for y in cap_ys)
+            under = None if split else [cv2.warpAffine(c_, np.float32(footage_affine(t, plan, W, H)), (W, H))
+                                        for c_ in (cut_prev, cut, cut_next) if c_ is not None]
+            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch, under) for y in cap_ys)
             if nl > (cs.get("max_lines") or 1):
                 wrapped.append((t, page_frames[n]["text"], nl))
         need = up or n in sframes or n in cap_frames
         if not need:
             continue
-        if split:
+        nb = []      # the footage one frame either side: where the render lands a frame off the cut (a 29.97 fps
+        if split:    # source drawn at 30), a card's box would otherwise read the footage's own change as the card
             bg = ground
         else:
             zm = np.float32(footage_affine(t, plan, W, H))
             bg = cv2.warpAffine(cut, zm, (W, H))
+            nb = [cv2.warpAffine(c_, zm, (W, H)) for c_ in (cut_prev, cut_next) if c_ is not None and up]
             # a behind card: the speaker's cutout over it is the speaker, not the card (and its refined
             # edge differs a little from the raw camera), so his pixels read as footage here
             k = any(cards[i].get("layer") == "behind" for i in up) and \
@@ -789,8 +849,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             x0, y0, x1, y1 = boxes[i]
             if x1 <= x0 or y1 <= y0:
                 continue
-            a, b = frame[y0:y1, x0:x1], bg[y0:y1, x0:x1]
-            diff = cv2.absdiff(cv2.GaussianBlur(a, (5, 5), 0), cv2.GaussianBlur(b, (5, 5), 0)).max(axis=2)
+            diff = card_diff(frame[y0:y1, x0:x1], [b_[y0:y1, x0:x1] for b_ in [bg] + nb])
             ink = diff > INK_DIFF["split" if split else "overlay"]
             r0, r1 = max(0, cap_rows[0] - y0), max(0, cap_rows[1] - y0)
             ink[r0:r1] = False                      # the caption is not the card
@@ -844,7 +903,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     events = sorted(set(hard + jump + [i for a, b in moves for i in range(a, b + 1)]))
     moving = np.zeros(nfr, bool)
     for i in events:
-        moving[max(0, i - fps // 4):i + fps // 4] = True
+        moving[max(0, i - int(fps // 4)):i + int(fps // 4)] = True
     for i, c in enumerate(cards):
         d = series[i]["d"]
         for k, v in enumerate(d):
@@ -878,13 +937,16 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     mins = dur / 60
     landed = []
     meas["zoom_moves"] = []
-    for t, kind, st, planned in zoom_moves(video, plan):
-        v = zoom_verdict(st, planned)
+    zk = (style or {}).get("zoom") or {}
+    behind_src = (edit / plan["video"], proxy_filter(m["width"], m["height"], plan["width"], plan["height"]))
+    for t, kind, sc, want, planned in zoom_moves(video, plan, behind=behind_src, cuts=cuts):
+        v = zoom_verdict(sc, want, planned)
+        ok = [(x, y) for x, y in zip(sc, want) if x is not None]
         meas["zoom_moves"].append({"t": t, "kind": kind, "verdict": v,
-                                   "peak_share": round(max(map(abs, st)) / max(1e-6, abs(sum(st))), 2) if st else None})
+                                   "off_plan": round(max(abs(x - y) for x, y in ok) / max(1e-6, abs(planned)), 2) if ok else None})
         if v:
             out.append(F("WARN", t, f"the {kind} zoom at {t:.2f} s {'snaps in one frame' if v == 'snap' else 'surges or reverses mid-move'}",
-                         "set \"kind\": \"push\" under \"zoom\" in style.json (an eased move of 0.8 s or more), then plan and render again"))
+                         zoom_fix(kind, zk.get("kind"))))
     meas["rhythm"] = {"cuts_per_min": round((len(hard) + len(jump)) / mins, 1),
                       "moves_per_min": round(len(moves) / mins, 1),
                       "zooms_per_min": round(len(plan["zooms"]) / mins, 1)}
@@ -1124,17 +1186,29 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
 def demo():
     import numpy as np
     import cv2
-    # zoom moves: an instant 1.2x punch snaps; the same punch eased over 0.16 s, or a sine push, does not
-    tex = cv2.GaussianBlur(np.random.default_rng(1).integers(0, 255, (200, 270)).astype(np.uint8), (0, 0), 1.2)
-    at = lambda k: cv2.warpAffine(tex, cv2.getRotationMatrix2D((135, 100), 0, k), (270, 200))  # noqa: E731
-    out2 = lambda f: 1 - (1 - f) ** 2  # noqa: E731
-    assert zoom_verdict(zoom_steps([at(1.0)] * 3 + [at(1.2)] * 5)) == "snap"
-    assert zoom_verdict(zoom_steps([at(1.2 ** out2(min(1, i / 5))) for i in range(9)])) is None
-    assert zoom_verdict(zoom_steps([at(1.2 ** ((1 - np.cos(np.pi * i / 24)) / 2)) for i in range(25)])) is None
-    assert zoom_verdict([0.01, 0.03, 0.005, 0.03, 0.01]) == "jerk" and zoom_verdict([0.01] * 2) is None
-    # two punches touching: 1.2x drops to 1x in one frame and eases straight back, netting nothing: a snap
-    back = zoom_steps([at(1.2)] * 3 + [at(1.2 ** out2(min(1, i / 5))) for i in range(6)])
-    assert zoom_verdict(back) is None and zoom_verdict(back, math.log(1.2)) == "snap"
+    # zoom moves, measured against the cut behind. The footage is handheld: its own scale wobbles 4% frame to
+    # frame, which a frame-to-frame read of the render calls a surge on every move (the sample take: 16 of 16).
+    # Render = footage x the planned zoom. A 0.8 s sine push follows its plan: no verdict. The same render
+    # drawn as an instant step (or a punch where a push was planned) is off the plan: a snap. One that backs
+    # out half-way and in again: a jerk.
+    tex = cv2.GaussianBlur(np.random.default_rng(1).integers(0, 255, (480, 270)).astype(np.uint8), (0, 0), 1.2)
+    at = lambda f, k: cv2.warpAffine(f, cv2.getRotationMatrix2D((135, 150), 0, k), (270, 480))  # noqa: E731
+    sine = lambda i: (1 - np.cos(np.pi * min(1, max(0, i) / 24))) / 2  # noqa: E731
+    shake = [1 + 0.04 * np.sin(i * 1.7) for i in range(30)]
+    cut = [at(tex, k) for k in shake]
+    want = [math.log(1.2) * sine(i - 3) for i in range(30)]
+    push = [at(c, math.exp(w)) for c, w in zip(cut, want)]
+    old = zoom_steps(push)       # what the old frame-to-frame read saw: the footage's wobble reversing the move
+    assert min(old) < -0.3 * max(old), old
+    assert zoom_verdict(zoom_scales(push, cut, 100, 300), want, math.log(1.2)) is None
+    snap = [at(c, 1.2 if i >= 4 else 1.0) for i, c in enumerate(cut)]
+    assert zoom_verdict(zoom_scales(snap, cut, 100, 300), want, math.log(1.2)) == "snap"
+    back = [at(c, math.exp(w * (0.2 if 12 <= i < 18 else 1))) for i, (c, w) in enumerate(zip(cut, want))]
+    assert zoom_verdict(zoom_scales(back, cut, 100, 300), want, math.log(1.2)) == "jerk"
+    sc = zoom_scales(push, cut, 100, 300)
+    sc[10] = 0.9                 # one misfit frame (a jump cut in the footage lands a frame apart): dropped
+    assert zoom_verdict(sc, want, math.log(1.2)) is None
+    assert '"push"' not in zoom_fix("push") and '"push"' not in zoom_fix("punch", "push") and '"push"' in zoom_fix("punch")
     # every WARN's fix is something the model can do: never "render with the current renderer"
     assert "current StyleEdit" not in Path(__file__).read_text().replace('"current StyleEdit" not in', "")
     # an audio clip's cover: a 12% push over 22 s moves all but its first and last second; a punch fills a gap
@@ -1203,6 +1277,14 @@ def demo():
     assert landing(flash, 30, 30)[1] == "flash"
     assert landing([0, 0, 0] + [1000] * 25, 30, 30)[1] == "whole"
     assert landing([900, 900, 900] + [1000] * 25, 30, 30) == (None, None)
+    # the sample's 'Duolingo' logo (15.32 s): the screen in the shot changes from blue to cream as the logo starts,
+    # and the render sits one frame behind the cut there. Against this frame of the cut alone the box read 3036 px
+    # of "ink" on the logo's first frame, then 1259: a flash. Against the footage frames either side it reads 0
+    blue, cream = np.full((40, 80, 3), (230, 120, 20), np.uint8), np.full((40, 80, 3), (200, 235, 245), np.uint8)
+    assert (card_diff(blue, [cream]) > 40).sum() == 3200 and (card_diff(blue, [cream, blue]) > 40).sum() == 0
+    logo = blue.copy()
+    logo[10:30, 30:50] = (60, 200, 90)
+    assert 300 < (card_diff(logo, [cream, blue]) > 40).sum() <= 500
     # scene_land: planned 0.3 x k early (k 1.35), word 5.0, so start 5.0 - 0.1 - 0.405; half done at start + 0.31 k
     k = 1.35
     sc = {"trigger_word": "Notion,", "start": round(5.0 - 0.1 - 0.3 * k, 3)}
@@ -1246,6 +1328,17 @@ def demo():
     cv2.putText(two, "ads", (230, 650), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
     white = [np.array([255, 255, 255.])]
     assert caption_lines(one, white, 600, 40) == 1 and caption_lines(two, white, 600, 40) == 2
+    # the sample at 9.87 s: one caption line over a screen in the shot whose own white text sits a line lower
+    # read as "drawn on 2 lines". The footage under it has that text too, so it is not the caption's
+    shot = np.full((960, 540, 3), 90, np.uint8)
+    cv2.putText(shot, "on the screen", (110, 650), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    page = shot.copy()
+    cv2.putText(page, "down competitor ads", (40, 590), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
+    assert caption_lines(page, white, 600, 40) == 2 and caption_lines(page, white, 600, 40, shot) == 1
+    # the render a frame off the cut while the camera moves (the 30 fps render of the 29.97 sample, 14.03 s):
+    # this frame of the cut does not have the shot's text there yet, the next one does
+    moved = np.full((960, 540, 3), 90, np.uint8)
+    assert caption_lines(page, white, 600, 40, [moved]) == 2 and caption_lines(page, white, 600, 40, [moved, shot]) == 1
     # rhythm counter, measure_edit's synthetic clip
     f = np.full((120, 36, 64), 40, np.float32)
     base = np.random.default_rng(0).uniform(0, 80, (36, 64)).astype(np.float32)

@@ -43,7 +43,7 @@ against:
 
 | part | default | measured (3 styles) |
 |---|---|---|
-| zooms | punch to 1.18, eased by the renderer (0.16 s, never a one-frame snap), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
+| zooms | push to 1.18, eased 0.8 s each way (sine.inOut, PRINCIPLES "Smooth before varied"), on sentence starts, 9.5 a minute | punch in all three; 1.18 / 1.18 / 1.2; 6 / 9.5 / 10 a minute |
 | long sentences | a zoom change on the word nearest the middle of any stretch over 5 s (`zoom.max_hold_s`) | (the render check WARNs at 6 s with nothing moving) |
 | motion | `smooth` personality, median shot 2.4 s | 2.4 / 2.4 / 3.98 s |
 | captions | 3 words, 5.5% type, y 66%, lower case, weight 800, white, no stroke (plan.py adds one where the footage needs it) | 1 / 3 / 3 words; 4.7 / 5.5 / 6.5%; y 62 / 66 / 75% |
@@ -95,7 +95,9 @@ python3 "$VPY" "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 
 It writes `edits/<name>/cutout/<size>-<key>/` (RGBA PNGs named by their frame of the cut, about
 0.5 MB a frame; the key changes with cut.mp4) and the plan's `cutouts`, then prints, per card, how much of its key region the speaker covers and that the face
-is solid. On a `WARNING`, shrink or move that card. Laptop CPU: about 0.2-0.5 s a frame (free).
+is solid. On a `WARNING`, shrink or move that card: give its beat a smaller `"box": [x, y, w, h]` (% of
+the frame) beside the head or higher, on its beat in visuals.json or its entry in images.json, then
+plan.py and matte.py again; or plan with `--behind off`. Laptop CPU: about 0.2-0.5 s a frame (free).
 `--modal` runs each range on its own Modal CPU container (8 cores). The estimate is Modal's listed
 rates times the laptop's 0.26 s a frame: about $0.00003 a frame, $0.06 per minute of behind-card time;
 the run then prints the cost from the containers' own run time. `--estimate` prints

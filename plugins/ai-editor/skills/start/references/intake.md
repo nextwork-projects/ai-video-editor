@@ -61,6 +61,8 @@ python3 "$P" set behind true                              # false: cards stay be
 python3 "$P" set past_edit false                          # true once taste learn.py has run on their edit
 ```
 
-If the user says "just edit it" or "use the defaults", save nothing and go on: every answer has a
-default (vertical, no creator unless named, the editorial look, emoji, stock and icons avoided,
-the creator's captions, subtle sound).
+If the user says "just edit it" or "use the defaults", run `python3 "$P" defaults` and go on. It
+saves every unanswered style question as its default (vertical, no creator unless named, the
+editorial look, emoji, stock and icons avoided, the creator's captions, subtle sound, nothing
+behind, no past edit), so they are not asked again. Saving nothing left every style id missing and
+start asked them all again on the next video.

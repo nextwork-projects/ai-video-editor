@@ -743,9 +743,10 @@ def demo():
     assert names[:3] == ["python", "ffmpeg", "node"], names
     global HOME, LATER
     import tempfile
-    keep = HOME, LATER
+    keep = HOME, LATER, profile.HOME
     with tempfile.TemporaryDirectory() as d:
         HOME, LATER = Path(d), Path(d) / "later.json"
+        profile.HOME = Path(d)       # a home whose profile has every style answer marks style done
         later("style"); later("style")
         assert later_load() == ["style"] and "style" in still_later()
         assert later("bogus") == 2 and later_load() == ["style"]   # an unknown step is refused, not saved
@@ -754,7 +755,7 @@ def demo():
         "typesafe", "gemini", "elevenlabs", "style", "modal", "matte"]
     assert todo({x: (lambda x=x: x != "gemini") for x in STEPS}) == ["gemini"]
     assert set(step_done()) == set(STEPS)
-    HOME, LATER = keep
+    HOME, LATER, profile.HOME = keep
     # Saved logins: one row each, with its age and the logout offer; a folder with no profile is not one
     with tempfile.TemporaryDirectory() as d:
         for name in ("example.com", "app.other.org"):

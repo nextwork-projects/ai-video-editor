@@ -58,6 +58,7 @@ TEARDOWN_PLATFORMS = ("tiktok", "youtube", "instagram")  # what creator-teardown
 ORDER = ("ask", "creator", "takes", "own", "video", "long", "product", "music", "unsupported")
 ACTION = {
     "own": "fetch into the edit folder, then cut + style-edit",
+    "own-local": "cut it where it is (never copied; the cut skill reads the path), then style-edit",
     "takes": "join the files in order into edits/<name>/joined.mp4 (cut/references/takes.md), then cut + style-edit",
     "creator": "creator-teardown (quick mode), then blend the style",
     "long": "clips",
@@ -82,7 +83,7 @@ TOKEN_RE = re.compile(
 
 
 def _item(kind, url, **kw):
-    d = {"kind": kind, "url": url, "action": ACTION[kind]}
+    d = {"kind": kind, "url": url, "action": ACTION["own-local" if kind == "own" and kw.get("local") else kind]}
     d.update({k: v for k, v in kw.items() if v is not None})
     return d
 
@@ -827,6 +828,10 @@ def _demo(home):
         if url:
             assert it["url"] == url, (raw, it["url"], url)
     assert len(CASES) >= 40, len(CASES)
+    # a local file is cut where it is (the cut skill never copies the source): its action never says "fetch"
+    loc = classify("take.mp4")
+    assert loc["kind"] == "own" and loc.get("local") and "fetch" not in loc["action"] and "never copied" in loc["action"], loc
+    assert "fetch" in classify("https://example.com/v/take.mp4")["action"]
     # a Drive link: the share how-to is said only when the download fails; the folder is named after the file
     dr = classify("https://drive.google.com/file/d/1l5rk28jrAbCdEf/view?usp=sharing")
     assert "note" not in dr and "Anyone with the link" in dr["if_fails"], dr

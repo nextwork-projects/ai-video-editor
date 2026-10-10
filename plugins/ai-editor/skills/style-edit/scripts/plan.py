@@ -1477,7 +1477,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     if aspect == "auto":
         aspect = "9:16" if meta["height"] > meta["width"] else "16:9"
     width, height = SIZES[aspect]
-    fps = round(meta["fps"]) or 30
+    fps = source_fps(meta["fps"])
     duration = meta["duration"]
     visuals = anti_generic(list(visuals), profile)
     cap = dict(style.get("captions") or {})
@@ -1491,7 +1491,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import profile as prof_mod
     head = {"video": meta["video"], "width": width, "height": height, "fps": fps,
-            "durationInFrames": int(duration * fps),
+            "durationInFrames": round(duration * fps),
             "look": pick_look(style, profile, prof_mod),
             "motion": pick_motion(style)}
     pace = (style.get("pace") or {}) if took(style, "pace") else {}
@@ -1583,6 +1583,16 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
                             "control_first_graphic_s": ((style.get("hook") or {}).get("control") or {}).get("first_graphic_s")}
     return {**out, "captions": {"style": cap, "chunks": chunks}, "zooms": zooms, "card_gap_s": gap,
             "cards": scene_parts(cards, words, edit_dir), **extra}
+
+
+def source_fps(fps):
+    """The plan's frame rate: the source's own (29.97 stays 29.97003), so frame n of the plan is frame n of
+    the cut. Rounding a 29.97 source to 30 drew 1997 frames from its 1996 and put the render a frame off
+    the cut by the end (quality.py reads the cut frame by frame against the render; matte.py names its
+    cutout frames by the cut's own frame numbers)."""
+    if not fps:
+        return 30
+    return round(fps) if abs(fps - round(fps)) < 1e-3 else round(fps, 5)
 
 
 def probe(video):
@@ -1740,6 +1750,22 @@ def treat_captions(plan, edit_dir, meta, floors=None):
 STEPS = (None,) + TREATS
 
 
+def contrast_summary(changed, chunks, worst=3):
+    """treat_captions' pages as one line: how many got each treatment, and the lowest contrasts they reach."""
+    if not changed:
+        return ""
+    by = {}
+    for _, t, _ in changed:
+        by[t] = by.get(t, 0) + 1
+    low = sorted((got, i) for i, _, got in changed if got)[:worst]
+    late = sum(1 for _, _, got in changed if not got)
+    return (f"captions: {len(changed)} of {len(chunks)} pages treated for contrast ("
+            + ", ".join(f"{n} {t}" for t, n in sorted(by.items(), key=lambda kv: -kv[1])) + ")"
+            + (f"; lowest reached: " + ", ".join(f"{got}:1 '{chunks[i]['text']}' at {chunks[i]['start']:.1f} s"
+                                                 for got, i in low) if low else "")
+            + (f"; {late} from the last render check" if late else ""))
+
+
 def contrast_floors(edit_dir, out):
     """{page start: treat}: the caption pages the last render check (check<tag>.json, caption_contrast.low_at)
     read under CONTRAST_TARGET get one treatment past the one that render drew (the plan at `out`). Kept in
@@ -1809,7 +1835,10 @@ def demo():
     meta = {"video": "cut.mp4", "width": 3840, "height": 2160, "fps": 29.97, "duration": t}
     imgs = [{"src": "images/n.png", "word": "Notion"}]
     p = build(style, words, meta, imgs)
-    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 30), p
+    assert (p["width"], p["height"], p["fps"]) == (1920, 1080, 29.97), p
+    # the source's real rate: the real-footage test's 29.97 cut (1996 frames, 66.5998 s) planned at 30 drew 1997
+    assert source_fps(30000 / 1001) == 29.97003 and source_fps(30.0) == 30 and source_fps(25) == 25 and source_fps(0) == 30
+    assert round(66.599813 * source_fps(30000 / 1001)) == 1996 and int(66.599813 * 30) == 1997
     chunks = p["captions"]["chunks"]
     assert all(len(c["words"]) <= 3 for c in chunks)
     assert chunks[0]["text"] == "SO THIS IS" and chunks[1]["text"] == "HOW I EDIT", chunks[:2]
@@ -2065,6 +2094,12 @@ def demo_contrast():
         assert contrast_floors(d, d / "plan.json") == {"1.00": "stroke"}       # the same check is read once
         pl = {"captions": {"style": {"stroke": True}, "chunks": [{"start": 1.0, "end": 2.0, "text": "a"}]}}
         assert treat_captions(pl, d, None, {"1.00": "stroke"}) == [(0, "stroke", None)]
+    # the real-footage test printed 94 lines, one per page; now one line with the count and the worst three
+    ch = [{"text": f"w{i}", "start": float(i)} for i in range(10)]
+    got = contrast_summary([(i, "backing" if i % 3 else "stroke", 9.0 - i / 2) for i in range(9)] + [(9, "stroke", None)], ch)
+    assert got.count("\n") == 0 and "10 of 10 pages" in got and "6 backing" in got and "4 stroke" in got, got
+    assert "5.0:1 'w8'" in got and "'w5'" not in got and "1 from the last render check" in got, got
+    assert contrast_summary([], ch) == ""
     assert pick_treat([(230, 225, 216)] * 9, white)[:2] == ("backing", "#111111")  # a bright desk
     assert pick_treat([(230, 225, 216)] * 9, {**white, "stroke_color": "#1B2A4A"})[1] == "#1B2A4A"   # her palette
     assert pick_treat([(250, 250, 250)] * 9, {**white, "highlight_color": "#5A5A5A"})[0] == "backing"
@@ -2129,10 +2164,10 @@ def main():
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {"mode": a.layout} if a.layout else None, prof, None if a.behind is None else a.behind == "on")
     out = Path(a.out) if a.out else edit_dir / "plan.json"
-    for i, t, got in treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)):
-        print(f"caption {i} '{plan['captions']['chunks'][i]['text']}': {t} for contrast " +
-              (f"(reaches {got}:1 on the footage behind it)" if got else "(the last render check read it too low)"),
-              file=sys.stderr)
+    line = contrast_summary(treat_captions(plan, edit_dir, probe(video), contrast_floors(edit_dir, out)),
+                            plan["captions"]["chunks"])
+    if line:
+        print(line, file=sys.stderr)
     if a.no_sfx or (prof.get("sound") or {}).get("sfx") is False:
         plan["sfx"] = []
     if (edit_dir / ".sfx" / "music.wav").exists() and (prof.get("sound") or {}).get("music") is not False:

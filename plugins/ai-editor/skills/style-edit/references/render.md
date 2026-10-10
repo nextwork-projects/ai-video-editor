@@ -7,6 +7,7 @@ SKILL.md steps 6-9.
 
 `edit.py estimate` never renders the whole video. Laptop: seconds per frame from a 2-second benchmark
 the first time, then from the last full laptop render of 10 s or more (`~/.ai-video-editor/laptop.json`).
+The line says when that render was another video's: a rough guess, since cards and length change it.
 Modal: upload + container start + the work over the containers times a straggle factor + the tail
 (the last download and the join), each measured on the last Modal render
 (`~/.ai-video-editor/modal.json`); before the first one, the sample take's (`edit.py`
@@ -36,6 +37,20 @@ Back to back, 14 tabs beat 7 in 4 of 8 pairs: no clear gain, and twice under the
 tabs were much slower (80 s against 54 s, 80 s against 43 s). A draft is not much faster: the
 time goes on Chrome and reading the source video, not on pixels. The 4 s smoke clip renders in
 3.7-8.6 s with either tab count: Chrome start-up is most of it.
+
+### If a render stops
+
+The renderer prints `Rendered N/M` about once a second; edit.py writes all of its output to
+`edits/<name>/render.renderer.log` (`render-draft.renderer.log` for a draft) and shows the progress.
+A watchdog stops a render that prints no new frame for `max(180 s, 200 frames' time)` (a render once
+sat 25 min at 0% CPU after Remotion restarted a crashed browser) and renders again in 200-frame
+pieces, each its own Chrome, joined like the GitHub render. Nothing to do: it says so and carries on.
+
+| message | do |
+|---|---|
+| `the laptop render failed (exit N). The renderer's log: <path>` | read its last line; render again once; then offer `--draft` or `--modal` |
+| `render.mjs <cmd> failed (exit N)` (stills, bundle, Lambda) | run the same command again once; the same error twice: say so with that line |
+| `the render stalled: ... rendering again in 200-frame pieces` | wait; it finishes on its own |
 
 ## Modal
 
@@ -191,8 +206,8 @@ card frame on a laptop); `--no-render` skips them. If the raw take moved, pass `
 ## YouTube chapters
 
 Offered for a 16:9 video at step 9, in the question box: add chapters for the YouTube description
-(Recommended), or skip. On yes, read `cut.transcript.json` and pick one chapter per section: the
-words spoken where it starts and a short title from the speaker's own words. Write
+(Recommended), or skip. On yes, read `captions.txt` (the cut's words; never the JSON) and pick one chapter
+per section: the words spoken where it starts and a short title from the speaker's own words. Write
 `edits/<name>/chapters.json` as `[["words spoken", "title"], ...]`, then:
 
 ```bash
@@ -200,5 +215,6 @@ python3 "$S/chapters.py" edits/<name> [--intro "a plain description draft"]
 ```
 
 It times each chapter off the cut (a re-cut re-times them) and writes `chapters.txt`, plus
-`description.txt` with `--intro`. YouTube's rules are checked: first at 0:00, at least 3, each at
-least 10 s, in order. On a FAIL, merge or move chapters and run it again. Hand over the file's path.
+`description.txt` with `--intro` (a run without it removes an older one). YouTube's rules are checked:
+first at 0:00, at least 3, each at least 10 s, in order. A FAIL writes nothing: merge or move chapters
+and run it again. Hand over the file's path.
