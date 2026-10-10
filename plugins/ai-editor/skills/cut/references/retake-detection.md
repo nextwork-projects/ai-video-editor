@@ -82,7 +82,7 @@ Windows without bash, one after another:
 
 ```bash
 for n in 1 2; do ( v=$(python3 "$S/retakes.py" hook edits/<name> $n) && python3 "$S/build_timeline.py" <source> "$v" \
-  && python3 "$S/render.py" <source> "$v" && $PY "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
+  && python3 "$S/render.py" <source> "$v" && python3 "$PY" "$S/verify_cut.py" "$v" --engine <engine> ) > edits/<name>-hook$n.log 2>&1 & done; wait
 ```
 
 Words that often come just before a retake: "wait", "sorry", "again", "let me do that again",

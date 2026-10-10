@@ -8,10 +8,14 @@
 Each clip is normalised to the first clip's picture size (as displayed, rotation applied), its frame
 rate snapped to a standard one, and 48 kHz stereo audio. Other sizes and rotations are fitted with
 black bars, never stretched. Variable frame rate phone clips come out constant. A clip with no
-audio gets silence. Each part is rendered alone, then the parts are joined with no re-encode.
-Writes <out>.parts.json: where each clip starts in the joined file.
+audio gets silence. Each part is rendered alone with its audio left as PCM, then the parts are
+joined with no video re-encode and the audio encoded once. Joining AAC parts as a stream copy left
+the audio 21 ms late: each part's encoder delay was no longer trimmed.
+Writes <out>.parts.json: where each clip starts in the joined file, its video and audio length, and
+its full path.
 
-Exit 1 when any part or the joined file has audio and video more than 0.1 s apart. One filter
+Exit 1 when any part or the joined file has audio and video lengths more than 0.1 s apart, or one
+stream starting more than half a frame after the other. One filter
 graph trimming and joining several phone clips at once once shipped a 69 s video with 54 s of
 audio, while each clip was fine alone.
 ponytail: HDR (HLG/PQ) phone clips are squashed to 8-bit SDR with no tone map, so colours can look
@@ -47,25 +51,36 @@ def probe(path):
 
 
 def durs(path):
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
-                          "-of", "json", path], capture_output=True, text=True, check=True).stdout
+    """{"video": s, "audio": s, "video_start": s, "audio_start": s, "fps": f} as far as known."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                          "stream=codec_type,duration,start_time,r_frame_rate", "-of", "json", path],
+                         capture_output=True, text=True, check=True).stdout
     d = {}
     for st in json.loads(out)["streams"]:
         kind, val = st.get("codec_type"), st.get("duration")
         if kind in ("video", "audio") and kind not in d and val not in (None, "N/A"):
             d[kind] = float(val)
+            if st.get("start_time") not in (None, "N/A"):
+                d[kind + "_start"] = float(st["start_time"])
+            if kind == "video" and st.get("r_frame_rate", "0/0") != "0/0":
+                d["fps"] = float(F(st["r_frame_rate"]))
     return d
 
 
 def check(path, want=None, tol_want=TOL):
+    """The file's durs() when audio and video match in length and start; else exit 1."""
     d = durs(path)
     msg = f"{os.path.basename(path)}: video {d.get('video', 0):.2f}s audio {d.get('audio', 0):.2f}s"
     if "audio" not in d or abs(d["video"] - d["audio"]) > TOL or (
             want is not None and abs(d["video"] - want) > tol_want):
         sys.exit(f"FAIL {msg}" + (f" (wanted {want:.2f}s)" if want is not None else "")
                  + ": audio and video lengths differ. Do not cut this file.")
+    off = d.get("audio_start", 0.0) - d.get("video_start", 0.0)
+    if abs(off) > 0.5 / d.get("fps", 30):
+        sys.exit(f"FAIL {msg}: audio and video start {abs(off) * 1000:.1f} ms apart, over half a frame. "
+                 "Do not cut this file.")
     print(f"ok   {msg}")
-    return d["video"]
+    return d
 
 
 def order(clips, sort):
@@ -84,31 +99,34 @@ def join(out, clips):
     tmp = tempfile.mkdtemp(prefix="join_")
     parts, placed, total = [], [], 0.0
     for i, (src, inf) in enumerate(zip(clips, info)):
-        part = os.path.join(tmp, f"{i:02d}.mp4")
+        part = os.path.join(tmp, f"{i:02d}.mov")
         silence = [] if inf["audio"] else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
         vdur = durs(src).get("video")
         subprocess.run(
             ["ffmpeg", "-v", "error", "-y", "-i", src, *silence,
              "-map", "0:v:0", "-map", "0:a:0" if inf["audio"] else "1:a:0",
              "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1,fps={fps},format=yuv420p",
-             # audio padded with silence or trimmed to the picture's length, so the two always match
-             "-af", "aresample=48000:async=1,apad", *(["-t", f"{vdur:.3f}"] if vdur else ["-shortest"]),
+                    f"setsar=1,fps={fps}:start_time=0,format=yuv420p",
+             # both streams start at 0 (a dropped first frame is filled with the next one); audio padded
+             # with silence or trimmed to the picture's length, so the two always match
+             "-af", "aresample=48000:async=1:first_pts=0,apad", *(["-t", f"{vdur:.3f}"] if vdur else ["-shortest"]),
              "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", part], check=True)
-        dur = check(part)
-        placed.append({"clip": src, "start": round(total, 3), "dur": round(dur, 3)})
-        total += dur
+             "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", part], check=True)
+        d = check(part)
+        placed.append({"clip": os.path.realpath(src), "start": round(total, 3), "dur": round(d["video"], 3),
+                       "audio": round(d["audio"], 3)})
+        total += d["video"]
         parts.append(part)
     lst = os.path.join(tmp, "list.txt")
     with open(lst, "w") as f:
         # concat quoting: a ' in the temp path (a user name like O'Brien) is closed, escaped, reopened
         f.writelines("file '" + p.replace("'", "'\\''") + "'\n" for p in parts)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    # every part has the same codec settings, so the join is a stream copy
+    # every part has the same video settings, so the video is a stream copy; the audio is encoded
+    # once, so its encoder delay is trimmed once, at the start
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst,
-                    "-c", "copy", "-movflags", "+faststart", out], check=True)
-    total = check(out, total, TOL + 0.02 * len(parts))   # each join can round by up to a frame
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out], check=True)
+    total = check(out, total, TOL + 0.02 * len(parts))["video"]   # each join can round by up to a frame
     with open(out + ".parts.json", "w") as f:
         json.dump(placed, f, indent=1)
     shutil.rmtree(tmp)   # the parts of a 4K take run to gigabytes
@@ -137,6 +155,9 @@ def demo():
     placed = join(out, [a, b, c])
     d = durs(out)
     assert abs(d["video"] - d["audio"]) <= TOL, d
+    assert abs(d.get("audio_start", 0) - d.get("video_start", 0)) <= 0.5 / 25, d    # in sync from the start
+    pj = json.load(open(out + ".parts.json"))
+    assert [p["clip"] for p in pj] == [os.path.realpath(x) for x in (a, b, c)] and all("audio" in p for p in pj), pj
     assert abs(d["video"] - 6.0) <= 0.15, d
     assert [p["start"] for p in placed][:2] == [0.0, placed[0]["dur"]], placed
     s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
@@ -149,6 +170,13 @@ def demo():
         raise AssertionError("check passed a 0.5 s audio/video gap")
     except SystemExit:
         pass
+    late = os.path.join(tmp, "late.mp4")   # audio 50 ms behind the picture, lengths equal
+    ff("-i", out, "-itsoffset", "0.05", "-i", out, "-map", "0:v", "-map", "1:a", "-c", "copy", late)
+    try:
+        check(late)
+        raise AssertionError("check passed audio starting 50 ms late")
+    except SystemExit as e:
+        assert "half a frame" in str(e), e
     shutil.rmtree(tmp)
     print("demo ok")
 

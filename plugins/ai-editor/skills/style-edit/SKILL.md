@@ -19,7 +19,7 @@ the stills sheet (step 5) and picks where to render (step 6).
 
 Paths are relative to the folder Claude Code was started in. Run the scripts with `python3` on Mac
 and Linux, `py` on Windows. `S="${CLAUDE_SKILL_DIR}/scripts"`,
-`$VPY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
+`VPY="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`; `python3 "$VPY"` is the venv Python.
 
 ```
 edits/<name>/cut.mp4 + cut.transcript.json + words.json       (the cut skill)
@@ -106,7 +106,7 @@ captures must read on a phone: give each a `find` (plan.py drops a small one wit
 Find the speaker's head first, so no box covers the face, then plan with the style.json from step 1:
 
 ```bash
-$VPY "$S/face.py" edits/<name>
+python3 "$VPY" "$S/face.py" edits/<name>
 python3 "$S/plan.py" edits/<name>/style.json edits/<name>/captions.json [--aspect 9:16|16:9] [--layout overlay|split]
 ```
 
@@ -187,7 +187,7 @@ All but `--draft` write `edits/<name>/render.mp4`. GitHub Actions (`--github`, t
 and `github-fetch`) and every target's detail: `references/render.md`. Then, before the user sees it:
 
 ```bash
-$VPY "$S/check.py" render edits/<name> [--plan plan.json] [--style edits/<name>/style.json]
+python3 "$VPY" "$S/check.py" render edits/<name> [--plan plan.json] [--style edits/<name>/style.json]
 ```
 
 FAILs go back to the plan or the cut; at most two fix rounds, then show the render with what is

@@ -83,8 +83,7 @@ tests that prove them: `docs/feedback-matrix.md`.
 ## Learning
 
 - Every correction becomes a rule for the next video, counted, with regressions shown.
-  (`lib/ai_editor/taste.py`)
+  (`lib/ai_editor/taste.py`; review notes: `review.py learn`)
 - After every correction the question box asks "this video, your style, or would it help
-  everyone?". "Everyone" goes to
-  `~/.ai-video-editor/suggestions.jsonl` (scrubbed) and, on a yes, a GitHub issue (`taste.py suggest`,
-  `issue`). `improve` turns those into a rule, its check and a test.
+  everyone?". "Everyone" goes to `suggestions.jsonl` (scrubbed) and, on a yes, a GitHub issue
+  (`taste.py suggest`, `issue`). `improve` turns those into a rule, its check and a test.

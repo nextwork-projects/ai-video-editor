@@ -39,6 +39,7 @@ Stdlib only. Exit codes: 0 ok, 1 error, 2 usage
 """
 import datetime
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -203,9 +204,10 @@ def find(rules, section, rule, setting, scope):
     return None
 
 
-def add(section, rule, setting=None, value=None, scope="all", edit=None):
+def add(section, rule, setting=None, value=None, scope="all", edit=None, source=None):
     """Capture one correction. Returns (status, rule): 'added', 'updated', or 'regression' (the rule
-    was applied at least once since it was last corrected, and the user had to say it again)."""
+    was applied at least once since it was last corrected, and the user had to say it again).
+    source="review": it came from a review-page note (review.py learn); report says so."""
     section = section.strip().title()
     edit = edit_name(edit)
     rules = load_rules()
@@ -226,6 +228,8 @@ def add(section, rule, setting=None, value=None, scope="all", edit=None):
         if setting:
             r.update(setting=setting, value=value)
     r["corrections"].append({"edit": edit, "at": now(), "rule": rule, "value": value})
+    if source:
+        r["from"] = source
     r["since_fix"] = 0
     if scope == "all":
         add_rule(section, rule)
@@ -277,7 +281,8 @@ CALLERS = {"build_timeline.py": lambda k: k == "cut.max_pause", "retakes.py": la
 def load_json(edit_dir=None, count=True):
     """THE HOOK. What plan.py and build_timeline.py read: taste.json, plus the "this video only"
     settings of the edit being worked on (found from the script's arguments when not passed).
-    Counts each setting rule it hands over as applied to that edit."""
+    Counts each setting rule it hands over as applied to that edit, except on a --dry-run (nothing is
+    built, so nothing was applied, and the next correction would wrongly read as a regression)."""
     data = read_json()
     if not rules_path().exists():
         return data
@@ -288,7 +293,7 @@ def load_json(edit_dir=None, count=True):
     for r in mine:
         if r["scope"] != "all":
             data = set_key(data, r["setting"], r["value"])
-    if count:
+    if count and "--dry-run" not in sys.argv[1:]:
         # ponytail: caller found by script name; give load_json a key filter if a third caller appears
         acts = CALLERS.get(Path(sys.argv[0]).name, lambda k: True)
         ids = {r["id"] for r in mine if acts(r["setting"])}
@@ -320,7 +325,8 @@ def report():
     lines = []
     for r in sorted(rules, key=order):
         setting = f"  [{r['setting']} = {json.dumps(r['value'])}]" if r.get("setting") else ""
-        scope = "every video" if r["scope"] == "all" else r["scope"].replace("video:", "only ")
+        scope = ("every video" if r["scope"] == "all" else r["scope"].replace("video:", "only ")) + (
+            ", from a review note" if r.get("from") == "review" else "")
         reg = r["regressions"][-1] if r["regressions"] else None
         lines.append(f"#{r['id']} {r['section']}: {r['rule']}{setting}")
         lines.append(f"    {scope}. applied {r['applied']}x in {len(r['applied_in'])} edit(s), "
@@ -330,6 +336,9 @@ def report():
     regs = [r for r in rules if r["regressions"]]
     lines += ["", f"{len(rules)} rules, {sum(r['applied'] for r in rules)} applications, "
                   f"{len(regs)} said twice after being applied" + (": " + ", ".join(f"#{r['id']}" for r in regs) if regs else ".")]
+    rev = [r for r in rules if r.get("from") == "review"]
+    if rev:
+        lines.append(f"{len(rev)} came from review-page notes: " + ", ".join(f"#{r['id']}" for r in rev))
     return "\n".join(lines)
 
 
@@ -374,11 +383,19 @@ def suggestions_path():
     return HOME / "suggestions.jsonl"
 
 
-def suggest(what, rule, owner, example=""):
-    """A correction the user said would help everyone, as a general rule for the maintainers."""
+def note_key(note):
+    """A review note's "<edit>#<id>" as a short hash: matches across files, carries no name."""
+    return hashlib.sha256(note.encode()).hexdigest()[:12]
+
+
+def suggest(what, rule, owner, example="", note=None):
+    """A correction the user said would help everyone, as a general rule for the maintainers.
+    note: "<edit>#<id>" of the review note it came from, kept only as note_key(), so improve counts it once."""
     names = profile_names()
     row = {"at": now(), **{k: scrub(v, names) for k, v in
                            {"what": what, "rule": rule, "owner": owner, "example": example}.items()}}
+    if note:
+        row["note"] = note_key(note)
     HOME.mkdir(parents=True, exist_ok=True)
     with open(suggestions_path(), "a") as f:
         f.write(json.dumps(row) + "\n")
@@ -436,6 +453,9 @@ def demo():
         rs = {x["setting"]: x for x in load_rules() if x.get("setting")}
         assert rs["captions.size_pct"]["applied"] == 1 and rs["captions.size_pct"]["applied_in"] == ["vid-a"]
         assert rs["cut.max_pause"]["applied"] == 0
+        sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed), "--dry-run"]
+        load_json()     # a dry run builds nothing: not applied
+        assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 0}
         sys.argv = ["build_timeline.py", "/raw/take.mov", str(ed)]
         load_json()
         assert {x["setting"]: x["applied"] for x in load_rules() if x.get("setting")} == {"captions.size_pct": 1, "cut.max_pause": 1}

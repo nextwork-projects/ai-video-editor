@@ -87,9 +87,9 @@ rules with counts, so the first edit already cuts like them.
 python3 "$S/taste.py" report
 ```
 
-Each rule with how many times it was applied, in how many edits, how often it was corrected,
-and the last edit where the user had to correct it again after it was applied. Show it when the
-user asks "what have you learned", "are you learning", or after a regression.
+Each rule with times applied, in how many edits, corrections, and the last edit where it
+was said again after it was applied. Rules from review-page notes (`review.py learn`) say so.
+Show it on "what have you learned", "are you learning", or after a regression.
 
 ## Before any edit
 

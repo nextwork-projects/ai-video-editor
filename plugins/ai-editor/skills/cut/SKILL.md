@@ -22,8 +22,8 @@ edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (wha
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), relative to the folder Claude Code
 started in. Never modify, move or copy the source file: pass its path.
 
-`$PY` is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`, the tool venv. On Windows, use `py`
-wherever these commands say `python3`.
+`PY="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`; `python3 "$PY"` runs the tool venv. On Windows, use
+`py` wherever these commands say `python3`.
 No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 ## No video yet?
@@ -61,17 +61,17 @@ Follow every rule in it. Save a reaction to a result ("too slow") with the taste
 ## 1. Transcribe
 
 ```bash
-$PY "$S/transcribe.py" <source> edits/<name>/words.raw.json
+python3 "$PY" "$S/transcribe.py" <source> edits/<name>/words.raw.json
 ```
 
-Say the time first: Whisper takes 1-4 minutes for a 3-minute take on a laptop, CrisperWhisper about
-the length of the take. It picks ElevenLabs Scribe when a key is saved, else CrisperWhisper if setup
+Say the time first: Whisper takes 1-4 min for a 3-min take on a laptop, CrisperWhisper about the
+take's length. It picks ElevenLabs Scribe when a key is saved, else CrisperWhisper if setup
 installed it, else the free local Whisper (`--engine whisper|crisper|scribe` overrides). Whisper drops
 some ums and false starts; Scribe and CrisperWhisper keep them for the cut. With neither, say once that
 setup can add one (CrisperWhisper's weights are non-commercial only). A take full of retakes:
 `AI_EDITOR_WHISPER_MODEL=medium` hears them better (1.5 GB, twice as slow). Step 5 catches the rest.
 
-**Never read `words.raw.json`**: `transcript.txt` is 1/12 the size.
+**Never read `words.raw.json`**: step 2 writes `transcript.txt`, 1/12 the size.
 
 ## 2. Decide what to cut
 
@@ -88,13 +88,13 @@ TypeSafe's Jev judges them in one request (a fraction of a cent) into `spans.jso
 - **Exit 4: no TypeSafe key** (or Jev unreachable); **exit 5: the key was rejected.** Decide yourself:
   read `transcript.txt` and `candidates.md` (the places code flagged), follow
   `references/retake-detection.md`, and write `spans.json` (`references/shapes.md`). Tell the user once
-  that a TypeSafe key (exit 5: a new one) makes this much cheaper, via the `setup` skill.
+  that a TypeSafe key (exit 5: a new one) makes this cheaper, via the `setup` skill.
 
-Last take wins, except alternate hooks. Never type a timestamp and never write a span for
-a pause.
+Last take wins, except alternate hooks. Never type a timestamp or write a span for a
+pause.
 
 Only if the user wants it shorter, also read `references/editorial-rules.md` and add `redundant`
-cuts. Jev does not make those: they are content calls.
+cuts (content calls, which Jev does not make).
 
 A misheard name is one command, never a JSON rewrite: `python3 "$S/retakes.py" fix edits/<name>
 cloud=Claude jiv=Jev` (whole words, timings untouched, kept in `fixes.json` for the captions).
@@ -109,7 +109,7 @@ python3 "$S/build_timeline.py" <source> edits/<name>
 Every pause (breaths included) over `--max-pause` (0.15 s) becomes 0.10 s; under music only gaps
 between words are trimmed. Fix any `ERROR` the dry run prints, then run it for real.
 
-Then the `cut-judge` agent scores `paper-edit.md` (what plays, `<<n>>` at each join) on a rubric
+Then the `cut-judge` agent scores `paper-edit.md` (what plays, `<<n>>` at each join)
 and fixes `spans.json`: a flub, restart or "wait" left in (add a span), a bad join or two takes
 stitched into a sentence nobody said (move it), a good line lost that no better take replaces
 (remove it). Launch, readers for takes over 5 min, and the approval score: `references/judge.md`.
@@ -124,22 +124,22 @@ Build again if spans changed: paper is free, a render is not.
 python3 "$S/render.py" <source> edits/<name>
 ```
 
-A 3-minute 4K take takes a few minutes: run long takes in the background.
+A 3-min 4K take renders in a few minutes: run long takes in the background.
 
 ## 5. Verify
 
 ```bash
-$PY "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
+python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 ```
 
-Re-transcribes cut.mp4 and diffs it against the words the cut meant to keep.
+Re-transcribes cut.mp4 and diffs it against the words meant to be kept.
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
 - **SURVIVED**: each line prints its cut and source time and the span to add. A real repeat or
   stumble: add that span to `spans.json`. Clean speech there is a mishearing.
 - **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
 - **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 
-One fix cycle, then show the user whatever is left.
+One fix cycle, then show the user what is left.
 
 ## 6. The user approves
 
@@ -166,7 +166,7 @@ the page opens, start the `visual-prep` agent in the background.
 | message | do |
 |---|---|
 | `no such file` / `ffmpeg could not read audio` | ask for the right path; never copy or convert the source |
-| `faster-whisper missing` / `CrisperWhisper missing` | run with `$PY`, or the setup skill's step 3 |
+| `faster-whisper missing` / `CrisperWhisper missing` | run with `python3 "$PY"`, or the setup skill's step 3 |
 | `no ElevenLabs key` (exit 2) / `HTTP 4xx`, `unreachable` (3) | drop `--engine scribe`, or re-save the key with the setup skill |
 | `spans.json exists. Pass --force` | only on a fresh decision: `propose --force` (keeps spans.prev.json) |
 | build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |

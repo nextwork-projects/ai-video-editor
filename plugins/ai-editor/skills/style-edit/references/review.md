@@ -9,7 +9,8 @@ Script: `${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py` (stdlib), page `review.h
 `review.py demo` self-checks. Mac, Windows and Linux: it opens the default browser.
 
 Notes save in the edit folder: `review.json` (rounds, notes, replies, send and approve) and
-`review/` (a frame still per note, and any image the user pasted or dropped on a note).
+`review/` (a frame still per note, any image the user pasted or dropped on a note, and a copy of
+each round's video, so a new render to the same path never changes an earlier round's tab).
 
 ## The loop
 
@@ -27,7 +28,7 @@ the question box meanwhile.
 `wait` prints `SEND` or `APPROVE`, then every note of the round:
 
 ```
-SEND: <name> the cut, round 1, 2 notes. video /abs/cut.mp4
+SEND: <name> the cut, round 1, 2 notes. video /abs/edits/<name>/review/v-cut1.mp4
 #1 0:02.6 (2.6s): the pause before "editor" still feels long
     said: "is how I cut my videos in one go"
     frame: /abs/edits/<name>/review/rcut1-c1.jpg
@@ -35,8 +36,27 @@ SEND: <name> the cut, round 1, 2 notes. video /abs/cut.mp4
 
 An edit-stage note started with `--plan plan.json` also names the card on screen
 (`[card 3 image 'notion']`: the index in `plan.json` `cards`). Look at the frame still and any
-`image:` line before deciding the fix. A note that is a preference ("captions too small") also goes
-to the taste skill.
+`image:` line before deciding the fix. `wait` ends with a `LEARN:` line and the `learn` command.
+
+## After send or approve: learn from the notes
+
+Review notes flow into the user's taste (memory) and, when marked for everyone, to the maintainers.
+
+1. Pick the notes that are preferences: "captions too small", "too many zooms". Leave out one-off
+   fixes ("cut the 'um' at 0:12"). Write each as a general rule, as the taste skill does.
+2. If any, ask the scope ONCE for the whole batch in the question box: `My style (Recommended)` /
+   `Just this video` / `Would help everyone`.
+3. Run `learn`. One `--rule` per preference note; add `key=value` when a taste setting maps:
+
+```bash
+python3 "$R" edits/<name> learn --scope style --rule 2 captions "Captions bigger" captions.size_pct=6 --rule 4 visuals "Logos stay small"
+python3 "$R" edits/<name> learn --none     # no preferences in this round
+```
+
+It saves each rule with `taste.py add` (`everyone` also adds a suggestion), marks every other note of
+the round one-off, and writes on each note what happened: `"taste"` = rule id, `video-only`,
+`suggested` or `one-off`. Tell the user in one line what was saved. On `everyone`, offer the GitHub
+issue as the taste skill does (`taste.py issue`). `round` lists notes not learned yet.
 
 With no `wait` running the page says Claude is not listening, and notes still save. The next
 `wait` returns at once with them.

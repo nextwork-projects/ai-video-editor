@@ -6,8 +6,34 @@ What changed for every user, newest first.
 
 ## ai-editor 2.2.0 (2026-10-09)
 
+- Review-page notes now reach your taste. After send or approve, Claude picks the notes that are
+  preferences, asks the scope once for the round, and runs `review.py learn`, which saves them with
+  `taste.py add` and marks the rest one-off. Each note in review.json records what happened to it
+  (`taste`: rule id, `video-only`, `suggested`, `one-off`). `wait` ends with the command, `round`
+  lists notes not learned yet, and `taste.py report` marks rules that came from review notes.
+  `improve.py collect` reads every `*/review.json` under edits, clips and product: notes marked
+  would-help-everyone and rules repeated across videos. Tests: `review.py demo`, `improve.py demo`.
+- Each review round keeps its own copy of its video in `<edit>/review/` (`v-cut1.mp4`,
+  `v-edit2-wide.mp4`), so a new render to the same `cut.mp4` no longer changes what an earlier
+  round's tab replays. Test: `review.py demo`.
+- After an approve, the review page footer says the round is approved, not "Claude is working on
+  your notes". Test: `review.py demo` (runs the page's `listenText` in node).
+- Fixes from a real-footage test of this release:
+  - `learn.py` measures your pauses from the audio of both files (build_timeline.py's threshold and
+    silencedetect), at every join, not from word gaps. Whisper stretches word ends over pauses, so a
+    205 s take measured 6 pauses and saved `cut.max_pause` 0.08; it now measures 18 joins, median
+    0.17 s, and saves 0.26. Re-learning the same value saves nothing. Test: `learn.py demo`.
+  - A `build_timeline.py --dry-run` no longer counts your taste rules as applied, so the next
+    correction is not reported as a regression. Test: `taste.py demo`.
+  - `join.py` output was 21 ms out of sync (audio late). Parts now keep PCM audio and the joined
+    file encodes it once. `check()` fails a file whose streams start over half a frame apart.
+    `parts.json` adds each part's audio length and full path. Test: `join.py demo`.
+  - `links.py` reads macOS Terminal drag-and-drop paths (`My\ Takes/IMG\ 0001.MOV`), says when a
+    local file is not there, and keeps several files in the order you gave them. Test: `links.py demo`.
+  - The skills define `$PY` and `$VPY` as the run.py path (`python3 "$PY" ...`), so the commands
+    work in zsh, the macOS default.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
-  question box whether they are one video (in file-name order, or filming order) or separate videos.
+  question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,
   then the normal cut runs. Each clip is fitted to the first clip's size (rotation applied, black bars,
   no stretching), one frame rate and 48 kHz audio, so upright, sideways and variable frame rate phone

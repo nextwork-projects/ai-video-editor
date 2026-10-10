@@ -287,12 +287,18 @@ function steps(){
     $(id).disabled=!has(st);
   });
 }
+function listenText(S){
+  const e=S.events[S.events.length-1],picked=!!(S.sent&&e&&e.handled);
+  if(S.listening)return 'Claude is listening';
+  if(picked&&e.type==='approve')return e.stage==='cut'?'the cut is approved':'approved';
+  return picked?'Claude is working on your notes':'Claude is not listening right now. notes still save, and Claude reads them next time.';
+}
 function render(){
   document.body.classList.toggle('vertical',!!S.vertical);
   $('name').textContent=S.name;document.title=S.name+(pending()==='send'?' · Claude working':' · round '+S.round);steps();
   const L=$('listen'),lastEv=S.events[S.events.length-1],picked=!!(S.sent&&lastEv&&lastEv.handled);
   L.className=S.listening||picked?'on':'';
-  L.textContent=S.listening?'Claude is listening':picked?'Claude is working on your notes':'Claude is not listening right now. notes still save, and Claude reads them next time.';
+  L.textContent=listenText(S);
   const what={cut:'<b>check the cut.</b> mistakes gone, no doubled lines, no long pauses.',
               edit:'<b>check captions, cards, zooms and timing.</b>'};
   if(pending()==='send'&&isCur())what[view.stage]=`<b>notes sent.</b> Claude is making round ${S.round+1}; progress is on the right. this page switches to it when it lands.`;

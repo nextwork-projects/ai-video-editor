@@ -29,7 +29,7 @@ edits/<name>-clip<N>/ one edit per chosen clip: source.mp4, words.raw.json (re-t
 ```
 
 Run the scripts with `python3` on Mac and Linux, `py` on Windows.
-`$PY` below is `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"` (`py` on Windows): the editor's venv Python.
+`PY="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py"`; `python3 "$PY"` below runs the editor's venv Python (`py "$PY"` on Windows).
 If it is missing, run the `setup` skill first. `K="${CLAUDE_SKILL_DIR}/scripts/clips.py"`,
 `C="${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts"`, `S="${CLAUDE_PLUGIN_ROOT}/skills/style-edit/scripts"`.
 
@@ -77,7 +77,7 @@ they have permission for. Say so once if the link is someone else's.
 ## 2. Transcribe once
 
 ```bash
-$PY "$C/transcribe.py" clips/<name>/source.mp4 clips/<name>/words.raw.json   # the file fetch printed: source.mp3 for audio
+python3 "$PY" "$C/transcribe.py" clips/<name>/source.mp4 clips/<name>/words.raw.json   # the file fetch printed: source.mp3 for audio
 ```
 
 Say the time first: Whisper takes 1-4 minutes per 3 minutes of video on a laptop (free), Scribe
@@ -138,7 +138,7 @@ that each clip is the audio over the show's cover with the speaker's words as ca
 
 **All clips at once** (Claude Code, or any agent with subagents): launch one `clip-editor` agent
 (`ai-editor:clip-editor`) per clip, **all in one message** so they run at the same time. Give each
-`EDIT` (the clip's folder, absolute), `ROOT` (`${CLAUDE_PLUGIN_ROOT}`), the `$PY` line, and the answers:
+`EDIT` (the clip's folder, absolute), `ROOT` (`${CLAUDE_PLUGIN_ROOT}`), the `PY` line, and the answers:
 aspect, layout, music, the transcription engine, and reframe yes (a wide source, unless the platform is
 YouTube) or no, and whether the source has captions burned in. Each takes its clip through the cut and style-edit to the stills sheet and returns a
 short JSON: `status`, `cut_s`, `verify`, `cut_page`, `sheet`, `error`. Merge those; never open a clip's
@@ -148,7 +148,7 @@ hand as below.
 
 **One at a time** (no subagents), for each clip in order:
 
-1. **Vertical from a wide video:** `$PY "$K" reframe edits/<name>-clip<N>` crops to 9:16 with the
+1. **Vertical from a wide video:** `python3 "$PY" "$K" reframe edits/<name>-clip<N>` crops to 9:16 with the
    crop following the speaker's head shot by shot (camera cuts found with ffmpeg). Skip it when the
    profile's platform is YouTube or the source is already vertical.
 2. **Cut:** the cut skill from its step 2 (`retakes.py propose`): the transcript is already there.
