@@ -113,8 +113,9 @@ Then the `cut-judge` agent scores `paper-edit.md` (what plays, `<<n>>` at each j
 and fixes `spans.json`: a flub, restart or "wait" left in (add a span), a bad join or two takes
 stitched into a sentence nobody said (move it), a good line lost that no better take replaces
 (remove it). Launch, readers for takes over 5 min, and the approval score: `references/judge.md`.
-- A `CLIPPED` line at the top means a pause cut ate a word. Rebuild with a larger `--pad`.
-- Joins inside speech move to a quiet frame. Any `still in speech`: listen to it in step 5.
+- `CLIPPED` in `paper-edit.md`: a pause cut ate a word. Raise `--pad`, rebuild. Still there: the
+  word's label is off; step 5 says if it plays.
+- Joins inside speech move to a quiet frame. Any `still in speech`: listen in step 5.
 
 Build again if spans changed: paper is free, a render is not.
 
@@ -124,7 +125,7 @@ Build again if spans changed: paper is free, a render is not.
 python3 "$S/render.py" <source> edits/<name>
 ```
 
-A 3-min 4K take renders in a few minutes: run long takes in the background.
+A 3-min 4K take renders in a few minutes: run it in the background.
 
 ## 5. Verify
 
@@ -132,10 +133,10 @@ A 3-min 4K take renders in a few minutes: run long takes in the background.
 python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 ```
 
-Re-transcribes cut.mp4 and diffs it against the words meant to be kept.
+Diffs cut.mp4's transcript against the words meant to be kept.
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
-- **SURVIVED**: each line prints its cut and source time and the span to add. A real repeat or
-  stumble: add that span to `spans.json`. Clean speech there is a mishearing.
+- **SURVIVED**: a span to add. A real repeat or stumble: add it, never one that cuts a kept line.
+  Clean speech there is a mishearing.
 - **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
 - **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 
@@ -151,9 +152,9 @@ R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"
 python3 "$R" edits/<name> start --video edits/<name>/cut.mp4 --stage cut --transcript edits/<name>/words.json
 ```
 
-Then `serve` and `wait` in the background (re-cut: `resolve` first). Say the seconds cut.
-`wait` exits on send or approve, with the notes. "keep <line>": narrow or delete that
-span; "cut <line>": add one; pauses off: `--max-pause`. Then build, render, verify, `round`.
+Then `serve` and `wait` in the background. Say the seconds cut. `wait` exits on send or
+approve, with the notes. "keep <line>": narrow or delete that span; "cut <line>": add one; pauses
+off: `--max-pause`. Then build, render, verify, `preview_cut.py`, `resolve`, `round`.
 
 After approval: hook check, then hook variants if `hooks.json` exists (`references/retake-detection.md`).
 
