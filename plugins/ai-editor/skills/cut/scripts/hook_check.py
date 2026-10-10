@@ -117,7 +117,7 @@ def demo():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "words.json").write_text(json.dumps(
             [{"text": "so", "start": 0.1, "end": 0.3, "type": "word"}, {"text": " ", "start": 0.3, "end": 0.4, "type": "spacing"},
-             {"text": "engineers", "start": 12.0, "end": 12.5, "type": "word"}]))
+             {"text": "engineers", "start": 12.0, "end": 12.5, "type": "word"}]), encoding="utf-8")
         t, term, first10 = check(load(d), "AI Engineer Roadmap")
         assert t == 12.0 and term == ("engineer",) and first10 == "so", (t, term, first10)
     print("demo ok")

@@ -254,7 +254,7 @@ def save_key(var, key, path=None):
     """Writes var=key into the key file, keeping the other keys in it."""
     path = path or KEY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    keep = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
+    keep = [ln for ln in (path.read_text(encoding="utf-8").splitlines() if path.exists() else [])
             if ln.strip() and not ln.startswith(f"{var}=")]
     # readable by you only from the moment it exists: created 0600, never written and then chmodded
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -262,7 +262,7 @@ def save_key(var, key, path=None):
         os.chmod(path, 0o600)   # a file made by an older version
     except OSError:
         pass
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("\n".join(keep + [f"{var}={key}"]) + "\n")
 
 
@@ -291,7 +291,7 @@ def cmd_list(args):
     if args.urls:
         # Hand-picked mode: a file of one URL per line. This is how the existing
         # teardowns were actually built -- specific videos, not whole profiles.
-        targets = [u.strip() for u in Path(args.urls).read_text().splitlines()
+        targets = [u.strip() for u in Path(args.urls).read_text(encoding="utf-8").splitlines()
                    if u.strip() and not u.strip().startswith("#")]
         if not targets:
             sys.exit(f"no urls in {args.urls}")
@@ -346,7 +346,7 @@ def cmd_list(args):
     if by == "likes":
         print("No view counts on these links (Instagram hides them from yt-dlp): ranked by likes.",
               file=sys.stderr)
-    (outdir / "videos.json").write_text(json.dumps(payload, indent=2))
+    (outdir / "videos.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     print(f"\n{len(vids)} videos - median {median:,.0f} {by}\n")
     print(f"{by:>10}  {'xmed':>5}  {'sec':>4}  id")
@@ -436,7 +436,7 @@ def cmd_transcribe(args):
     if not TRANSCRIBE.exists():
         sys.exit(f"missing {TRANSCRIBE}")
 
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     by_id = {v["id"]: v for v in meta["videos"]}
     median = meta.get("median_views") or 0
 
@@ -472,7 +472,7 @@ def cmd_transcribe(args):
         if tj.exists() and not args.force:
             print(f"{tag} cached", file=sys.stderr)
             if not (tdir / f"{vid}.timed.txt").exists():   # a teardown from before the timed file
-                (tdir / f"{vid}.timed.txt").write_text(timed_text(json.loads(tj.read_text())))
+                (tdir / f"{vid}.timed.txt").write_text(timed_text(json.loads(tj.read_text(encoding="utf-8"))), encoding="utf-8")
             return vid, True
 
         print(f"{tag} transcribing", file=sys.stderr)
@@ -506,9 +506,9 @@ def cmd_transcribe(args):
                 return vid, False
 
         # Flat text + words-per-minute, the two things the analysis reads.
-        data = json.loads(tj.read_text())
-        (tdir / f"{vid}.txt").write_text(flat_text(v, role, data))
-        (tdir / f"{vid}.timed.txt").write_text(timed_text(data))
+        data = json.loads(tj.read_text(encoding="utf-8"))
+        (tdir / f"{vid}.txt").write_text(flat_text(v, role, data), encoding="utf-8")
+        (tdir / f"{vid}.timed.txt").write_text(timed_text(data), encoding="utf-8")
         return vid, True
 
     from parallel import pmap
@@ -592,7 +592,7 @@ def demo():
         save_key("ELEVENLABS_API_KEY", "a" * 24, f)
         save_key("GEMINI_API_KEY", "b" * 24, f)
         save_key("GEMINI_API_KEY", "c" * 24, f)
-        assert f.read_text() == f"ELEVENLABS_API_KEY={'a' * 24}\nGEMINI_API_KEY={'c' * 24}\n"
+        assert f.read_text(encoding="utf-8") == f"ELEVENLABS_API_KEY={'a' * 24}\nGEMINI_API_KEY={'c' * 24}\n"
         # a new key file is 0600 from its first byte: with chmod doing nothing, the mode is still 0600
         if os.name != "nt":
             real, mask = os.chmod, os.umask(0)
@@ -603,7 +603,7 @@ def demo():
                 os.chmod, _ = real, os.umask(mask)
             assert (Path(d) / "new.env").stat().st_mode & 0o777 == 0o600, oct((Path(d) / "new.env").stat().st_mode)
         # the working folder's .env is another project's: never read
-        (Path(d) / ".env").write_text(f"GEMINI_API_KEY={'e' * 24}\n")
+        (Path(d) / ".env").write_text(f"GEMINI_API_KEY={'e' * 24}\n", encoding="utf-8")
         cwd, saved = os.getcwd(), os.environ.pop("GEMINI_API_KEY", None)
         os.chdir(d)
         try:

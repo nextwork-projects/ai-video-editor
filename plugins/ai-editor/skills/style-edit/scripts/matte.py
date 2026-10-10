@@ -264,7 +264,7 @@ def move_hint(c):
 def verify(plan, edit, w, h):
     """Per behind card: how much of its key region (plan.py's "key") the person covers, and that the
     face is solid (a hole in the matte would let the card show through the face)."""
-    face = json.loads((edit / "face.json").read_text()) if (edit / "face.json").exists() else None
+    face = json.loads((edit / "face.json").read_text(encoding="utf-8")) if (edit / "face.json").exists() else None
     bad = 0
     for c in plan["cards"]:
         if c.get("layer") != "behind":
@@ -365,10 +365,10 @@ def main():
     edit = Path(args[0]).resolve()
     plan_name = args[args.index("--plan") + 1] if "--plan" in args else "plan.json"
     plan_path = edit / plan_name
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     if not behind_ranges(plan):
         plan.pop("cutouts", None)
-        plan_path.write_text(json.dumps(plan, indent=1))
+        plan_path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
         print("no behind cards: nothing to cut out")
         return
     w, h, fps = plan["width"], plan["height"], plan["fps"]
@@ -406,7 +406,7 @@ def main():
         wall = time.time() - t0
         print(f"laptop: {frames} frames in {wall:.0f} s ({wall / max(1, frames):.2f} s/frame), free")
     plan["cutouts"] = cutouts
-    plan_path.write_text(json.dumps(plan, indent=1))
+    plan_path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     print(f"{plan_path}: {len(cutouts)} cutouts")
     if verify(plan, edit, w, h):
         print("Read every WARNING above: change that beat's \"box\" as it says, then plan.py and matte.py again.")
@@ -465,7 +465,7 @@ def demo():
         a[60:70, 50:58, 3] = 0                                     # a hole in the face
         (e / "cut").mkdir()
         cv2.imwrite(str(e / "cut" / "000045.png"), a)
-        (e / "face.json").write_text(json.dumps({"heads": [{"t": 1.5, "box": [30, 25, 40, 20]}]}))
+        (e / "face.json").write_text(json.dumps({"heads": [{"t": 1.5, "box": [30, 25, 40, 20]}]}), encoding="utf-8")
         pl = {"fps": 30, "cutouts": [{"src": "cut", "from": 0, "to": 90}],
               "cards": [{"layer": "behind", "start": 1.0, "end": 2.0, "trigger_word": "repo", "src": "images/capture-x.png",
                          "format": "shot"}]}

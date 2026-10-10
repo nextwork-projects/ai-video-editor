@@ -69,7 +69,7 @@ def main():
     a = ap.parse_args()
 
     d = Path(a.edit_dir)
-    rep = json.loads((d / "report.json").read_text())
+    rep = json.loads((d / "report.json").read_text(encoding="utf-8"))
     fps, frames = rep["fps"], rep["frames"]
     src, out = a.source, d / "cut.mp4"
     hw = sys.platform == "darwin" and not a.no_hw
@@ -110,7 +110,7 @@ def main():
     lst = tmp / "list.txt"
     # concat quoting: a ' in the temp path (a user name like O'Brien) is closed, escaped, reopened
     lst.write_text("".join("file '" + str(tmp / f"{i:05d}.mp4").replace("'", "'\\''") + "'\n"
-                           for i in range(len(frames))))
+                           for i in range(len(frames))), encoding="utf-8")
     allv = tmp / "all.mp4"
     if subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
                        "-c", "copy", str(allv)]).returncode:

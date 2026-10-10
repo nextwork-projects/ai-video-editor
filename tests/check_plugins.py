@@ -7,6 +7,7 @@ Skill frontmatter follows https://agentskills.io/specification. `claude plugin v
 covers the Claude Code manifests; this covers what it does not, and runs where the CLI is missing.
 Exit 1 with one line per problem.
 """
+import ast
 import json
 import re
 import sys
@@ -141,6 +142,27 @@ def load(path):
         return {}
 
 
+
+def text_calls_without_utf8(src):
+    """Line numbers of read_text / write_text / text-mode open() or os.fdopen() with no encoding. Windows reads
+    those as cp1252, so a curly quote or an accented name in a transcript breaks the script there."""
+    def mode(c):
+        m = c.args[1] if len(c.args) > 1 else next((k.value for k in c.keywords if k.arg == "mode"), None)
+        return "r" if m is None else (m.value if isinstance(m, ast.Constant) and isinstance(m.value, str) else None)
+    out = []
+    for c in ast.walk(ast.parse(src)):
+        if not isinstance(c, ast.Call) or any(k.arg in ("encoding", None) for k in c.keywords):
+            continue
+        f = c.func
+        if isinstance(f, ast.Attribute) and f.attr in ("read_text", "write_text"):
+            out.append(c.lineno)
+        elif (isinstance(f, ast.Name) and f.id == "open") or (isinstance(f, ast.Attribute) and f.attr == "fdopen"):
+            m = mode(c)
+            if m is not None and "b" not in m:
+                out.append(c.lineno)
+    return out
+
+
 def main():
     market = load(ROOT / ".claude-plugin" / "marketplace.json")
     for entry in market.get("plugins", []):
@@ -264,6 +286,13 @@ def main():
         if missing or total > budget:
             errors.append(f"{name}: required reads {total} bytes (budget {budget}): "
                           + ", ".join(f"{f.name} {f.stat().st_size}" if f.exists() else f"{f} missing" for f in files))
+
+    for py in sorted(ROOT.glob("plugins/**/*.py")) + sorted(ROOT.glob("tests/*.py")):
+        if "node_modules" in py.parts:
+            continue
+        for ln in text_calls_without_utf8(py.read_text(encoding="utf-8")):
+            errors.append(f"{py.relative_to(ROOT)}:{ln}: text file read or written without encoding=\"utf-8\" (breaks on Windows)")
+    assert text_calls_without_utf8('open("a")\nPath("b").read_text()\nopen("c", "rb")\nopen("d", encoding="utf-8")') == [1, 2]
 
     for e in errors:
         print("FAIL", e)

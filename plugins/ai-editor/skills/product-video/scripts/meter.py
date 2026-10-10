@@ -196,7 +196,7 @@ def main():
         if r["worst_window"]:
             print(f"{'':40} worst 1 s window at {r['worst_window']['t']} s: jerk {r['worst_window']['jerk_max']}, judder {r['worst_window']['judder']}")
     if out:
-        with open(out, "w") as f:
+        with open(out, "w", encoding="utf-8") as f:
             json.dump(res, f, indent=1)
 
 

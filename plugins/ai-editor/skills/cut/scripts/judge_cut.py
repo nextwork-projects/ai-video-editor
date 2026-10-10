@@ -55,7 +55,7 @@ def toks_of(d):
 
 def spans_of(d):
     p = Path(d) / "spans.json"
-    return json.loads(p.read_text()) if p.exists() else []
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
 
 
 def cuts_of(spans, toks):
@@ -104,7 +104,7 @@ def taste_cut_rules():
 def build_prompt(d, script=None):
     md, _ = paper(spans_of(d), toks_of(d))
     parts = ["You are the critic in a video-editing loop. Grade the paper edit below against the rubric. "
-             "Follow the rubric exactly, including its output format.", "", "# RUBRIC", "", RUBRIC.read_text()]
+             "Follow the rubric exactly, including its output format.", "", "# RUBRIC", "", RUBRIC.read_text(encoding="utf-8")]
     rules = taste_cut_rules()
     if rules:
         parts += ["", "# THE USER'S OWN CUT RULES", "",
@@ -112,9 +112,9 @@ def build_prompt(d, script=None):
                   "Do not raise a blocker against a cut one of these asks for, unless the removed take carries "
                   "a detail that survives nowhere else.", "", rules]
     built, rep = Path(d) / "paper-edit.md", Path(d) / "report.json"   # spans alone cannot show the pauses
-    extra = [x + " (last build)" for x in (built.read_text().splitlines() if built.exists() else []) if "CLIPPED" in x]
+    extra = [x + " (last build)" for x in (built.read_text(encoding="utf-8").splitlines() if built.exists() else []) if "CLIPPED" in x]
     if rep.exists():
-        r = json.loads(rep.read_text())
+        r = json.loads(rep.read_text(encoding="utf-8"))
         extra.insert(0, f"- last build, pauses cut: source {r['duration']:.1f}s, cut {r['final_s']:.1f}s")
     if extra:
         md = md.replace("\n## What plays", "\n" + "\n".join(extra) + "\n\n## What plays", 1)
@@ -189,7 +189,7 @@ def apply_findings(d, findings, rnd=0):
     toks, spans = toks_of(d), spans_of(d)
     cuts = cuts_of(spans, toks)
     lp = d / "judge-ledger.json"
-    ledger = json.loads(lp.read_text()) if lp.exists() else {"restored": [], "applied": []}
+    ledger = json.loads(lp.read_text(encoding="utf-8")) if lp.exists() else {"restored": [], "applied": []}
     drop, applied, refused, new = set(), [], [], []
     for f in findings:
         fix, act, ci, tag = f.get("fix") or {}, (f.get("fix") or {}).get("action", "none"), f.get("cut"), f["check"]
@@ -257,9 +257,9 @@ def apply_findings(d, findings, rnd=0):
     if applied:
         bak = d / f"spans.judge{rnd}.json"
         if not bak.exists():
-            bak.write_text(json.dumps(spans_of(d), indent=1))
-        (d / "spans.json").write_text(json.dumps(out, indent=1))
-        lp.write_text(json.dumps(ledger, indent=1))
+            bak.write_text(json.dumps(spans_of(d), indent=1), encoding="utf-8")
+        (d / "spans.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        lp.write_text(json.dumps(ledger, indent=1), encoding="utf-8")
     return applied, refused
 
 
@@ -273,7 +273,7 @@ def score(d):
     cuts = cuts_of(spans_of(d), toks)
     kept = reverted = 0
     lines = []
-    for x in json.loads(lp.read_text()).get("applied", []):
+    for x in json.loads(lp.read_text(encoding="utf-8")).get("applied", []):
         ts = [t for t in toks if x["start"] <= (t["start"] + t["end"]) / 2 <= x["end"]]
         if not ts:
             continue
@@ -289,17 +289,17 @@ def record(d, s):
     """One line per edit (a re-score replaces it) in $AI_EDITOR_HOME/judge-eval.jsonl."""
     p = home() / "judge-eval.jsonl"
     name = Path(d).resolve().name
-    rows = [json.loads(x) for x in p.read_text().splitlines() if x.strip()] if p.exists() else []
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.exists() else []
     rows = [r for r in rows if r.get("edit") != name]
     rows.append({"at": datetime.date.today().isoformat(), "edit": name, "kept": s["kept"], "reverted": s["reverted"]})
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
 
 def precision():
     """(precision or None, scored)."""
     p = home() / "judge-eval.jsonl"
-    rows = [json.loads(x) for x in p.read_text().splitlines() if x.strip()] if p.exists() else []
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.exists() else []
     k, r = sum(x["kept"] for x in rows), sum(x["reverted"] for x in rows)
     return (k / (k + r) if k + r else None), k + r
 
@@ -311,7 +311,7 @@ def gated():
 
 def cmd_apply(d, tighten=False):
     d = Path(d)
-    obj = json.loads((d / "judge.json").read_text()) if (d / "judge.json").exists() else None
+    obj = json.loads((d / "judge.json").read_text(encoding="utf-8")) if (d / "judge.json").exists() else None
     if obj is None or "findings" not in obj:
         sys.exit(f"ERROR: {d / 'judge.json'} missing or has no findings list")
     md, cuts = paper(spans_of(d), toks_of(d))
@@ -330,7 +330,7 @@ def cmd_apply(d, tighten=False):
             print(f"  suggest  {f['check']} {f['fix']['action']} {f.get('quote', '')[:70]!r}: {f.get('problem', '')}")
         return 0
     log = d / "judge-log.jsonl"
-    rnd = len(log.read_text().splitlines()) + 1 if log.exists() else 1
+    rnd = len(log.read_text(encoding="utf-8").splitlines()) + 1 if log.exists() else 1
     applied, refused = apply_findings(d, todo, rnd)
     for a in applied:
         print(f"  applied  {a}")
@@ -358,10 +358,10 @@ def demo():
         home = lambda: Path(tmp) / "home"
         d = Path(tmp) / "edits" / "vid"
         d.mkdir(parents=True)
-        (d / "words.raw.json").write_text(json.dumps(toks))
+        (d / "words.raw.json").write_text(json.dumps(toks), encoding="utf-8")
         spans = [{"text": "so the first thing", "kind": "retake", "occurrence": 1},
                  {"text": "speed and wait sorry", "kind": "meta"}]   # over-cut: "speed and" is a real line
-        (d / "spans.json").write_text(json.dumps(spans))
+        (d / "spans.json").write_text(json.dumps(spans), encoding="utf-8")
         md, cuts = paper(spans, toks)
         assert "<<0>> so the first thing is <<1>> the price is low" in md, md
         assert "PAPER EDIT TO GRADE" in build_prompt(d) and "B1" in build_prompt(d)
@@ -377,14 +377,14 @@ def demo():
         assert len(j) == 1, j
         assert flat("x he ended up <<7>> he ended up being the y").find(flat("he ended up <<7>> he ended up being the")) > 0
         assert "words only, pauses not counted" in md and "removed" not in md.split("## What plays")[0], md
-        (d / "paper-edit.md").write_text("# Paper edit\n\n- **CLIPPED by a pause cut, not asked for:** if\n")
+        (d / "paper-edit.md").write_text("# Paper edit\n\n- **CLIPPED by a pause cut, not asked for:** if\n", encoding="utf-8")
         assert "CLIPPED by a pause cut, not asked for:** if (last build)" in build_prompt(d)
         (d / "paper-edit.md").unlink()
         rc = [dict(c, kind="redundant") for c in cuts]
         g, _ = validate({"findings": [{"check": "B3", "cut": 1, "quote": "the price", "fix": {"action": "restore"}}]}, rc, md)
         assert g[0]["check"] == "W5" and g[0]["fix"]["action"] == "none"
         # trim gives back the head of C1; spans.json still builds
-        (d / "judge.json").write_text(json.dumps({"findings": f}))
+        (d / "judge.json").write_text(json.dumps({"findings": f}), encoding="utf-8")
         assert cmd_apply(d) == 3
         sp = spans_of(d)
         assert sp[1]["text"] == "wait sorry" and "after" in sp[1], sp
@@ -392,7 +392,7 @@ def demo():
         # an add of text an earlier round gave back is frozen; a W6 add is only suggested
         (d / "judge.json").write_text(json.dumps({"findings": [
             {"check": "B1", "cut": None, "quote": "speed and", "fix": {"action": "add", "evidence": "speed and"}},
-            {"check": "W6", "cut": None, "quote": "is low", "fix": {"action": "add", "evidence": "low"}}]}))
+            {"check": "W6", "cut": None, "quote": "is low", "fix": {"action": "add", "evidence": "low"}}]}), encoding="utf-8")
         assert cmd_apply(d) == 0 and spans_of(d) == sp
         # restore deletes the span; an add cuts kept text with confidence low
         applied, _ = apply_findings(d, [{"check": "B3", "cut": 0, "fix": {"action": "restore"}},
@@ -401,17 +401,17 @@ def demo():
         sp = spans_of(d)
         assert [s["text"] for s in sp] == ["wait sorry", "the price is"] and sp[1]["confidence"] == "low"
         # the user reverts the add ("keep the price is") and keeps the rest: 3 kept, 1 reverted
-        (d / "spans.json").write_text(json.dumps(sp[:1]))
+        (d / "spans.json").write_text(json.dumps(sp[:1]), encoding="utf-8")
         s = score(d)
         assert (s["kept"], s["reverted"]) == (2, 1), s
         record(d, s)
         record(d, s)                     # a re-score replaces, never doubles
         assert precision() == (2 / 3, 3) and not gated()
-        (home() / "judge-eval.jsonl").write_text(json.dumps({"edit": "old", "kept": 0, "reverted": 4}) + "\n")
+        (home() / "judge-eval.jsonl").write_text(json.dumps({"edit": "old", "kept": 0, "reverted": 4}) + "\n", encoding="utf-8")
         record(d, s)
         assert gated()                   # 2/7 under 0.60 with 7 scored: suggest only
         (d / "judge.json").write_text(json.dumps({"findings": [
-            {"check": "B1", "cut": None, "quote": "speed and", "fix": {"action": "add", "evidence": "and"}}]}))
+            {"check": "B1", "cut": None, "quote": "speed and", "fix": {"action": "add", "evidence": "and"}}]}), encoding="utf-8")
         before = spans_of(d)
         assert cmd_apply(d) == 0 and spans_of(d) == before
         assert extract_json('noise ```json\n{"findings": []}\n``` end') == {"findings": []}
@@ -434,8 +434,8 @@ def main():
     if not (d / "words.raw.json").exists():
         sys.exit(f"ERROR: no such file: {d / 'words.raw.json'}")
     if a[0] == "prompt":
-        script = Path(a[a.index("--script") + 1]).read_text() if "--script" in a else None
-        (d / "judge-prompt.md").write_text(build_prompt(d, script))
+        script = Path(a[a.index("--script") + 1]).read_text(encoding="utf-8") if "--script" in a else None
+        (d / "judge-prompt.md").write_text(build_prompt(d, script), encoding="utf-8")
         print(d / "judge-prompt.md")
         return 0
     if a[0] == "apply":

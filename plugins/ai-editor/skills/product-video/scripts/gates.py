@@ -32,7 +32,7 @@ def need_brief(d):
     """None when brief.json holds the brief's answers, else what to do."""
     f = Path(d) / "brief.json"
     try:
-        b = json.loads(f.read_text())
+        b = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return f"no brief: ask the brief in the question box (SKILL.md step 1) and write {f} first"
     missing = [k for k in BRIEF_KEYS if k not in b]
@@ -42,7 +42,7 @@ def need_brief(d):
 def stamp(d, plan_name):
     """What an approval covers: the plan and the story it was made from, byte for byte."""
     d = Path(d)
-    plan = json.loads((d / plan_name).read_text())
+    plan = json.loads((d / plan_name).read_text(encoding="utf-8"))
     h = lambda p: hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
     return {"plan": h(d / plan_name), "story": h(d / plan.get("story", "story.json"))}
 
@@ -57,7 +57,7 @@ def approve(d, plan_name):
     if not any((d / f"{k}-{tag}" / "sheet.png").exists() for k in ("animatic", "stills")):
         sys.exit(f"ERROR: no animatic-{tag}/sheet.png: run product.py animatic, show it, ask Approve in the question box")
     out = d / f"approved-{tag}.json"
-    out.write_text(json.dumps({**stamp(d, plan_name), "at": datetime.datetime.now().isoformat(timespec="seconds")}, indent=1))
+    out.write_text(json.dumps({**stamp(d, plan_name), "at": datetime.datetime.now().isoformat(timespec="seconds")}, indent=1), encoding="utf-8")
     return out
 
 
@@ -67,7 +67,7 @@ def need_approval(d, plan_name):
     f = d / f"approved-{tag}.json"
     if not f.exists():
         return f"plan-{tag} is not approved: show the animatic, ask Approve in the question box, then product.py approve"
-    got = json.loads(f.read_text())
+    got = json.loads(f.read_text(encoding="utf-8"))
     if {k: got.get(k) for k in ("plan", "story")} != stamp(d, plan_name):
         return f"plan-{tag} or its story changed after it was approved: show the new animatic and ask again"
     return None
@@ -79,7 +79,7 @@ def need_licence(d, own):
         return None
     f = Path(d) / "audio" / "music.json"
     try:
-        m = json.loads(f.read_text())
+        m = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         m = {}
     if m.get("rights") not in RIGHTS or m.get("file") != own:
@@ -96,9 +96,9 @@ def record_file(d, file, rights, credit=None):
     (d / "audio").mkdir(exist_ok=True)
     info = {"source": "a file from the user", "file": file, "rights": rights, "credit": credit,
             "date": datetime.date.today().isoformat()}
-    (d / "audio" / "music.json").write_text(json.dumps(info, indent=1))
+    (d / "audio" / "music.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
     (d / "audio" / "MUSIC-LICENSE.md").write_text("# Music licence\n\n| field | value |\n|---|---|\n"
-                                                    + "".join(f"| {k} | {v} |\n" for k, v in info.items()))
+                                                    + "".join(f"| {k} | {v} |\n" for k, v in info.items()), encoding="utf-8")
     return info
 
 
@@ -140,12 +140,12 @@ def demo():
     with tempfile.TemporaryDirectory() as t:
         d = Path(t)
         assert "no brief" in need_brief(d)
-        (d / "brief.json").write_text(json.dumps({"must_show": ["search"]}))
+        (d / "brief.json").write_text(json.dumps({"must_show": ["search"]}), encoding="utf-8")
         assert "audience" in need_brief(d)
-        (d / "brief.json").write_text(json.dumps({"must_show": ["search"], "audience": "new users", "action": "visit"}))
+        (d / "brief.json").write_text(json.dumps({"must_show": ["search"], "audience": "new users", "action": "visit"}), encoding="utf-8")
         assert need_brief(d) is None
-        (d / "story.json").write_text(json.dumps({"beats": [{"job": "hook"}, {"job": "end"}]}))
-        (d / "plan-linear-16x9.json").write_text(json.dumps({"story": "story.json"}))
+        (d / "story.json").write_text(json.dumps({"beats": [{"job": "hook"}, {"job": "end"}]}), encoding="utf-8")
+        (d / "plan-linear-16x9.json").write_text(json.dumps({"story": "story.json"}), encoding="utf-8")
         assert "not approved" in need_approval(d, "plan-linear-16x9.json")
         try:
             approve(d, "plan-linear-16x9.json")
@@ -156,7 +156,7 @@ def demo():
         (d / "animatic-linear-16x9" / "sheet.png").write_bytes(b"png")
         approve(d, "plan-linear-16x9.json")
         assert need_approval(d, "plan-linear-16x9.json") is None
-        (d / "story.json").write_text(json.dumps({"beats": [{"job": "hook"}, {"job": "payoff"}, {"job": "end"}]}))
+        (d / "story.json").write_text(json.dumps({"beats": [{"job": "hook"}, {"job": "payoff"}, {"job": "end"}]}), encoding="utf-8")
         assert "changed" in need_approval(d, "plan-linear-16x9.json"), "a changed story needs a new yes"
         (d / "audio").mkdir()
         (d / "audio" / "mine.wav").write_bytes(b"")

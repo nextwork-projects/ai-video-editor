@@ -567,9 +567,9 @@ def demo():
     tr.write_text(json.dumps([{"text": "hello", "start": 1.0, "end": 1.4, "type": "word"},
                               {"text": " ", "start": 1.4, "end": 1.5, "type": "spacing"},
                               {"text": "world", "start": 1.5, "end": 2.0, "type": "word"},
-                              {"text": "later", "start": 5.0, "end": 5.5, "type": "word"}]))
+                              {"text": "later", "start": 5.0, "end": 5.5, "type": "word"}]), encoding="utf-8")
     pl = tmp / "plan.json"
-    pl.write_text(json.dumps({"cards": [{"src": "images/a.png", "start": 3.5, "end": 5.5, "trigger_word": "later"}]}))
+    pl.write_text(json.dumps({"cards": [{"src": "images/a.png", "start": 3.5, "end": 5.5, "trigger_word": "later"}]}), encoding="utf-8")
     folder = tmp / "edits" / "demo"
     ns = argparse.Namespace
     cmd_start(ns(video=str(vid), stage="cut", transcript=str(tr), plan=None, note=None, name=None), folder)
@@ -652,7 +652,7 @@ def demo():
     post("/scope", {"id": c3["id"], "alt": "wide"})
     # live progress from a render log
     lg = tmp / "r.log"
-    lg.write_text("Rendered 10/40\nRendered 30/40\n")
+    lg.write_text("Rendered 10/40\nRendered 30/40\n", encoding="utf-8")
     cmd_status(ns(text="rendering", log=str(lg), done=False), folder)
     st = json.loads(get("/state").read())["activity"][-1]
     assert st["text"] == "rendering" and st["pct"] == 75 and not st["done"], st
@@ -675,7 +675,7 @@ def demo():
     assert cs[c2["id"]]["taste"] == rid and cs[c3["id"]]["taste"] == "video-only", cs
     assert cs[c4["id"]]["taste"] == "suggested" and cs[c4["id"]]["rule"] == "Captions stay inside the safe zone", cs
     assert "Cards fill the space they have" in taste.load_md()["Visuals"] and "sfx_db" not in taste.read_json()
-    sug = [json.loads(x) for x in (tmp / "home" / "suggestions.jsonl").read_text().splitlines()]
+    sug = [json.loads(x) for x in (tmp / "home" / "suggestions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert sug[-1]["note"] == taste.note_key(f"demo#{c4['id']}") and sug[-1]["what"] == "on all of them", sug
     assert "from a review note" in taste.report() and "3 came from review-page notes" in taste.report(), taste.report()
     # every round replays its own video: the next render overwriting the same file changes no earlier tab
@@ -685,7 +685,7 @@ def demo():
     vid.write_bytes(b"the next render")
     assert len(get("/video?k=cut-1").read()) == size and len(get("/video?k=edit-1&alt=wide").read()) == size
     # the footer after a pick-up: an approve says approved, a send says Claude is working (node runs the page's own function)
-    js = re.search(r"^function listenText\(S\)\{.*?\n\}", HTML.read_text(), re.M | re.S)
+    js = re.search(r"^function listenText\(S\)\{.*?\n\}", HTML.read_text(encoding="utf-8"), re.M | re.S)
     assert js, "review.html has no listenText()"
     if shutil.which("node"):
         ev = lambda t, n: {"listening": False, "sent": True, "events": [{"type": t, "stage": "edit", "handled": True}]}

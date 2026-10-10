@@ -145,7 +145,7 @@ def main():
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
     stills = edit / f"stills{plan_path.stem[len('plan'):]}"
-    r = build(stills, json.loads(plan_path.read_text()), stills / "sheet.png")
+    r = build(stills, json.loads(plan_path.read_text(encoding="utf-8")), stills / "sheet.png")
     print(json.dumps(r))
 
 
