@@ -5,6 +5,8 @@
     python3 edit.py estimate edits/NAME [--plan plan.json]   Laptop, Modal, then GitHub Actions and Lambda: time + cost
     python3 edit.py render   edits/NAME [--plan plan.json] [--modal | --lambda]   -> edits/NAME/render.mp4
     python3 edit.py render   edits/NAME [--plan plan.json] --draft   laptop, 2/3 size -> edits/NAME/render-draft.mp4
+    python3 edit.py stills   edits/NAME --at 15.4 --at 13-15.5   only those moments -> stills-at/sheet.png
+    python3 edit.py patch    edits/NAME [--range 13-15.5]   re-renders only what changed since render.mp4 (render.plan.json)
     python3 edit.py render   edits/NAME [--plan plan.json] --github   -> edits/NAME/github-render/ + github-render-media.zip
     python3 edit.py github-push  edits/NAME --repo NAME [--plan plan.json]   private repo + media release, starts a render
     python3 edit.py github-fetch edits/NAME --repo NAME [--plan plan.json]   waits, then -> edits/NAME/render-github.mp4
@@ -788,9 +790,10 @@ def github_fetch(edit, repo_name, tag):
     print(f"{out} ({float(dur):.1f} s)")
 
 
-def contact_sheet(edit, plan_name):
+def contact_sheet(edit, plan_name, folder=None):
     """sheet.py in the venv (it needs Pillow): one labelled sheet of every still, printed as THE review image."""
-    r = subprocess.run([venv_python(), str(Path(__file__).parent / "sheet.py"), str(edit), "--plan", plan_name],
+    r = subprocess.run([venv_python(), str(Path(__file__).parent / "sheet.py"), str(edit), "--plan", plan_name,
+                        *(["--dir", folder] if folder else [])],
                        capture_output=True, text=True)
     if r.returncode:
         print(f"note: no contact sheet ({(r.stderr.strip().splitlines() or ['sheet.py failed'])[-1]}); review the stills one by one")
@@ -801,8 +804,240 @@ def contact_sheet(edit, plan_name):
           f"Open a single still from {Path(s['sheet']).parent} only to zoom in on a tile.")
 
 
+def secs(x):
+    """'15.4', '15.4s', '0:15' or '1:02.5' -> seconds."""
+    m, _, sec = str(x).strip().rstrip("s").rpartition(":")
+    return round((int(m) * 60 if m else 0) + float(sec), 3)
+
+
+def card_at(plan, t):
+    """(index, card) of the plan card up at t seconds (its own lane first), else (None, None)."""
+    up = [(i, c) for i, c in enumerate(plan["cards"]) if c["start"] <= t < c["end"]]
+    up.sort(key=lambda ic: ic[1].get("lane") == "logo")
+    return up[0] if up else (None, None)
+
+
+def frames_at(plan, specs):
+    """--at specs -> {still name: frame}. '15.4' is one still; '13-15.5' is five across the range
+    (entrance, landing, middle, late, exit), the frames a moving card is judged on."""
+    fps, last, out = plan["fps"], plan["durationInFrames"] - 1, {}
+    for spec in specs:
+        a, _, b = spec.partition("-")
+        ts = [secs(a)] if not b else [secs(a) + (secs(b) - secs(a)) * k for k in (0.04, 0.25, 0.5, 0.75, 0.96)]
+        for t in ts:
+            out[f"t{t:07.2f}"] = min(last, max(0, round(t * fps)))
+    return out
+
+
+def at_labels(plan, frames):
+    """still name -> 'card 1 logo 'Duolingo'  15.40s' (card N = plan.cards[N], the review page's index)."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from sheet import kind
+    out = {}
+    for name, f in sorted(frames.items(), key=lambda kv: kv[1]):
+        t = f / plan["fps"]
+        i, c = card_at(plan, t)
+        out[name] = f"{t:.2f}s" + (f"  card {i} {kind(c)} '{c.get('trigger_word', '')}'" if c else "")
+    return out
+
+
+# A patch render re-renders only where the plan changed and splices those frames into the last render.
+PATCH_PAD_S = 0.5        # each changed span grows this much both ways: an exit or a cue tail
+PATCH_MAX_SHARE = 0.6    # more of the video than this changed: a full render is as quick
+SFX_TAIL_S = 1.5         # ponytail: the longest cue in the sfx.py kit; read each cue's length if the kit grows
+RANGED = ("cards", "zooms", "sfx", "cutouts")
+
+
+def changed_ranges(old, new):
+    """([[a, b], ...] seconds where new differs from old, why). ranges is None when the change is not
+    local (size, look, motion, caption style, music...): that needs a full render."""
+    for k in sorted(set(old) | set(new)):
+        if k not in RANGED + ("captions",) and old.get(k) != new.get(k):
+            return None, k
+    oc, nc = old.get("captions") or {}, new.get("captions") or {}
+    if {k: v for k, v in oc.items() if k != "chunks"} != {k: v for k, v in nc.items() if k != "chunks"}:
+        return None, "captions style"
+    fps, dur = new["fps"], new["durationInFrames"] / new["fps"]
+
+    def span(x):
+        if "start" in x:
+            return x["start"], x["end"]
+        if "from" in x:
+            return x["from"] / fps, (x["to"] + 1) / fps
+        return x["t"], x["t"] + SFX_TAIL_S
+    spans = []
+    for a, b in [(old.get(k) or [], new.get(k) or []) for k in RANGED] + [(oc.get("chunks") or [], nc.get("chunks") or [])]:
+        ka, kb = ({json.dumps(x, sort_keys=True) for x in xs} for xs in (a, b))
+        spans += [span(x) for x in a + b if json.dumps(x, sort_keys=True) not in ka & kb]
+    out = []
+    for s, e in sorted((max(0.0, s - PATCH_PAD_S), min(dur, e + PATCH_PAD_S)) for s, e in spans):
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return [[round(s, 3), round(e, 3)] for s, e in out], None
+
+
+def splice(old, pieces, out, fps, frames):
+    """The last render with each piece (from_frame, to_frame inclusive, file) laid in. The picture is one
+    encode; the sound is cut as raw 48 kHz samples, as JOIN does, so the voice never moves by a sample
+    (check.py's cue check subtracts the cut from the render, sample by sample). Frame times are whole
+    milliseconds, as Remotion writes them, so a check that seeks to a time lands on the same frame."""
+    from fractions import Fraction
+    sr, rate = 48000, Fraction(fps).limit_denominator(1001)
+    segs, cur, inputs = [], 0, ["-i", str(old)]
+    for i, (a, b, f) in enumerate(pieces, 1):
+        inputs += ["-i", str(f)]
+        if a > cur:
+            segs.append((0, cur, a))
+        segs.append((i, a, b + 1))
+        cur = b + 1
+    if cur < frames:
+        segs.append((0, cur, frames))
+    smp = lambda fr: round(fr * sr / fps)
+    raw = lambda f: subprocess.run(["ffmpeg", "-v", "error", "-i", str(f), "-map", "0:a", "-f", "s16le", "-ac", "2",
+                                    "-ar", str(sr), "-"], capture_output=True, check=True).stdout
+    srcs = [raw(old)] + [raw(f) for _, _, f in pieces]
+    pcm = Path(out).with_suffix(".pcm")
+    with open(pcm, "wb") as w:
+        for i, a, b in segs:
+            n = 4 * (smp(b) - smp(a))
+            w.write((srcs[0][4 * smp(a):4 * smp(b)] if i == 0 else srcs[i][:n]).ljust(n, b"\0"))
+    fl = [f"[0:v]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS[v{n}]" if i == 0 else
+          f"[{i}:v]trim=end_frame={b - a},setpts=PTS-STARTPTS[v{n}]" for n, (i, a, b) in enumerate(segs)]
+    fl.append("".join(f"[v{n}]" for n in range(len(segs))) + f"concat=n={len(segs)}:v=1:a=0[v]")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-f", "s16le", "-ar", str(sr), "-ac", "2", "-i", str(pcm),
+                    "-filter_complex", ";".join(fl), "-map", "[v]", "-map", f"{len(pieces) + 1}:a", "-r", str(rate),
+                    "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                    "-video_track_timescale", "1000", "-movflags", "+faststart", str(out)], check=True)
+    pcm.unlink()
+
+
+def probe_render(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,nb_frames",
+                        "-of", "json", str(path)], capture_output=True, text=True, check=True)
+    s = json.loads(r.stdout)["streams"][0]
+    return s["width"], s["height"], int(s.get("nb_frames") or 0)
+
+
+def patch(edit, plan_path, plan, pub, tag, ranges=None, run=None, bundle_to=None):
+    """Re-render only the moments that changed since the last render, then splice them in."""
+    out = edit / f"render{tag}.mp4"
+    snap = out.with_suffix(".plan.json")
+    if not out.exists():
+        sys.exit(f"ERROR: {out} missing: render in full first (edit.py render {edit})")
+    if ranges:
+        spans = [[secs(a), secs(b)] for a, _, b in (r.partition("-") for r in ranges)]
+    elif snap.exists():
+        spans, why = changed_ranges(json.loads(snap.read_text()), plan)
+        if spans is None:
+            sys.exit(f"the change is not local ({why} changed): render in full (edit.py render {edit})")
+        if not spans:
+            print(f"nothing changed since {out.name} was rendered")
+            return
+    else:
+        sys.exit(f"ERROR: no {snap.name} (the plan {out.name} was made from): pass --range A-B or render in full")
+    w, h, n = probe_render(out)
+    fps, frames = plan["fps"], plan["durationInFrames"]
+    if (w, h) != (plan["width"], plan["height"]) or abs(n - frames) > 1:
+        sys.exit(f"the plan is {plan['width']}x{plan['height']}, {frames} frames; {out.name} is {w}x{h}, {n}: render in full")
+    pieces = [(max(0, math.floor(a * fps)), min(frames - 1, math.ceil(b * fps))) for a, b in spans]
+    todo = sum(b - a + 1 for a, b in pieces)
+    print("patching " + ", ".join(f"{a / fps:.2f}-{(b + 1) / fps:.2f} s" for a, b in pieces)
+          + f": {todo} of {frames} frames", flush=True)
+    if todo > PATCH_MAX_SHARE * frames:
+        print("most of the video changed: rendering in full instead", flush=True)
+        render_laptop(edit, plan_path, pub, out, False, run=run)
+        shutil.copy2(plan_path, snap)
+        return
+    t0, tmp = time.time(), edit / f".patch{tag}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    bundle = tmp / "bundle"
+    (bundle_to or (lambda a, b: node("bundle", a, b)))(pub, bundle)
+    log, stall = out.parent / f"{out.stem}.renderer.log", stall_s(0.3)
+    files = []
+    for k, (a, b) in enumerate(pieces):
+        f = tmp / f"piece-{k}.mkv"
+        r = (run or watch)(["node", str(REMOTION / "render.mjs"), "chunk", str(bundle), str(plan_path), str(f), str(a), str(b)],
+                           log, stall, cwd=REMOTION, env=aws_env())
+        if r:
+            render_failed("stalled" if r == STALLED else r, log, edit)
+        files.append((a, b, f))
+    splice(out, files, tmp / "render.mp4", fps, frames)
+    os.replace(tmp / "render.mp4", out)
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copy2(plan_path, snap)
+    print(f"patched {out} in {time.time() - t0:.0f} s ({len(pieces)} piece{'s' * (len(pieces) > 1)})")
+
+
+def demo_patch():
+    """stills --at and patch: the moments asked for, the spans that changed, the splice, end to end."""
+    import tempfile
+    assert secs("15.4") == 15.4 and secs("0:15") == 15 and secs("1:02.5s") == 62.5
+    plan = {"fps": 30, "durationInFrames": 300, "width": 64, "height": 36, "look": {}, "captions": {"style": {}, "chunks": []},
+            "zooms": [], "sfx": [], "cards": [{"start": 2, "end": 4, "lane": "logo", "trigger_word": "duo", "anim": {"type": "logo"}},
+                                               {"start": 3, "end": 6, "src": "images/capture-a.png", "trigger_word": "repo"}]}
+    f = frames_at(plan, ["0:03", "4-6"])
+    assert f == {"t0003.00": 90, "t0004.08": 122, "t0004.50": 135, "t0005.00": 150, "t0005.50": 165, "t0005.92": 178}, f
+    lab = at_labels(plan, f)
+    assert lab["t0003.00"] == "3.00s  card 1 capture 'repo'" and lab["t0004.08"] == "4.07s  card 1 capture 'repo'", lab
+    assert card_at(plan, 2.5)[0] == 0 and card_at(plan, 7) == (None, None)
+    # what changed: a moved card is its old and new spans, padded and merged; a new look is a full render
+    new = json.loads(json.dumps(plan))
+    new["cards"][0]["box"] = [40, 17, 20, 11]
+    assert changed_ranges(plan, new) == ([[1.5, 4.5]], None)
+    assert changed_ranges(plan, plan) == ([], None)
+    new["sfx"] = [{"t": 8.0, "src": ".sfx/pop.wav"}]
+    new["zooms"] = [{"start": 9.0, "end": 9.4}]
+    assert changed_ranges(plan, new)[0] == [[1.5, 4.5], [7.5, 10.0]], changed_ranges(plan, new)
+    assert changed_ranges(plan, {**new, "look": {"preset": "mono"}}) == (None, "look")
+    assert changed_ranges(plan, {**new, "captions": {"style": {"size_pct": 7}, "chunks": []}}) == (None, "captions style")
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        mk = lambda out, color, n, ext: subprocess.run(   # n frames at 29.97, a 440 Hz tone under them
+            ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=64x36:r=30000/1001:d={n / 29 + 1}", "-f", "lavfi",
+             "-i", f"sine=f=440:d={n * 1001 / 30000}:r=48000", "-frames:v", str(n), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             "-c:a", "aac" if ext == "mp4" else "pcm_s16le", str(out)], check=True)
+        mk(t / "render.mp4", "red", 300, "mp4")
+        plan["fps"] = 30000 / 1001
+        (t / "plan.json").write_text(json.dumps(plan))
+        # no record of the rendered plan: patch asks for a range
+        try:
+            patch(t, t / "plan.json", plan, t, "")
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            assert "--range" in str(e.code), e.code
+        (t / "render.plan.json").write_text(json.dumps(plan))
+        moved = json.loads(json.dumps(plan))
+        moved["cards"][0]["box"] = [40, 17, 20, 11]
+        (t / "plan.json").write_text(json.dumps(moved))
+        asked = []
+
+        def fake(cmd, log, stall, **k):
+            a, b = int(cmd[-2]), int(cmd[-1])
+            asked.append((a, b))
+            mk(Path(cmd[-3]), "blue", b - a + 1, "mkv")
+            return 0
+        patch(t, t / "plan.json", moved, t, "", run=fake, bundle_to=lambda a, b: None)
+        assert asked == [(44, 135)], asked          # 1.5-4.5 s at 29.97 fps
+        assert json.loads((t / "render.plan.json").read_text()) == moved
+        n = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                            "stream=nb_read_frames", "-of", "csv=p=0", str(t / "render.mp4")], capture_output=True, text=True).stdout
+        assert int(n) == 300, n
+        px = lambda fr: subprocess.run(["ffmpeg", "-v", "error", "-i", str(t / "render.mp4"), "-vf", f"select=eq(n\\,{fr})",
+                                        "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout[:3]
+        assert px(20)[0] > 200 and px(90)[2] > 200 and px(200)[0] > 200, (px(20), px(90), px(200))
+        d = float(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
+                                  "-of", "csv=p=0", str(t / "render.mp4")], capture_output=True, text=True).stdout)
+        assert abs(d - 300 * 1001 / 30000) < 0.03, d
+        patch(t, t / "plan.json", moved, t, "", run=fake, bundle_to=lambda a, b: None)   # nothing changed: nothing rendered
+        assert len(asked) == 1
+
+
 def demo():
     import tempfile
+    demo_patch()
     # the laptop estimate: Chrome's start-up once, then every frame; every cloud line says when it is not set up
     assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0, "start_s": 2.0}, 1000) == 55.0
     assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0}, 1000) == 53.0
@@ -966,7 +1201,7 @@ def main():
     if sys.argv[1:] == ["demo"]:
         return demo()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["stills", "estimate", "render", "github-push", "github-fetch"])
+    ap.add_argument("cmd", choices=["stills", "estimate", "render", "patch", "github-push", "github-fetch"])
     ap.add_argument("edit")
     ap.add_argument("--plan", default="plan.json")
     ap.add_argument("--lambda", dest="use_lambda", action="store_true")
@@ -975,6 +1210,8 @@ def main():
     ap.add_argument("--github", action="store_true", help="package for GitHub Actions instead of rendering here")
     ap.add_argument("--repo", help="GitHub repo name (github-push, github-fetch)")
     ap.add_argument("--no-check", action="store_true", help="stills even when check.py plan finds a FAIL")
+    ap.add_argument("--at", action="append", help="stills: only this moment (15.4 or 0:15) or range (13-15.5, five stills)")
+    ap.add_argument("--range", action="append", help="patch: re-render this span (13-15.5) instead of what changed")
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
@@ -991,11 +1228,19 @@ def main():
         chk = subprocess.run([sys.executable, str(Path(__file__).parent / "check.py"), "plan", str(edit), "--plan", a.plan])
         if chk.returncode and not a.no_check:
             sys.exit("check.py plan found a FAIL: fix it and plan again (edit.py stills --no-check to look anyway)")
-        pairs = [f"{k}={v}" for k, v in still_frames(plan).items()]
-        node("stills", pub, plan_path, edit / f"stills{tag}", *pairs)
-        contact_sheet(edit, a.plan)
+        if a.at:   # just these moments, into stills-at/ (the full sheet stays as it was)
+            frames, folder = frames_at(plan, a.at), edit / f"stills{tag}-at"
+            shutil.rmtree(folder, ignore_errors=True)
+            folder.mkdir()
+            (folder / "labels.json").write_text(json.dumps(at_labels(plan, frames)))
+        else:
+            frames, folder = still_frames(plan), edit / f"stills{tag}"
+        node("stills", pub, plan_path, folder, *[f"{k}={v}" for k, v in frames.items()])
+        contact_sheet(edit, a.plan, folder.name if a.at else None)
     elif a.cmd == "estimate":
         estimate(plan_path, pub)
+    elif a.cmd == "patch":
+        patch(edit, plan_path, plan, pub, tag, a.range)
     elif a.github:
         package_github(edit, plan_path, pub, tag)
     elif a.use_lambda:
@@ -1007,6 +1252,8 @@ def main():
         render_modal(edit, plan_path, pub, edit / f"render{tag}.mp4")
     else:
         render_laptop(edit, plan_path, pub, edit / f"render{tag}{'-draft' if a.draft else ''}.mp4", a.draft)
+    if a.cmd == "render" and not (a.draft or a.github):   # the plan this render was made from: patch diffs against it
+        shutil.copy2(plan_path, edit / f"render{tag}.plan.json")
 
 
 if __name__ == "__main__":

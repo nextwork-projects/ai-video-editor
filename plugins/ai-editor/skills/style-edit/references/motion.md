@@ -131,7 +131,7 @@ A scene card in plan.json:
 ```
 
 - `layout`: `"scene"` (full frame) or `"box"` (default: the card's `box` over the footage, as before).
-- `box` on a scene: `[0, 0, 100, 100]` means "use the scene box": `[6, 13, 88, 52]` vertical (clear of the
+- `box` on a scene: `[0, 0, 100, 100]` means "use the scene box": `[14, 14, 72, 52]` vertical (clear of the
   app's top bar, captions under it), `[6, 9, 88, 70]` wide. check.py skips its safe-zone, centre and
   head checks for this shape. Any other box is used as given.
 - `focus`: `[x, y]` % of the frame where `match` and `iris` open from and close to. plan.py passes the
