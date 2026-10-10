@@ -4,6 +4,22 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- New `overlays` skill: change the visuals of an edit after it is rendered, one beat at a time. Move,
+  resize, swap, drop or add a card, logo, real page or animated diagram at the moment you name. It
+  re-plans, makes stills of just those moments, checks them, re-renders only the frames that
+  changed and opens the next round on the review page. New: `plan.py cards` (each card and the beat
+  it came from), `plan.py beat` (change, drop or add one beat by card, time or word),
+  `edit.py stills --at` (stills of chosen moments), `edit.py patch` (re-render what changed since
+  the last render and splice it in; `render.plan.json` records the plan each render came from).
+  `template-filler` fills `flow` diagrams; `stills-critic` adds a blind read of each card.
+  Tests: `plan.py demo`, `edit.py demo`, `sheet.py demo`, eval `move-card-off-caption`.
+- Fixes from the first real run of `overlays`:
+  - A vertical full-frame scene (a `flow` diagram, a scene capture) drew out to 94% of the width,
+    under the app's like and comment buttons. The scene box is now x 14-86%, y 14-66%
+    (`Scene.tsx`, `plan.py`), and a diagram in it still draws on the scene's own ground.
+  - A logo within 0.5 s of a scene was dropped without a word. plan.py now warns and says to end the
+    scene sooner.
+
 ## ai-editor 2.2.0 (2026-10-09)
 
 - Review-page notes now reach your taste. After send or approve, Claude picks the notes that are

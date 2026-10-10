@@ -1,6 +1,6 @@
 ---
 name: template-filler
-description: Fills the visuals.json beats of a style-edit from beats.json picks and the transcript: the overlay formats (capture shot, browser, sticker, post, logo, logo_cluster, chat, terminal, toasts, side_by_side, video_card). Use after `route.py beats`, one call for the whole video, when the routing is decided and only the small JSON is left to write.
+description: Fills the visuals.json beats of a style-edit from beats.json picks and the transcript: the overlay formats (capture shot, browser, sticker, post, logo, logo_cluster, chat, terminal, toasts, side_by_side, video_card) and the flow diagram. Use after `route.py beats`, one call for the whole video, or from the overlays skill, one call per beat, when the routing is decided and only the small JSON is left to write.
 tools: Read, Write
 model: haiku
 ---
@@ -18,7 +18,7 @@ the beat shape for every pick. There are no type cards (words on a ground); they
 | `capture:shot`, `capture:browser`, `capture:sticker` | a `capture` beat with that `format`, the page `url`, and a `highlight` or `ring` mark whose `find` is the page's exact text for what the speaker says |
 | `post` | a `post` beat: `url`, `highlight` (the phrase said, as the post writes it) |
 | `logo` | a `logo` beat: `brand`, `domain` when Simple Icons may lack it |
-| `logo_cluster`, `chat`, `terminal`, `toasts`, `side_by_side`, `video_card` | an `anim` beat of that `type` with its props |
+| `logo_cluster`, `chat`, `terminal`, `toasts`, `side_by_side`, `video_card`, `flow` | an `anim` beat of that `type` with its props (`flow`: real logos or capture files as nodes, each landing on its word) |
 
 Rules:
 
