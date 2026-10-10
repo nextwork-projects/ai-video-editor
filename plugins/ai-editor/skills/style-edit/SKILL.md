@@ -91,9 +91,8 @@ on screen and the rules plan.py enforces.
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`.
 3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
-4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube
-   and GitHub images into `images/`, hides cookie banners, measures marks. Do not open the images:
-   the step 5 stills sheet shows every capture.
+4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts, app, YouTube and
+   GitHub images into `images/`, hides cookie banners, measures marks. Do not open them: the step 5 sheet shows all.
 
 Pacing, one rule: a card where a sentence names something real (a product, site, post, person, or a
 figure on the page that published it), never two at once; otherwise the speaker carries it. No stretch
