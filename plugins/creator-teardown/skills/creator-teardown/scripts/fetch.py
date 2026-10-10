@@ -327,6 +327,8 @@ def cmd_list(args):
         v = {k: d.get(k) for k in KEEP}
         if not v.get("webpage_url"):
             v["webpage_url"] = d.get("url")
+        # one picture per video for ai-editor's home page; flat listings give a list, full ones one url
+        v["thumbnail"] = d.get("thumbnail") or next((t.get("url") for t in d.get("thumbnails") or [] if t.get("url")), None)
         vids.append(v)
 
     if not vids:
