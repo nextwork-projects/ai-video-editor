@@ -27,7 +27,11 @@ Before running anything, tell the user in plain words what setup does and why, a
 3. **Cloud renders** (optional, 3 min): finish long videos faster on Modal.
 4. **Your style** (2 min): the creators and videos you like, so edits look like what you want.
 
-Then ask in the question box: **Start with the tools (Recommended)** / **Only add a key** / **Later**.
+Then ask in the question box: **Open the setup page (Recommended)** / **Start with the tools here** /
+**Only add a key** / **Later**. The setup page is the home page in their browser: tool checks, keys
+typed there (saved and tested by the page, never seen in the chat), then a creator and a video.
+Follow `${CLAUDE_PLUGIN_ROOT}/skills/start/references/home.md`; still fix doctor's `FIX` lines here
+(steps 2-4), reporting each with its `status setup`.
 
 Every step can be skipped and finished later: on a skip, run `python3 "$U" later <step>`
 (`typesafe`, `gemini`, `elevenlabs`, `modal`, `style`, `matte`) and say "Saved. Say *finish setup*

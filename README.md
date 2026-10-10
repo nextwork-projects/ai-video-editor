@@ -54,6 +54,12 @@ it asks you to log in.
 **4. Say yes when it asks whether you trust this folder.** That lets the editor load. Then type
 **edit my video**.
 
+**5. Pick "Open the home page".** A page opens in your browser. It checks your computer, takes
+optional keys (saved on your computer, never sent to the chat), and asks for a creator you like.
+Paste their handle or profile link and press **Study their videos**: Claude measures their top
+videos (about 3 minutes, free) and shows what makes them work. Then you get a skill in their
+format, the prompts to use it, and a place to drop your video.
+
 The folder's `.claude/settings.json` turns the editor on. If Claude says the editor is not loaded,
 it offers to install it: say yes, then type `/reload-plugins`.
 

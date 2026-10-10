@@ -28,6 +28,7 @@ Read a skill's `SKILL.md` in full before doing its task.
 | `creator-teardown` | `plugins/creator-teardown/skills/creator-teardown/` | "break down @handle", "tear down @handle" |
 
 Order: `start` asks a few questions once, then runs setup, creator-teardown, cut and style-edit in order.
+On a first run `start` offers the home page (`plugins/ai-editor/lib/ai_editor/home.py`, `start/references/home.md`): the user pastes a creator and drops a video there, `home.py wait` hands each job to the agent as one line (`JOB teardown @handle ...`), and the agent runs the skill and reports back with `home.py status`.
 `creator-teardown` measures a creator, `cut` cleans the user's take, `style-edit` renders
 it in that creator's style. Every render (cut, edit, clip, product video) is handed over on the review page
 (`plugins/ai-editor/lib/ai_editor/review.py`): the user leaves notes at moments, Claude fixes and re-renders. `taste` runs whenever the user corrects an edit; a correction the user says would help everyone goes to
