@@ -140,7 +140,7 @@ def join(chunk_dir, chunks, fps, out):
 
 
 def render(bundle_dir, plan_path, out):
-    plan = json.loads(Path(plan_path).read_text())
+    plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
     frames, fps = plan["durationInFrames"], plan["fps"]
     n, r = plan_pieces(frames, speed()[0]["s_per_frame"])
     job = uuid.uuid4().hex[:12]
@@ -292,7 +292,7 @@ def demo():
         b = Path(t, "b")
         (b / "public").mkdir(parents=True)
         for f, x in (("bundle.js", "js"), ("1.bundle.js", "font"), ("bundle.js.map", "map"), ("1.bundle.js.map", "map"), ("public/cut.mp4", "mp4")):
-            Path(b, f).write_text(x)
+            Path(b, f).write_text(x, encoding="utf-8")
         pack(b, Path(t, "1.tar"))
         os.utime(b / "bundle.js", (1, 1))
         pack(b, Path(t, "2.tar"))
@@ -388,7 +388,7 @@ def mocked_render(bundle_dir, plan_path, out):
         # A Modal container with cpu=4 shows Node more cores than `nproc` (4), and Remotion takes the
         # lower: a fake nproc on PATH gives this computer the same split.
         with one_at_a_time, tempfile.TemporaryDirectory() as bin_dir:
-            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n")
+            Path(bin_dir, "nproc").write_text("#!/bin/sh\necho 4\n", encoding="utf-8")
             Path(bin_dir, "nproc").chmod(0o755)
             path = os.environ["PATH"]
             os.environ["PATH"] = bin_dir + os.pathsep + path

@@ -68,7 +68,7 @@ def find_key(var="ELEVENLABS_API_KEY"):
         return os.environ[var].strip(), f"the {var} variable"
     for p in (KEY_FILE,):   # never a .env in the working folder: another project's key would be billed
         if p.exists():
-            for line in p.read_text().splitlines():
+            for line in p.read_text(encoding="utf-8").splitlines():
                 if line.startswith(f"{var}="):
                     key = line.split("=", 1)[1].strip().strip('"').strip("'")
                     if key:
@@ -262,7 +262,7 @@ def main():
         payload = whisper(src, args.lang, keyterms)
         payload["_source"] = str(src.resolve())
         summarise(payload, "whisper")
-        out_path.write_text(json.dumps(payload, indent=2))
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(out_path)
         return
 
@@ -287,7 +287,7 @@ def main():
     payload["_keyterms"] = keyterms
     payload["_engine"] = "scribe"
     summarise(payload, "verbatim")
-    out_path.write_text(json.dumps(payload, indent=2))
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(out_path)
 
     if args.clean:
@@ -296,7 +296,7 @@ def main():
                            url=args.media if is_url else None)
         summarise(clean, "clean")
         cp = out_path.with_suffix(".clean.json")
-        cp.write_text(json.dumps(clean, indent=2))
+        cp.write_text(json.dumps(clean, indent=2), encoding="utf-8")
         print(cp)
 
     if wav:

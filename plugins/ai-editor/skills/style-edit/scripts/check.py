@@ -568,7 +568,7 @@ def check_audio(edit, words):
     """Silences inside the speech on cut.mp4, at the cut skill's threshold derived from this take."""
     sys.path.insert(0, str(HERE.parents[1] / "cut" / "scripts"))
     from build_timeline import SPEECH_OFFSET_DB, derive_noise_db, detect_silence, window_rms_db
-    src = Path((json.loads((edit / "report.json").read_text()) if (edit / "report.json").exists() else {}).get("source", ""))
+    src = Path((json.loads((edit / "report.json").read_text(encoding="utf-8")) if (edit / "report.json").exists() else {}).get("source", ""))
     noise, how = None, ""
     for f, label in ((src, "derived from the source, as the cut did"), (edit / "cut.mp4", "derived from the cut")):
         if noise is None and f.is_file():
@@ -842,13 +842,13 @@ def main():
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     tag = plan_path.stem[len("plan"):]
-    rd = lambda n: json.loads((edit / n).read_text()) if (edit / n).exists() else None
+    rd = lambda n: json.loads((edit / n).read_text(encoding="utf-8")) if (edit / n).exists() else None
     face = rd("face.json")
     extra = {}
     if a.mode == "plan":
-        pace = (json.loads(Path(a.style).read_text()).get("pace") or {}) if a.style else {}
+        pace = (json.loads(Path(a.style).read_text(encoding="utf-8")).get("pace") or {}) if a.style else {}
         static_s = round(2.5 * pace["median_shot_s"], 1) if pace.get("median_shot_s") else STATIC_S
         if not face:
             print("note: no face.json, the head check is skipped (run face.py)")
@@ -864,7 +864,7 @@ def main():
         found, extra["cards"] = check_render(edit, plan, video)
         found += font_findings(plan, google_fonts())
         import quality   # every frame, the settled cards, the audio, the files: quality.py
-        style = json.loads(Path(a.style).read_text()) if a.style else None
+        style = json.loads(Path(a.style).read_text(encoding="utf-8")) if a.style else None
         if style_note(a.style, style):
             print(style_note(a.style, style))
         more, q = quality.run(edit, plan, video, plan_path, style, cut_points(edit), brand())
@@ -888,9 +888,9 @@ def main():
             found += caption_looks(heard, shown, known)
     n = report(found, a.mode)
     out = edit / f"check{tag}.json"
-    doc = json.loads(out.read_text()) if out.exists() else {}
+    doc = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
     doc[a.mode] = {"plan": a.plan, "counts": n, "findings": found, **extra}
-    out.write_text(json.dumps(doc, indent=1))
+    out.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     print(out)
     sys.exit(1 if n["FAIL"] else 0)
 

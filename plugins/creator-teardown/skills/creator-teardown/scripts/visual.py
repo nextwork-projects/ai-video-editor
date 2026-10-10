@@ -351,7 +351,7 @@ def speech(tdir, vid):
     p = tdir / f"{vid}.json"
     if not p.exists():
         return None
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     words = [x for x in d.get("words", []) if x.get("type") == "word"]
     dur = d.get("audio_duration_secs") or (words[-1]["end"] if words else 0)
     if len(words) < 2 or not dur:
@@ -390,7 +390,7 @@ def zoom_block(rows, tdir):
 def cmd_download(a):
     handle = slug(a.handle)
     outdir = OUT_ROOT / handle
-    meta = json.loads((outdir / "videos.json").read_text())
+    meta = json.loads((outdir / "videos.json").read_text(encoding="utf-8"))
     if a.ids:
         by_id = {v["id"]: v for v in meta["videos"]}
         todo = [by_id[i] for i in a.ids.split(",")]
@@ -434,7 +434,7 @@ def measure_one(job):
     """One video's visual.json (worker process)."""
     p, sheets = job
     r = measure_video(p, sheets)
-    p.with_suffix(".visual.json").write_text(json.dumps(r, indent=2))
+    p.with_suffix(".visual.json").write_text(json.dumps(r, indent=2), encoding="utf-8")
     print(f"{p.stem}: {len(r['cuts'])} cuts ({r['cuts_per_10s']}/10s), median shot "
           f"{r['median_shot_s']} s, {len(r['zooms'])} zooms, {len(r['sheets'])} sheets", file=sys.stderr)
     return r
@@ -453,7 +453,7 @@ def cmd_measure(a):
     sp = [s for s in (speech(tdir, r["id"]) for r in rows) if s]
     first = rows[0]
     style_path = outdir / "style.json"
-    style = json.loads(style_path.read_text()) if style_path.exists() else {}
+    style = json.loads(style_path.read_text(encoding="utf-8")) if style_path.exists() else {}
     style.update({
         "handle": handle,
         "videos": len(rows),
@@ -481,7 +481,7 @@ def cmd_measure(a):
         style["transitions"] = tr     # [] = they only cut: style-edit cuts its scenes hard
     eases = Counter(z.get("ease") for r in rows for z in r["zooms"] if z["kind"] == style["zoom"].get("kind"))
     style["zoom"]["ease"] = eases.most_common(1)[0][0] if eases else None
-    style_path.write_text(json.dumps(style, indent=2))
+    style_path.write_text(json.dumps(style, indent=2), encoding="utf-8")
     if a.json:
         print(json.dumps({k: style[k] for k in ("pace", "zoom", "camera")}, indent=2))
     print(summary_line(style, style_path))

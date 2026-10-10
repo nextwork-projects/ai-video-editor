@@ -109,7 +109,7 @@ def main():
         sys.exit(f"ERROR: no cut.mp4 in {d}")
     heads = scan(video)
     found = sum(1 for x in heads if x["box"])
-    (d / "face.json").write_text(json.dumps({"step_s": STEP_S, "heads": heads}))
+    (d / "face.json").write_text(json.dumps({"step_s": STEP_S, "heads": heads}), encoding="utf-8")
     print(f"{d / 'face.json'}: a head in {found} of {len(heads)} samples")
 
 

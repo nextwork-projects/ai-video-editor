@@ -488,11 +488,11 @@ def propose(d, key=None, canned=None, force=False):
     """Returns 0, or 4 with no key. canned={qid: answer} runs offline (tests)."""
     d = Path(d)
     toks = load(d)
-    (d / "transcript.txt").write_text(text_view(toks, d.name))
+    (d / "transcript.txt").write_text(text_view(toks, d.name), encoding="utf-8")
     cands = find(toks, keeps_fillers(d))
     write_hooks(d, toks)
     if key is None and canned is None:
-        (d / "candidates.md").write_text(candidates_md(cands))
+        (d / "candidates.md").write_text(candidates_md(cands), encoding="utf-8")
         return 4
     sp = d / "spans.json"
     if sp.exists() and not force:
@@ -503,10 +503,10 @@ def propose(d, key=None, canned=None, force=False):
     spans = to_spans(cuts, toks)
     if sp.exists():
         sp.replace(d / "spans.prev.json")
-    sp.write_text(json.dumps(spans, indent=1))
-    (d / "review.md").write_text(review_md(review, toks))
+    sp.write_text(json.dumps(spans, indent=1), encoding="utf-8")
+    (d / "review.md").write_text(review_md(review, toks), encoding="utf-8")
     (d / "candidates.json").write_text(json.dumps(
-        [{k: v for k, v in c.items() if k != "questions"} for c in cands], indent=1))
+        [{k: v for k, v in c.items() if k != "questions"} for c in cands], indent=1), encoding="utf-8")
     u = jev.ask.last_usage
     n = sum(c["kind"] == "alt_hook" for c in cands)
     if n:
@@ -529,7 +529,7 @@ def write_hooks(d, toks):
     keep, oe, _ = hook_line(toks, alts[0])
     out = {"opening": q(keep, oe),
            "alternates": [{"n": n, **q(a, hook_line(toks, (a, b))[2])} for n, (a, b) in enumerate(alts, 1)]}
-    f.write_text(json.dumps(out, indent=1))
+    f.write_text(json.dumps(out, indent=1), encoding="utf-8")
     return out["alternates"]
 
 
@@ -545,7 +545,7 @@ def hook_variant(d, n):
         sys.exit(f"ERROR: no alternate hook {n}; {d.name} has {len(alts)} (retakes.py propose lists them)")
     take = alts[n - 1]
     keep, oe, le = hook_line(toks, take)
-    spans = json.loads((d / "spans.json").read_text())
+    spans = json.loads((d / "spans.json").read_text(encoding="utf-8"))
     t_open, t_tail = toks[oe]["end"], toks[alts[0][0]]["start"]
     # the opening (replaced) and the alternate hooks (rebuilt below, one span per take)
     out = [sp for sp in spans if t_open <= B.resolve_spans([sp], toks)[0]["start"] < t_tail]
@@ -562,8 +562,8 @@ def hook_variant(d, n):
     for name in ("words.raw.json", "fixes.json"):
         if (d / name).exists():
             shutil.copyfile(d / name, v / name)
-    (v / "spans.json").write_text(json.dumps(sorted(out, key=lambda s: s["after"]), indent=1))
-    (v / "lead.json").write_text(json.dumps(q(take[0], le, "alt_hook", f"alternate hook {n}, played first"), indent=1))
+    (v / "spans.json").write_text(json.dumps(sorted(out, key=lambda s: s["after"]), indent=1), encoding="utf-8")
+    (v / "lead.json").write_text(json.dumps(q(take[0], le, "alt_hook", f"alternate hook {n}, played first"), indent=1), encoding="utf-8")
     return v
 
 
@@ -578,14 +578,14 @@ def fix(d, pairs):
     """Replace whole words (case-insensitive), keeping each token's punctuation. Remembered in fixes.json."""
     d, n = Path(d), 0
     fj = d / "fixes.json"
-    kept = json.loads(fj.read_text()) if fj.exists() else {}
+    kept = json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {}
     kept.update({old.lower(): new for old, new in pairs})
-    fj.write_text(json.dumps(kept, indent=1))
+    fj.write_text(json.dumps(kept, indent=1), encoding="utf-8")
     for name in ("words.raw.json", "words.json", "cut.transcript.json", "captions.json"):
         f = d / name
         if not f.exists():
             continue
-        data = json.loads(f.read_text())
+        data = json.loads(f.read_text(encoding="utf-8"))
         toks = data["words"] if isinstance(data, dict) else data
         for t in toks:
             for old, new in pairs:
@@ -594,7 +594,7 @@ def fix(d, pairs):
                     t["text"], n = s, n + 1
         if name == "captions.json" and not isinstance(data, dict):
             data = one_word_each(data)
-        f.write_text(json.dumps(data, indent=1))
+        f.write_text(json.dumps(data, indent=1), encoding="utf-8")
     return n
 
 
@@ -652,9 +652,9 @@ def captions(d):
     cut = load_words(d / "words.json") if (d / "words.json").exists() else []
     fj = d / "fixes.json"
     names = [n["name"] for n in profile.load().get("names") or [] if isinstance(n, dict) and n.get("name")]
-    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text()) if fj.exists() else {})
-    (d / "captions.json").write_text(json.dumps(words, indent=1))
-    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."))
+    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {})
+    (d / "captions.json").write_text(json.dumps(words, indent=1), encoding="utf-8")
+    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."), encoding="utf-8")
     return words, changed
 
 
@@ -697,19 +697,19 @@ def remap(d):
     prev = d / "prep-decisions.json"
     if not prev.exists():
         sys.exit(f"ERROR: no prep-decisions.json in {d}: copy decisions.json to it when visual prep starts")
-    old, new = json.loads(prev.read_text()), json.loads((d / "decisions.json").read_text())
+    old, new = json.loads(prev.read_text(encoding="utf-8")), json.loads((d / "decisions.json").read_text(encoding="utf-8"))
     raw = [w for w in load_fitted(d) if w.get("type", "word") == "word"]
     for name in ("visuals.json", "images.json"):
         f = d / name
         if not f.exists():
             continue
-        beats = json.loads(f.read_text())
+        beats = json.loads(f.read_text(encoding="utf-8"))
         kept, dropped = remap_beats(raw, old, new, beats)
-        f.write_text(json.dumps(kept, indent=1))
+        f.write_text(json.dumps(kept, indent=1), encoding="utf-8")
         moved = sum(1 for a, b in zip([x for x in beats if x not in dropped], kept) if a.get("nth") != b.get("nth"))
         print(f"{f}: {len(kept)} kept, {moved} re-pointed, {len(dropped)} dropped"
               + "".join(f"\n  dropped '{b['word']}' ({b.get('kind') or b.get('src')}): its word was cut" for b in dropped))
-    prev.write_text(json.dumps(new, indent=1))
+    prev.write_text(json.dumps(new, indent=1), encoding="utf-8")
 
 
 def main():
@@ -722,7 +722,7 @@ def main():
     d = Path(a.edit_dir)
     if a.cmd == "text":
         out = d / "transcript.txt"
-        out.write_text(text_view(load(d), d.name))
+        out.write_text(text_view(load(d), d.name), encoding="utf-8")
         raw = (d / "words.raw.json").stat().st_size
         print(f"{out}  ({out.stat().st_size} bytes, {raw / out.stat().st_size:.1f}x smaller than words.raw.json)")
     elif a.cmd == "fix":
@@ -753,7 +753,7 @@ def main():
         try:
             code = propose(d, key=key, force=a.force)
         except jev.JevError as e:
-            (d / "candidates.md").write_text(candidates_md(find(load(d), keeps_fillers(d))))
+            (d / "candidates.md").write_text(candidates_md(find(load(d), keeps_fillers(d))), encoding="utf-8")
             if e.rejected_key:
                 print(f"TypeSafe rejected the saved key ({e}). Save a new one with the setup skill's setkey step. "
                       "Meanwhile decide the cut yourself from transcript.txt and candidates.md.", file=sys.stderr)

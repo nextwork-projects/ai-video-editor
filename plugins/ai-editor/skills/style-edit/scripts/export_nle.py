@@ -142,11 +142,11 @@ def load_edit(edit, plan_name, source):
     report = edit / "report.json"
     if not report.exists():
         sys.exit(f"ERROR: no {report}. Run the cut skill first: the export trims the raw take with its spans.")
-    rep = json.loads(report.read_text())
+    rep = json.loads(report.read_text(encoding="utf-8"))
     plan_path = edit / plan_name
     if not plan_path.exists():
         sys.exit(f"ERROR: no {plan_path}. Run plan.py first.")
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     src = Path(source or rep["source"]).expanduser()
     if not src.exists():
         sys.exit(f"ERROR: the raw take {src} is gone. Pass --source <the same file> (it must be the take the cut was made from).")
@@ -155,7 +155,7 @@ def load_edit(edit, plan_name, source):
         sys.exit(f"ERROR: {src} is {meta['duration']:.2f} s, the cut was made from a {rep['duration']:.2f} s take. Wrong file?")
     beats = edit / "beats.json"
     return {"name": edit.name, "edit": edit.resolve(), "plan": plan, "plan_path": plan_path, "fps": rep["fps"], "frames": rep["frames"],
-            "source": src.resolve(), "meta": meta, "beats": json.loads(beats.read_text()) if beats.exists() else None}
+            "source": src.resolve(), "meta": meta, "beats": json.loads(beats.read_text(encoding="utf-8")) if beats.exists() else None}
 
 
 def ctx_timing(ctx):
@@ -207,7 +207,7 @@ def render_cards(ctx, todo, media):
             frames = media / f".card-{it['i']:02d}"
             shutil.rmtree(frames, ignore_errors=True)
             pp = media / f".card-{it['i']:02d}.json"
-            pp.write_text(json.dumps(props))
+            pp.write_text(json.dumps(props), encoding="utf-8")
             E.node("stills", bundle, pp, frames, *(f"f{k:05d}={k}" for k in range(it["len_f"])))
             x, y, w, h = it["rect"]
             ffmpeg("-framerate", fps, "-i", frames / "f%05d.png", "-vf", f"crop={w}:{h}:{x}:{y}",

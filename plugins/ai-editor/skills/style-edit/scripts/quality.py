@@ -765,7 +765,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     from edit import proxy_filter, still_frames
     from plan import CARD_LEAD_S, ENTRANCES, MOTION_K, OVERLAY_LEAD_S, overlay_led, probe
     cj = edit / "captions.json"
-    cwords = json.loads(cj.read_text()) if cj.exists() else []
+    cwords = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else []
     out, meas = [], {}
     fps = plan["fps"]
     split = bool(plan.get("layout"))
@@ -1087,7 +1087,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     meas["icons"] = {"stock": icons_all, "real": real_all}
     for where, obj in (("visuals.json", (edit / "visuals.json")), ("captions.json", (edit / "captions.json"))):
         if obj.exists():
-            em = emoji_in(json.loads(obj.read_text()))
+            em = emoji_in(json.loads(obj.read_text(encoding="utf-8")))
             if em:
                 out.append(F("WARN", None, f"emoji in {where}: {' '.join(em)}", "words or a real image, not emoji"))
 
@@ -1211,7 +1211,7 @@ def demo():
     assert zoom_verdict(sc, want, math.log(1.2)) is None
     assert '"push"' not in zoom_fix("push") and '"push"' not in zoom_fix("punch", "push") and '"push"' in zoom_fix("punch")
     # every WARN's fix is something the model can do: never "render with the current renderer"
-    assert "current StyleEdit" not in Path(__file__).read_text().replace('"current StyleEdit" not in', "")
+    assert "current StyleEdit" not in Path(__file__).read_text(encoding="utf-8").replace('"current StyleEdit" not in', "")
     # an audio clip's cover: a 12% push over 22 s moves all but its first and last second; a punch fills a gap
     cv = {"box": [20.4, 16.7, 59.3, 33.3], "push": 1.12, "pulses": []}
     mv = cover_moving(cv, 22.0, 1080, 30, 660)
@@ -1404,8 +1404,8 @@ def demo():
     import tempfile, os, time
     with tempfile.TemporaryDirectory() as tmp:
         r, p = Path(tmp) / "render.mp4", Path(tmp) / "plan.json"
-        r.write_text("x")
-        p.write_text("{}")
+        r.write_text("x", encoding="utf-8")
+        p.write_text("{}", encoding="utf-8")
         os.utime(r, (time.time() - 100, time.time() - 100))
         assert stale(r, [p])[0][0] == "plan.json" and stale(p, [r]) == []
         # normalize: the quiet sample take's level comes up to -14 by one gain; a peak caps the gain

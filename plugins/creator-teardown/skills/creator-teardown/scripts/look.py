@@ -717,7 +717,7 @@ def load_words(tdir, vid):
     p = tdir / f"{vid}.json"
     if not p.exists():
         return []
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     return [(norm(w["text"]), w["start"]) for w in d.get("words", []) if w.get("type") == "word"]
 
 
@@ -1072,9 +1072,9 @@ def summary(style, rows_n=None):
 
 
 def write_summary(outdir):
-    style = json.loads((outdir / "style.json").read_text())
+    style = json.loads((outdir / "style.json").read_text(encoding="utf-8"))
     text = summary(style)
-    (outdir / "look.md").write_text(text)
+    (outdir / "look.md").write_text(text, encoding="utf-8")
     return text
 
 
@@ -1084,7 +1084,7 @@ def measure_one(job):
     engine, ocr = ocr_engine()
     print(f"{p.stem} measuring", file=sys.stderr)
     r = measure_video(p, load_words(tdir, p.stem), ocr, face_detector(), engine, fps)
-    p.with_suffix(".look.json").write_text(json.dumps(r, default=float))
+    p.with_suffix(".look.json").write_text(json.dumps(r, default=float), encoding="utf-8")
     c = r["captions"]
     print(f"  {p.stem}: captions {c.get('present')} ({c['samples']} samples) y {c.get('y_pct')} "
           f"size {c.get('size_pct')} {c.get('color')}; graphics {r['graphics']['share_pct']}%", file=sys.stderr)
@@ -1103,12 +1103,12 @@ def cmd_measure(a):
             print(f"{p.stem} cached", file=sys.stderr)
     from parallel import pmap
     pmap(measure_one, [(p, outdir / "transcripts", a.fps) for p in todo])
-    rows = [json.loads(p.with_suffix(".look.json").read_text()) for p in vids]
-    visuals = [json.loads(p.read_text()) for p in sorted((outdir / "video").glob("*.visual.json"))]
+    rows = [json.loads(p.with_suffix(".look.json").read_text(encoding="utf-8")) for p in vids]
+    visuals = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((outdir / "video").glob("*.visual.json"))]
     sp = outdir / "style.json"
-    style = json.loads(sp.read_text()) if sp.exists() else {"handle": slug(a.handle)}
+    style = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"handle": slug(a.handle)}
     style.update(merge(rows, visuals, style))
-    sp.write_text(json.dumps(style, indent=2, default=float))
+    sp.write_text(json.dumps(style, indent=2, default=float), encoding="utf-8")
     print(write_summary(outdir))
     print(f"-> {sp}\n-> {outdir / 'look.md'}")
 

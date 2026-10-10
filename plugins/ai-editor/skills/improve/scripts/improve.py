@@ -28,7 +28,7 @@ SAME = 0.6     # rules this similar are the same feedback said again
 
 def jsonl(p):
     try:
-        return [json.loads(x) for x in Path(p).read_text().splitlines() if x.strip()]
+        return [json.loads(x) for x in Path(p).read_text(encoding="utf-8").splitlines() if x.strip()]
     except (OSError, ValueError):
         return []
 
@@ -39,7 +39,7 @@ def items(edits=(), gh=True):
     out = [{"source": "suggestion", "rule": r.get("rule", ""), "what": r.get("what", ""), "owner": r.get("owner", ""),
             "ref": r.get("example", "")} for r in sug]
     try:
-        rules = json.loads((HOME / "rules.json").read_text())
+        rules = json.loads((HOME / "rules.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         rules = []
     out += [{"source": "taste regression", "rule": r["rule"], "what": f"said again after it was applied ({len(r['regressions'])}x)",
@@ -65,7 +65,7 @@ def review_notes(edits, suggested):
     for d in edits:
         for f in sorted(Path(d).glob("*/review.json")):
             try:
-                rv = json.loads(f.read_text())
+                rv = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             for c in rv.get("comments", []):
@@ -102,12 +102,12 @@ def changelog(entry, root=None):
     if not (root / "plugins" / "ai-editor").is_dir():
         sys.exit(f"ERROR: {root} is not a checkout of the editor repo; run this from one")
     f = root / "CHANGELOG.md"
-    text = f.read_text() if f.exists() else "# Changelog\n\nWhat changed for every user, newest first.\n"
+    text = f.read_text(encoding="utf-8") if f.exists() else "# Changelog\n\nWhat changed for every user, newest first.\n"
     if "\n## Unreleased\n" not in text:
         head, sep, rest = text.partition("\n## ")
         text = head.rstrip() + "\n\n## Unreleased\n\n" + (sep.lstrip("\n") + rest if sep else "")
     text = text.replace("\n## Unreleased\n\n", f"\n## Unreleased\n\n- {entry.strip()}\n", 1)
-    f.write_text(text.rstrip() + "\n")
+    f.write_text(text.rstrip() + "\n", encoding="utf-8")
     return f
 
 
@@ -119,14 +119,14 @@ def demo():
         HOME.mkdir()
         (HOME / "suggestions.jsonl").write_text(
             json.dumps({"rule": "Zooms ease in over at least 0.5 s", "what": "snap", "owner": "quality.py", "example": ""}) + "\n"
-            + json.dumps({"rule": "Zooms ease in over at least half a second", "what": "jerk", "owner": "", "example": ""}) + "\n")
+            + json.dumps({"rule": "Zooms ease in over at least half a second", "what": "jerk", "owner": "", "example": ""}) + "\n", encoding="utf-8")
         (HOME / "rules.json").write_text(json.dumps([{"id": 3, "section": "Captions", "rule": "Captions bigger", "setting": "captions.size_pct",
                                                       "regressions": [{"edit": "a", "at": "x"}]},
-                                                     {"id": 4, "section": "Cut", "rule": "Tighter", "regressions": []}]))
+                                                     {"id": 4, "section": "Cut", "rule": "Tighter", "regressions": []}]), encoding="utf-8")
         ed = Path(t) / "edits" / "vid"
         ed.mkdir(parents=True)
         (ed / "corrections.jsonl").write_text(json.dumps({"change": "card.move", "target": "c1", "from": 1, "to": 2,
-                                                          "what": "zooms ease in over at least 0.5 s"}) + "\n")
+                                                          "what": "zooms ease in over at least 0.5 s"}) + "\n", encoding="utf-8")
         g = group(items([Path(t) / "edits"], gh=False))
         assert g[0]["count"] == 3 and g[0]["owner"] == "quality.py" and g[0]["sources"] == ["preview correction", "suggestion"], g[0]
         assert [x["rule"] for x in g[1:]] == ["Captions bigger"], g      # a rule never said twice is not feedback
@@ -134,7 +134,7 @@ def demo():
         # once), the same rule on two videos, a rule on one video only and a one-off fix
         def review(name, comments):
             (Path(t) / "clips" / name).mkdir(parents=True)
-            (Path(t) / "clips" / name / "review.json").write_text(json.dumps({"name": name, "comments": comments}))
+            (Path(t) / "clips" / name / "review.json").write_text(json.dumps({"name": name, "comments": comments}), encoding="utf-8")
         (HOME / "suggestions.jsonl").open("a").write(json.dumps({"rule": "Logos stay small", "note": hashlib.sha256(
             b"v2#2").hexdigest()[:12]}) + "\n")
         review("v1", [{"id": 1, "text": "captions are tiny", "rule": "Text readable on a small screen", "taste": 4},
@@ -151,7 +151,7 @@ def demo():
         (root / "plugins" / "ai-editor").mkdir(parents=True)
         changelog("quality.py: zooms faster than 0.5 s fail (demo assert)", root)
         f = changelog("record.mjs: create is on the deny list (tests/test_record.mjs)", root)
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         assert text.startswith("# Changelog") and text.count("## Unreleased") == 1, text
         assert text.index("record.mjs") < text.index("quality.py"), text      # newest first
         assert not (HOME / "taste.md").exists()

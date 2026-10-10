@@ -155,9 +155,9 @@ def cut_check(lab, cuts, spans, dur, final, has_video):
 def write_all(d, toks, cuts, spans, dur, final):
     d = Path(d)
     lab = label(toks, cuts, spans)
-    (d / "paper-edit.md").write_text(paper_edit(lab, cuts, dur, final))
+    (d / "paper-edit.md").write_text(paper_edit(lab, cuts, dur, final), encoding="utf-8")
     (d / "cut-check.html").write_text(cut_check(lab, cuts, spans, dur, final,
-                                                (d / "cut.mp4").exists()))
+                                                (d / "cut.mp4").exists()), encoding="utf-8")
 
 
 if __name__ == "__main__":
@@ -165,9 +165,9 @@ if __name__ == "__main__":
     if len(args) != 1:
         sys.exit(__doc__)
     d = Path(args[0])
-    rep = json.loads((d / "report.json").read_text())
+    rep = json.loads((d / "report.json").read_text(encoding="utf-8"))
     toks = [t for t in load_fitted(d) if t.get("type") in ("word", "audio_event")]
-    write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text()),
+    write_all(d, toks, rep["model_cuts"], json.loads((d / "decisions.json").read_text(encoding="utf-8")),
               rep["duration"], rep["final_s"])
     print(d / "paper-edit.md")
     print(d / "cut-check.html")

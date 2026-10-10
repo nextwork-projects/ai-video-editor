@@ -303,7 +303,7 @@ def load_fitted(d):
     words.json and verify_cut.py all judge, so the three agree."""
     toks = load_words(Path(d) / "words.raw.json")
     rep = Path(d) / "report.json"
-    labels = json.loads(rep.read_text()).get("labels", {}) if rep.exists() else {}
+    labels = json.loads(rep.read_text(encoding="utf-8")).get("labels", {}) if rep.exists() else {}
     return apply_labels(toks, {int(k): v for k, v in labels.items()})
 
 
@@ -622,7 +622,7 @@ def main():
     if not any(t["type"] == "word" for t in toks):
         sys.exit("ERROR: transcript has no words")
     sp = d / "spans.json"
-    spans_in = json.loads(sp.read_text()) if sp.exists() else []
+    spans_in = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else []
     resolve_spans(spans_in, toks)   # a bad quote fails before the audio is read
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -675,7 +675,7 @@ def main():
         frames, moved, left = fix_splices(frames, fps, lvl, noise, nframes, removed)
     lead = d / "lead.json"
     if lead.exists():   # split halfway into the pauses either side, so no word is halved
-        lc = resolve_spans([{**json.loads(lead.read_text()), "kind": "alt_hook"}], toks)[0]
+        lc = resolve_spans([{**json.loads(lead.read_text(encoding="utf-8")), "kind": "alt_hook"}], toks)[0]
         before = max([t["end"] for t in toks if t["end"] <= lc["start"]], default=0.0)
         after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
         frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
@@ -705,13 +705,13 @@ def main():
         c.pop("_next", None)
         if c["end"] == math.inf:
             c["end"] = dur
-    (d / "decisions.json").write_text(json.dumps(spans, indent=1))
+    (d / "decisions.json").write_text(json.dumps(spans, indent=1), encoding="utf-8")
     (d / "report.json").write_text(json.dumps(
         {"source": str(Path(a.source).resolve()), "fps": fps, "duration": dur, "final_s": final,
          "max_pause_s": max_pause, "frames": frames, "model_cuts": model_cuts, "cuts": allcuts,
          "labels": {str(i): v for i, v in labels.items()}, "splices_in_speech": left},
-        indent=1))
-    (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1))
+        indent=1), encoding="utf-8")
+    (d / "words.json").write_text(json.dumps(retime(words, spans), indent=1), encoding="utf-8")
     import preview_cut
     preview_cut.write_all(d, toks, model_cuts, spans, dur, final)
     for f in ("decisions.json", "report.json", "words.json", "paper-edit.md", "cut-check.html"):

@@ -120,7 +120,7 @@ def is_purple_blue(c):
 def presets(src=None):
     """look.tsx presets -> {name: {key: value}}, spreads resolved. Parsed, so it never drifts from the renderer."""
     try:
-        text = src if src is not None else LOOK_TSX.read_text()
+        text = src if src is not None else LOOK_TSX.read_text(encoding="utf-8")
     except OSError:
         return {}
     consts, named = {}, {}
@@ -563,9 +563,9 @@ def main():
         sys.exit(__doc__)
     edit = Path(a[0])
     opt = dict(zip(a[1::2], a[2::2]))
-    plan = json.loads((edit / opt.get("--plan", "plan.json")).read_text())
+    plan = json.loads((edit / opt.get("--plan", "plan.json")).read_text(encoding="utf-8"))
     vis = edit / opt.get("--visuals", "visuals.json")
-    found = check_plan(plan, json.loads(vis.read_text()) if vis.exists() else None)
+    found = check_plan(plan, json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else None)
     if "--stills" in opt:
         found += check_stills(edit / opt["--stills"], plan)
     for f in found:

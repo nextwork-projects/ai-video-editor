@@ -127,7 +127,7 @@ STATE = ("Excerpts from the transcript of one long video (a talk, tutorial or po
 # --- transcript ------------------------------------------------------------------
 
 def load_words(path):
-    d = json.loads(Path(path).read_text())
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
     toks = d["words"] if isinstance(d, dict) else d
     return [t for t in toks if t.get("type") in ("word", "audio_event")]
 
@@ -367,9 +367,9 @@ def candidates(d, lo=20, hi=40, speakers=1, style=None, top=8, key=None, canned=
         else:
             c["jev"], c["score"] = None, c["features_score"]
     short = shortlist(cands, top)
-    (d / "candidates.json").write_text(json.dumps(cands, indent=1))
-    (d / "shortlist.json").write_text(json.dumps(short, indent=1))
-    (d / "shortlist.md").write_text(shortlist_md(short, moves, jev_used=code == 0))
+    (d / "candidates.json").write_text(json.dumps(cands, indent=1), encoding="utf-8")
+    (d / "shortlist.json").write_text(json.dumps(short, indent=1), encoding="utf-8")
+    (d / "shortlist.md").write_text(shortlist_md(short, moves, jev_used=code == 0), encoding="utf-8")
     cost = usage["cost_usd"] if usage else round(est_tokens * jev.USD_PER_MTOK / 1e6, 4)
     print(f"{len(sents)} sentences, {len(cands)} candidates {lo}-{hi} s, {len(qs)} Jev questions "
           f"({'$%.4f' % cost if usage else 'about %d tokens, $%.4f with a key' % (est_tokens, cost)}); "
@@ -443,7 +443,7 @@ table{border-collapse:collapse;font-size:13px;width:100%}td{padding:2px 6px 2px 
 
 def page(d, recommend=()):
     d = Path(d)
-    short = json.loads((d / "shortlist.json").read_text())
+    short = json.loads((d / "shortlist.json").read_text(encoding="utf-8"))
     src = source(d)
     rec = list(recommend)
     order = [c for r in rec for c in short if c["id"] == r] + [c for c in short if c["id"] not in rec]
@@ -476,7 +476,7 @@ def page(d, recommend=()):
            f'<body><main><h1>Clip picks: {html.escape(d.name)}</h1><p class="sub">{len(order)} clips, best first. '
            f'The bold line is the hook. Pick in the question box in Claude Code.</p>{"".join(cards)}</main></body></html>')
     out = d / "picks.html"
-    out.write_text(doc)
+    out.write_text(doc, encoding="utf-8")
     print(f"{out} ({out.stat().st_size // 1024} KB)")
     return out
 
@@ -485,8 +485,8 @@ def page(d, recommend=()):
 
 def trim(d, ids, name=None, edits="edits"):
     d = Path(d)
-    cands = {c["id"]: c for c in json.loads((d / "candidates.json").read_text())}
-    raw = json.loads((d / "words.raw.json").read_text())
+    cands = {c["id"]: c for c in json.loads((d / "candidates.json").read_text(encoding="utf-8"))}
+    raw = json.loads((d / "words.raw.json").read_text(encoding="utf-8"))
     raw = raw["words"] if isinstance(raw, dict) else raw
     src = source(d)
     audio = is_audio(src)
@@ -509,7 +509,7 @@ def trim(d, ids, name=None, edits="edits"):
             words.pop(0)
         while words and words[-1]["type"] == "spacing":
             words.pop()
-        (e / "words.raw.json").write_text(json.dumps(words, indent=1))
+        (e / "words.raw.json").write_text(json.dumps(words, indent=1), encoding="utf-8")
         meta = {"from": str(d.resolve()), "id": cid, "start": a, "end": b, "hook": c["hook"]}
         if audio:   # no picture: the podcast's cover is the ground, the speaker's words the only text
             for old in e.glob("cover.*"):
@@ -520,7 +520,7 @@ def trim(d, ids, name=None, edits="edits"):
                                                       (COVER_PX, GROUND_W), (COVER_PX, GROUND_H))]
             meta |= {"audio_only": True, "cover": f"cover{cover.suffix.lower()}" if cover else None,
                      "cover_box": box, "captions": True}
-        (e / "clip.json").write_text(json.dumps(meta, indent=1))
+        (e / "clip.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
         if audio:
             subprocess.run(ground_cmd(src, a, b, cover, e / "source.mp4"), check=True)
         elif src:
@@ -600,7 +600,7 @@ def reframe(edit_dir):
                     "-preset", "fast", "-c:a", "copy", "-movflags", "+faststart", str(tmp)], check=True)
     src.replace(wide)
     tmp.replace(src)
-    (e / "reframe.json").write_text(json.dumps({"shots": shots, "crop_w": crop_w, "from": [w, h]}, indent=1))
+    (e / "reframe.json").write_text(json.dumps({"shots": shots, "crop_w": crop_w, "from": [w, h]}, indent=1), encoding="utf-8")
     print(f"{src}: {crop_w}x{h}, {len(shots)} shot(s), crop follows the head (wide original: {wide.name})")
 
 
@@ -665,7 +665,7 @@ def demo():
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp) / "talk"
         d.mkdir()
-        (d / "words.raw.json").write_text(json.dumps(toks))
+        (d / "words.raw.json").write_text(json.dumps(toks), encoding="utf-8")
         sents = sentences(load_words(d / "words.raw.json"))
         assert len(sents) == len(plan), (len(sents), len(plan))
         assert not opens({"text": "Mm-hmm."}) and not closes({"text": "and it would know- ..."})
@@ -682,36 +682,36 @@ def demo():
                 canned[f"c{n}_{k}"] = hi if planted else lo
         code = candidates(d, lo=15, hi=40, style=style, canned=canned, names=["Acme"])
         assert code == 0
-        cands = json.loads((d / "candidates.json").read_text())
+        cands = json.loads((d / "candidates.json").read_text(encoding="utf-8"))
         starts = {s["start"] for s in sents}
         ends = {s["end"] for s in sents}
         for c in cands:   # no clip starts or ends mid-thought, and every length is in range
             assert c["start"] in starts and c["end"] in ends and 15 <= c["dur"] <= 40, c
-        short = json.loads((d / "shortlist.json").read_text())
+        short = json.loads((d / "shortlist.json").read_text(encoding="utf-8"))
         assert short[0]["hook"].startswith("Why does") and "Acme" in short[0]["named"], short[0]
         assert short[0]["jev"]["what_works"] > 0.9 and short[0]["numbers"] >= 3
         for x in short:
             for y in short:
                 assert x is y or x["end"] <= y["start"] or x["start"] >= y["end"], "shortlist overlaps"
-        md = (d / "shortlist.md").read_text()
+        md = (d / "shortlist.md").read_text(encoding="utf-8")
         assert len(md) < 8000 and short[0]["id"] in md and chr(0x2014) not in md
         filler_starts = [c for c in cands if c["leans_back"]]
         assert filler_starts and all(c["features_score"] < short[0]["features_score"] for c in filler_starts)
-        assert json.loads(Path(d / "jev-usage.jsonl").read_text().splitlines()[-1])["cost_usd"] == 0
+        assert json.loads(Path(d / "jev-usage.jsonl").read_text(encoding="utf-8").splitlines()[-1])["cost_usd"] == 0
 
         # no key: features only, exit 4, same files
         assert candidates(d, lo=15, hi=40, style=style, names=["Acme"]) == 4
-        assert json.loads((d / "shortlist.json").read_text())[0]["jev"] is None
+        assert json.loads((d / "shortlist.json").read_text(encoding="utf-8"))[0]["jev"] is None
 
         # page without media still renders, recommended first
         candidates(d, lo=15, hi=40, style=style, canned=canned, names=["Acme"])
         rec = short[0]["id"]
-        p = page(d, [rec]).read_text()
+        p = page(d, [rec]).read_text(encoding="utf-8")
         assert "Recommended #1" in p and p.index(f">{rec}<") < p.index(f'>{short[1]["id"]}<') and "<video" not in p
 
         # trim: words re-timed to the clip, first word near 0, nothing past the end
         e = trim(d, [rec], edits=Path(tmp) / "edits")[0]
-        w = json.loads((e / "words.raw.json").read_text())
+        w = json.loads((e / "words.raw.json").read_text(encoding="utf-8"))
         words = [x for x in w if x["type"] == "word"]
         assert words[0]["text"] == "Why" and abs(words[0]["start"] - PAD_IN) < 1e-6
         assert words[-1]["end"] <= short[0]["end"] - short[0]["start"] + PAD_IN + PAD_OUT + 1e-6
@@ -750,13 +750,13 @@ def demo():
         subprocess.run(ff + ["-i", "color=c=0x3a6ea5:s=600x600", "-frames:v", "1", str(d / "cover.png")], check=True)
         ws = [{"text": t, "start": 0.5 + k * 0.5, "end": 0.9 + k * 0.5, "type": "word"}
               for k, t in enumerate("why does this work so well.".split())]
-        (d / "words.raw.json").write_text(json.dumps(ws))
-        (d / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.5, "end": 3.4, "hook": "why does this"}]))
+        (d / "words.raw.json").write_text(json.dumps(ws), encoding="utf-8")
+        (d / "candidates.json").write_text(json.dumps([{"id": "c0", "start": 0.5, "end": 3.4, "hook": "why does this"}]), encoding="utf-8")
         for has_cover in (True, False):
             if not has_cover:
                 (d / "cover.png").unlink()   # a sine has no embedded art: a black ground, never an invented one
             e = trim(d, ["c0"], edits=Path(td) / "edits")[0]
-            meta = json.loads((e / "clip.json").read_text())
+            meta = json.loads((e / "clip.json").read_text(encoding="utf-8"))
             assert meta["audio_only"] and meta["captions"] is True, meta
             assert (meta["cover"] == "cover.png") == has_cover == (e / "cover.png").exists(), meta
             got = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height", "-of",
@@ -791,9 +791,9 @@ def main():
         print(f"{dst} ({how})")
         return 0
     if a.cmd == "candidates":
-        style = json.loads(Path(a.style).read_text()) if a.style else None
+        style = json.loads(Path(a.style).read_text(encoding="utf-8")) if a.style else None
         prof = Path(os.environ.get("AI_EDITOR_HOME", Path.home() / ".ai-video-editor")) / "profile.json"
-        names = name_list(json.loads(prof.read_text()).get("names")) if prof.exists() else []
+        names = name_list(json.loads(prof.read_text(encoding="utf-8")).get("names")) if prof.exists() else []
         return candidates(a.clips_dir, a.min, a.max, a.speakers, style, a.top, keys.get("typesafe")[0], names=names)
     if a.cmd == "page":
         page(a.clips_dir, [x for x in a.recommend.split(",") if x])
