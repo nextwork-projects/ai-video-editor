@@ -619,7 +619,7 @@ def demo():
     vids = [{"id": str(i), "title": f"v{i}", "view_count": v, "duration": 30, "thumbnail": f"https://x/{i}.jpg"}
             for i, v in enumerate([1600000, 820000, 410000, 302000, 188000, 151000, 97000, 76000, 49000, 47000, 1000])]
     (td / "videos.json").write_text(json.dumps({"handle": "sample.creator", "platform": "tiktok", "count": 11,
-                                                "median_views": 151000, "ranked_by": "views", "videos": vids}))
+                                                "median_views": 151000, "ranked_by": "views", "videos": vids}), encoding="utf-8")
     calls = []
     globals()["run_doctor"] = lambda: update(lambda d: d.__setitem__("doctor", {"rows": doctor_rows(
         "ok   python               3.12.1 (need 3.10+)\nFIX  renderer             missing\n     run: x\n"
@@ -676,7 +676,7 @@ def demo():
         keys._get = real
     st = get("/state")
     assert st["keys"]["gemini"]["set"] and not st["keys"]["typesafe"]["set"]
-    assert secret not in state_path().read_text() and secret not in json.dumps(st), "a key reached state.json"
+    assert secret not in state_path().read_text(encoding="utf-8") and secret not in json.dumps(st), "a key reached state.json"
     assert keys.get("gemini")[0] == secret
     # the paste: a profile link names the platform; a bare name is a handle; a website is not a creator
     r = post("/lookup", {"text": "https://www.tiktok.com/@sample.creator"})
@@ -710,7 +710,7 @@ def demo():
                                                "zoom": {"kind": "punch", "per_min": 6.0, "scale": 1.12},
                                                "captions": {"present": True, "words_per_caption": 2, "y_pct": 62.4,
                                                             "case": "upper", "color": "#FFFFFF", "box": True,
-                                                            "box_color": "#000000", "entrance": "pop"}}))
+                                                            "box_color": "#000000", "entrance": "pop"}}), encoding="utf-8")
     m = get("/state")["jobs"][-1]["measured"]
     assert [x["big"] for x in m["tiles"]] == ["1.9 s", "1.12x", "186"], m["tiles"]
     assert m["rows"]["captions"].startswith("2 words at a time, 62% down") and "graphics" not in m["rows"], m["rows"]
@@ -718,7 +718,7 @@ def demo():
     t = get("/state")["jobs"][-1]
     assert t["state"] == "done" and t["result"]["reject"] and all(s["done"] for s in t["steps"])
     # the teardown page and its files only, never outside the creator's folder
-    (td / "teardown.html").write_text("<h1>t</h1>")
+    (td / "teardown.html").write_text("<h1>t</h1>", encoding="utf-8")
     assert urllib.request.urlopen(base + "/td/sample.creator/teardown.html?t=" + tok).read() == b"<h1>t</h1>"
     for bad in ("/td/sample.creator/../videos.json", "/td/sample.creator/%2e%2e/%2e%2e/x"):
         try:
