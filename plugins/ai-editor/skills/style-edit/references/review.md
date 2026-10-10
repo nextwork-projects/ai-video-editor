@@ -73,6 +73,9 @@ python3 "$R" edits/<name> status "rendering" --log edits/<name>/render.log
 `--log` shows the last `N/M` in that file as a progress bar (Remotion prints `Rendered 812/3255`), so
 write the render's output to a log. Never make up a percent.
 
+The page has a **Stop** button while Claude works. When the user presses it, the round's notes open
+again and the next `status` exits 3 with `STOPPED`: stop the work, say so in one line, run `wait`.
+
 Answer every note, then open the round with the new render:
 
 ```bash
@@ -109,7 +112,12 @@ the ones still in play again with `alt`.
 
 ## On the page
 
-Round tabs replay every earlier render. The timeline has a pin per note, and last round's notes
+The cut stage shows the transcript beside the video: every word, cut words and removed pauses struck
+through, the line playing now highlighted (built from `decisions.json` and `words.raw.json` when they
+add up to the video). The timeline is split at the cut points, or at `chapters.txt` on the edit, and
+the edit adds Cards / Zooms / Captions tracks from `plan.json`. A missing file leaves that part out.
+**Compare** plays an earlier round (or another version) beside this one, in sync. The **Rounds** tab
+replays every earlier render. The timeline has a pin per note, and last round's notes
 pinned where `--new-t` put them. A vertical render gets a **safe zone** button (`z`) that shades
 where the app's buttons and text sit (plan.py's `SAFE` for 9:16). The cut stage links to
 `cut-check.html` (the transcript, cut words struck through) when it exists. Shortcuts: space,

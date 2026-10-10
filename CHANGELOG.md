@@ -4,6 +4,14 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The review page is redesigned (direction B): a light stone page with a stage switch and a quiet
+  status line; on the cut, the transcript beside the video with cut words and pauses struck and the
+  line playing now highlighted; notes as bubbles with the frame, time and words, Claude's answers
+  and its work steps under them; a composer whose clock follows the playhead; a timeline split at
+  cut points or chapters with numbered note pins, and Cards / Zooms / Captions tracks on the edit;
+  Compare plays two rounds side by side; Stop while Claude works; a bottom sheet on phones.
+  `review.py` writes `review/data-<stage><round>.json` for it. Test: `review.py demo`.
+
 ## ai-editor 2.2.0 (2026-10-09)
 
 - Review-page notes now reach your taste. After send or approve, Claude picks the notes that are
