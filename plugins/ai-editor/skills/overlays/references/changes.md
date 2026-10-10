@@ -42,25 +42,32 @@ filled the gap, a dropped one can add one. `edit.py patch` renders those spans t
 ## A diagram
 
 How something works ("it takes the reference video and builds the style"), drawn as a `flow`:
-white node cards, each with a real picture and a label of the speaker's words, wires that draw, a
-packet that runs a wire and lands on each node's word. On 9:16 a flow is a full-frame scene with a
-transition from the speaker's face.
+white node cards over the footage, each with a real picture and a label of the speaker's words, wires
+that draw, a packet that runs a wire and lands on each node's word. It is an overlay in the band
+beside or above the head: the speaker stays on screen. Real screenshots and UI come first (shapes.md
+order); a diagram is for a mechanism the words describe that no single screen shows.
 
 ```json
-{"word": "reference", "nth": 1, "kind": "anim", "type": "flow", "hold_s": 1.9,
- "props": {"nodes": [{"logo": "youtube", "label": "reference video", "word": "reference"},
-                     {"logo": "github", "label": "created the style", "word": "created"}]}}
+{"word": "reference", "nth": 1, "kind": "anim", "type": "flow", "hold_s": 2.0,
+ "props": {"nodes": [{"logo": "youtube", "label": "reference", "word": "reference"},
+                     {"src": "images/capture-gh-ai-video-editor-avatar.png", "label": "created the style", "word": "created"}]}}
 ```
 
+- Each node is a thing the words name, in the order they are said: "a reference video" is the
+  video's source, "it created the style" is the editor itself. Never a brand that only sits near the
+  topic, and never a logo standing for a word it is not ("the style" under a GitHub logo).
 - Every node is a real logo (`{"logo": "brand"}`, plus `"domain"` when Simple Icons may lack it) or a
-  file in `images/` (`"src": "images/capture-....png"`, a capture or the user's own image). Never an
-  icon alone, never emoji, never a node with a label and no picture.
+  file in `images/` (a capture or the user's own image). A wide capture shrinks to nothing in a node:
+  crop the part that names it (the repo's avatar, the app's icon) into its own file in `images/`.
+  Never an icon alone, never emoji, never a node with a label and no picture.
 - Labels are a few of the speaker's own words. No number, name or step the speaker did not say.
-- One node per thing named, in the order they are said; 2-4 nodes read on a phone, 6 at most.
-  Options off the last node go in `split`; inputs that feed a node in `tasks`.
+- 2-3 nodes with short labels: the overlay band is about 72% of a vertical frame wide, and
+  `check.py plan` FAILs a flow that draws under 60% of the width or off centre. Shorten labels or
+  drop a node before anything else.
 - Each node's `word` is said while the diagram is up; `hold_s` reaches past the last one by about 0.4 s.
-- The diagram must not run into the next card. A logo within 0.5 s of a scene is dropped (plan.py
-  warns): shorten `hold_s` until the scene ends 0.5 s before it.
+- A full-frame scene (`"layout": "scene"`) only when the user asks for one. `check.py plan` FAILs a
+  scene no beat asked for. In an asked scene the captions fade out while the board shows the same words.
+  A logo within 0.5 s of a scene is dropped (plan.py warns).
 - `accent`: the destination's real brand colour, or leave it unset.
 
 Run `capture.mjs` (it fetches every `logo` inside the props), then plan.

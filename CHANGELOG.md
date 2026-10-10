@@ -19,6 +19,16 @@ What changed for every user, newest first.
     (`Scene.tsx`, `plan.py`), and a diagram in it still draws on the scene's own ground.
   - A logo within 0.5 s of a scene was dropped without a word. plan.py now warns and says to end the
     scene sooner.
+- A `flow` diagram is now an overlay in the band beside or above the head on vertical too, so the
+  speaker stays on screen. It was a full-frame white board. A full-frame scene comes only from a beat
+  with `"layout": "scene"`, and `check.py plan` FAILs a scene no beat asked for. Tests: `plan.py demo`,
+  `check.py demo`.
+- In a scene the user asked for, captions that the board already shows fade out and back in over
+  0.24 s. They vanished in one frame (`check.py render`: "the picture jumps in one frame").
+  Test: `tests/test_record.mjs` (`captionFade`).
+- Sound cues start on the frame the renderer plays them. A cue between frames played up to half a
+  frame early, so the cue check missed most of a short pop ("pop cue -28 dB: not heard"). Test:
+  `plan.py demo`.
 
 ## ai-editor 2.2.0 (2026-10-09)
 

@@ -77,9 +77,10 @@ lands late): `references/changes.md` "Requests".
 
 **New visuals** (an animation, a diagram, a real page): pick the format from what is said, in
 style-edit's order (`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/shapes.md`): the user's own
-asset, the real thing captured, UI rebuilt from real parts, real logos. A diagram is a `flow` of real
-logos or capture files that lights each part on its spoken word (`references/changes.md` "A
-diagram"); never a text panel, a type card or stock icons. With several new beats, fan out: one
+asset, the real thing captured, UI rebuilt from real parts, real logos. A diagram is a `flow` of the
+real logos or captures the words name, lighting each part on its spoken word, as an overlay beside or
+above the head: the speaker stays on screen (`references/changes.md` "A diagram"). Never a text
+panel, a type card, stock icons, or a full-frame scene the user did not ask for. With several new beats, fan out: one
 `template-filler` agent per beat, all in ONE message, each given the edit folder, its sentence, its
 pick, the word it lands on, the full path of style-edit's `references/shapes.md`, and its own output
 file `edits/<name>/visuals.fill-<n>.json`. Then one `beat --add` with every file. One new beat:
@@ -116,7 +117,8 @@ card is judged on. Give each changed card its range (from `plan.py cards`), and 
 before and after it. Writes `stills-at/` and `stills-at/sheet.png`, each tile labelled with its time
 and the card up. Review the sheet; hand it to the `stills-critic` agent too and compare its blind
 `reads_as` with what the beat should show. Fix before going on: a card on the face, under the
-caption or the app's buttons, text too small for a phone, the wrong part of a page, an AI look.
+caption or the app's buttons, text too small for a phone, the wrong part of a page, an AI look,
+the speaker gone from the frame (a full-frame scene nobody asked for).
 
 - **A fix** (move, resize, swap, drop): go on to step 5.
 - **New visuals** (an animation, a diagram, a new page): show the sheet and ask in the question box:

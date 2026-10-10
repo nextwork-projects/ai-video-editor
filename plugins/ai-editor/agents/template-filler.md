@@ -31,6 +31,9 @@ Rules:
    `{"icon": ...}`, never emoji.
 5. A sticker gets no `crop`: capture.mjs cuts the sentence that holds its first mark.
 6. Set `hold_s` so the card is still up on its last word.
+7. A `flow` is an overlay over the footage: never set `"layout": "scene"` unless the caller says the user
+   asked for a full-frame scene. Each node is a thing the sentence names, in spoken order, 2-3 nodes,
+   labels of 1-3 of the speaker's words.
 
 Write the entries to the file the caller names (default `edits/<name>/visuals.fill.json`) as a JSON
 list, then return only that path and the number of entries. Do not edit any other file.
