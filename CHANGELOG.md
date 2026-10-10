@@ -24,6 +24,14 @@ What changed for every user, newest first.
     as "quote is not in the paper edit": the paper lost its `<<n>>` markers before matching and the
     quote kept them. Both now drop them. The judge's paper edit labels its lengths as words only, and
     adds the last build's real lengths and its CLIPPED line from `paper-edit.md`. Test: `judge_cut.py demo`.
+  - A stretched word label that starts on the previous word's tail is fitted after the silence
+    inside it. The real take's "if" (labelled 192.75-193.41 s, said at 193.30 s) was fitted onto
+    "you", fell in a pause cut and showed as CLIPPED at any `--pad`. Test: `test_build_timeline.py`.
+  - `verify_cut.py` no longer prints a SURVIVED span that would cut words of a kept line. It says a
+    word label is off instead. On the real take it had offered a span that cut "better. if you".
+    Test: `verify_cut.py demo`.
+  - A kept span under 0.2 s at the head of the take is dropped. `decisions.json` had started with a
+    one-frame flash (0.0-0.033 s) and a jump to 0.43 s. Test: `test_build_timeline.py`.
 - Several takes of one video. When the user hands over two or more files, the editor asks in the
   question box whether they are one video (in the order the user gave them) or separate videos.
   For one video, `cut/scripts/join.py` joins them into `edits/<name>/joined.mp4` before transcription,

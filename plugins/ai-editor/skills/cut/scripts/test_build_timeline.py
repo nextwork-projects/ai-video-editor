@@ -109,6 +109,25 @@ def test_stretched_label_is_not_clipped():
     assert md.split("## What plays")[1].split("## Cuts")[0].split("\n")[-3] == "so if you", md
 
 
+def test_label_after_the_previous_words_tail():
+    """The real take: "you" 192.63-192.75 then "if" labelled 192.75-193.41. The audio: "you" sounds to
+    192.86, silence to 193.30, "if" at 193.30. Fitted from its label start, "if" landed on the tail of
+    "you", fell in the pause cut and was CLIPPED whatever the --pad. It is fitted after the silence."""
+    words = [{"text": "you", "start": 192.63, "end": 192.75, "type": "word"},
+             {"text": "if", "start": 192.75, "end": 193.41, "type": "word"},
+             {"text": "you", "start": 193.41, "end": 193.51, "type": "word"}]
+    loud = [(192.58, 192.86), (193.30, 193.60)]
+    lvl = [-20.0 if any(a <= i * B.RMS_WIN_S < b for a, b in loud) else -60.0 for i in range(int(194 / B.RMS_WIN_S))]
+    got = B.fit_labels(words, lvl, -40.0)
+    assert list(got) == [1] and 193.2 <= got[1][0] < got[1][1] <= 193.41, got
+
+
+def test_no_head_sliver():
+    """decisions.json started [0.0, 0.033] then [0.434, ...]: a one-frame flash, then a jump."""
+    frames = B.kept_frames([{"start": 0.05, "end": 0.43}, {"start": 3.0, "end": math.inf}], 30, 4.0)
+    assert frames == [[13, 90]], frames
+    assert B.kept_frames([{"start": 0.5, "end": 1.0}], 30, 2.0) == [[0, 15], [30, 60]]   # a real head stays
+
 
 def test_hidden_repeat_is_listed_and_shown():
     """The sample: Whisper labels "content" 117.07-119.01 s over "and to break down competitor ads and"
@@ -168,6 +187,8 @@ if __name__ == "__main__":
     test_spans()
     test_frames_and_retime()
     test_stretched_label_is_not_clipped()
+    test_label_after_the_previous_words_tail()
+    test_no_head_sliver()
     test_hidden_repeat_is_listed_and_shown()
     test_splice_never_reaches_a_removed_word()
     print("all ok")
