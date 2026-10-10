@@ -48,6 +48,15 @@ https://gsap.com/standard-license. They are installed from npm, not vendored.
 https://github.com/remotion-dev/remotion/blob/main/LICENSE.md (free for individuals and small
 companies; larger companies need a company license).
 
+## Fonts from Google Fonts (SIL Open Font License 1.1 and others), loaded at render time, not shipped
+
+The renderer loads its faces through `@remotion/google-fonts` from fonts.gstatic.com while it renders:
+IBM Plex Sans, Newsreader, Instrument Serif, Inter, and TikTok Sans for the default captions
+(https://fonts.google.com/specimen/TikTok+Sans; Copyright 2024 TikTok Inc., https://github.com/tiktok/TikTokSans;
+SIL Open Font License 1.1, https://openfontlicense.org). Each face keeps its own licence, listed on its
+Google Fonts page. No font files are part of this repository; a rendered video carries the glyphs, which
+the OFL allows.
+
 ## LottieFiles motion-design-skill (MIT)
 
 `plugins/ai-editor/skills/motion-design/` is vendored from https://github.com/lottiefiles/motion-design-skill

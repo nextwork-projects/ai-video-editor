@@ -3,7 +3,7 @@
 // restrained editorial look: warm paper, near-black ink, one vermilion accent, a grotesk that does the
 // work and a serif for the odd italic word. Real logos and real images carry the visuals.
 import React, { useEffect, useState } from "react";
-import { continueRender, delayRender, useCurrentFrame } from "remotion";
+import { cancelRender, continueRender, delayRender, useCurrentFrame } from "remotion";
 import { getAvailableFonts } from "@remotion/google-fonts";
 
 export type Look = {
@@ -98,7 +98,9 @@ export const shadowOf = (look: Look, u: number) =>
 
 // ---------- fonts ----------
 // No font named, or one Google Fonts does not have: Inter. system-ui is SF Pro on a Mac and another
-// font on the Linux render machines, so the stills and a cloud render would differ.
+// font on the Linux render machines, so the stills and a cloud render would differ. check.py names a font
+// Google Fonts does not have (font_findings). A font that is there but fails to load stops the render with
+// its name: drawing system-ui, or no captions, in its place would pass unseen.
 const FALLBACK = "Inter";
 const cache = new Map<string, Promise<string>>();
 export const loadFamily = (name: string | undefined, weights: number[]): Promise<string> => {
@@ -112,6 +114,9 @@ export const loadFamily = (name: string | undefined, weights: number[]): Promise
       const loaded = font.loadFont("normal", { weights: [...new Set(weights.map((w) => String(near(w))))], subsets: ["latin"] });
       await loaded.waitUntilDone();
       return `'${loaded.fontFamily}', system-ui, sans-serif`;
+    }).catch((e) => {
+      cancelRender(new Error(`font '${entry.fontFamily}' did not load: ${e?.message ?? e}`));
+      throw e;
     }));
   }
   return cache.get(key)!;

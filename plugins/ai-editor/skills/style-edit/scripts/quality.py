@@ -1127,6 +1127,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         meas["caption_contrast"] = {"worst": lo[0], "at": round(lo[1], 2), "median": float(np.median([c for c, _ in worst_cap])),
                                     "samples": len(worst_cap)}
         meas["caption_contrast"]["low_at"] = [round(t, 2) for c, t in worst_cap if c < CONTRAST_TARGET]
+        meas["caption_contrast"]["fail_at"] = [round(t, 2) for c, t in worst_cap if c < CONTRAST_FAIL]
         bad = [x for x in worst_cap if x[0] < CONTRAST_WARN]
         if bad:
             out.append(F("FAIL" if lo[0] < CONTRAST_FAIL else "WARN", lo[1],

@@ -469,6 +469,7 @@ def check_stills(stills, plan):
 def demo():
     import cv2
     import numpy as np
+    assert "tiktok sans" not in GROTESK, "the default plain captions' face is not a tell"
     tsx = '''const EDITORIAL: Look = { preset: "editorial", ground: "#F2EEE6", accent: "#E5482C", surface: "card",
       font: "Archivo", font_display: "Newsreader" };
     const NEUTRAL: Look = { ...EDITORIAL, preset: "neutral", ground: "#FFFFFF", accent: "#0D0D0D", font: "Geist" };
