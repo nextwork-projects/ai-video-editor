@@ -252,6 +252,14 @@ def read_alpha(path, frame, w, h):
     return cv2.imread(str(Path(path) / f"{frame:06d}.png"), cv2.IMREAD_UNCHANGED)[..., 3] / 255.0
 
 
+def move_hint(c):
+    """The field that moves or shrinks a behind card: its beat's "box" (images.json for the user's picture)."""
+    word = c.get("trigger_word") or f"{c['start']:.1f} s"
+    where = "images.json" if str(c.get("src") or "").startswith("images/") and not c.get("format") else "visuals.json"
+    return (f"move or shrink it: give the '{word}' beat a smaller \"box\": [x, y, w, h] (% of the frame) in {where}, "
+            "beside the head or higher, or plan with --behind off")
+
+
 def verify(plan, edit, w, h):
     """Per behind card: how much of its key region (plan.py's "key") the person covers, and that the
     face is solid (a hole in the matte would let the card show through the face)."""
@@ -272,7 +280,7 @@ def verify(plan, edit, w, h):
             msg.append(f"key region {100 * cov:.0f}% behind the speaker")
             if cov > 0.05:
                 bad += 1
-                msg[-1] += " (WARNING: over 5%, move or shrink the card)"
+                msg[-1] += f" (WARNING: over 5%; {move_hint(c)})"
         hd = face and min(face["heads"], key=lambda x: abs(x["t"] - t))["box"]
         if hd:   # the face itself: the middle of the head box
             x, y, hw, hh = hd
@@ -281,7 +289,7 @@ def verify(plan, edit, w, h):
             msg.append(f"face {100 * solid:.0f}% solid")
             if solid < 0.97:
                 bad += 1
-                msg[-1] += " (WARNING: the card would show through the face)"
+                msg[-1] += f" (WARNING: the card would show through the face; {move_hint(c)})"
         print(f"  {c.get('trigger_word') or c['start']}: " + ", ".join(msg))
     return bad
 
@@ -400,7 +408,7 @@ def main():
     plan_path.write_text(json.dumps(plan, indent=1))
     print(f"{plan_path}: {len(cutouts)} cutouts")
     if verify(plan, edit, w, h):
-        print("Read every WARNING above: shrink or move that card in visuals.json, plan again, matte again.")
+        print("Read every WARNING above: change that beat's \"box\" as it says, then plan.py and matte.py again.")
 
 
 def demo():
@@ -448,6 +456,24 @@ def demo():
     assert abs(stabilise(cams, alphas, 2, cv2, np)[5, 5] - 0.8) < 1e-6
     cams[0] = np.full((10, 10, 3), 200, np.uint8)
     assert abs(stabilise(cams, alphas, 2, cv2, np)[5, 5] - 0.1) < 1e-6
+    # a WARNING names the field that moves the card (the real-footage test's warning named none)
+    with tempfile.TemporaryDirectory() as t:
+        e = Path(t)
+        a = np.full((192, 108, 4), 255, np.uint8)
+        a[60:70, 50:58, 3] = 0                                     # a hole in the face
+        (e / "cut").mkdir()
+        cv2.imwrite(str(e / "cut" / "000045.png"), a)
+        (e / "face.json").write_text(json.dumps({"heads": [{"t": 1.5, "box": [30, 25, 40, 20]}]}))
+        pl = {"fps": 30, "cutouts": [{"src": "cut", "from": 0, "to": 90}],
+              "cards": [{"layer": "behind", "start": 1.0, "end": 2.0, "trigger_word": "repo", "src": "images/capture-x.png",
+                         "format": "shot"}]}
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert verify(pl, e, 108, 192) == 1
+        assert "through the face" in buf.getvalue() and "'repo' beat" in buf.getvalue() and '"box"' in buf.getvalue() \
+            and "visuals.json" in buf.getvalue(), buf.getvalue()
+        assert "images.json" in move_hint({"start": 1, "src": "images/dashboard.png"})
     # The Modal image installs the lock's pins (hashes and all), never an unpinned package.
     import re
     import tempfile

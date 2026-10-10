@@ -95,7 +95,9 @@ python3 "$VPY" "$S/matte.py" edits/<name> [--plan plan.json] [--modal]
 
 It writes `edits/<name>/cutout/<size>-<key>/` (RGBA PNGs named by their frame of the cut, about
 0.5 MB a frame; the key changes with cut.mp4) and the plan's `cutouts`, then prints, per card, how much of its key region the speaker covers and that the face
-is solid. On a `WARNING`, shrink or move that card. Laptop CPU: about 0.2-0.5 s a frame (free).
+is solid. On a `WARNING`, shrink or move that card: give its beat a smaller `"box": [x, y, w, h]` (% of
+the frame) beside the head or higher, in visuals.json (images.json for the user's own picture), then
+plan.py and matte.py again; or plan with `--behind off`. Laptop CPU: about 0.2-0.5 s a frame (free).
 `--modal` runs each range on its own Modal CPU container (8 cores). The estimate is Modal's listed
 rates times the laptop's 0.26 s a frame: about $0.00003 a frame, $0.06 per minute of behind-card time;
 the run then prints the cost from the containers' own run time. `--estimate` prints
