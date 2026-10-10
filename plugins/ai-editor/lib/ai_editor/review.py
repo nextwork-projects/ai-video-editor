@@ -803,8 +803,8 @@ def demo():
     # the cut's transcript: kept words on the cut's timeline, the cut word struck, the removed pause a chip
     (folder / "words.raw.json").write_text(json.dumps([
         {"text": "hello", "start": 0.0, "end": 0.4, "type": "word"}, {"text": "um,", "start": 0.5, "end": 0.8, "type": "word"},
-        {"text": "world.", "start": 2.0, "end": 2.5, "type": "word"}, {"text": "later", "start": 3.0, "end": 9.0, "type": "word"}]))
-    (folder / "decisions.json").write_text(json.dumps([{"start": 0.0, "end": 0.45}, {"start": 1.95, "end": 7.5}]))
+        {"text": "world.", "start": 2.0, "end": 2.5, "type": "word"}, {"text": "later", "start": 3.0, "end": 9.0, "type": "word"}]), encoding="utf-8")
+    (folder / "decisions.json").write_text(json.dumps([{"start": 0.0, "end": 0.45}, {"start": 1.95, "end": 7.5}]), encoding="utf-8")
     tx = cut_transcript(folder, 6.0)
     toks = [x for ln in tx["lines"] for x in ln["tokens"]]
     assert toks == [{"w": "hello", "t": 0.0}, {"w": "um,", "t": None}, {"p": 1.1}, {"w": "world.", "t": 0.5},
