@@ -162,7 +162,7 @@ Five prompts, each one the user can paste into Claude Code as it is. Every numbe
 
 ### `JOB video <path> as=<mine|@handle|defaults> aspect=<9:16|16:9> edit=<dir> root=<dir>`
 ### `JOB video takes=<dir>/takes.txt as=... aspect=... edit=<dir> root=<dir>`
-### either one with ` script=<edit>/script.md`, ` skill=<skill>`, ` chain=<steps>`, ` sample=1` and/or ` assets=<edit>/assets.json` before `root=`
+### either one with ` script=<edit>/script.md`, ` skill=<skill>`, ` chain=<steps>`, ` sample=1`, ` assets=<edit>/assets.json`, ` broll=<edit>/broll.json`, ` instructions=<edit>/instructions.md` and/or ` mode=broll-reel` before `root=`
 
 The user picked clips and a style and pressed "Make my video" (or "Start the cut" on a first run).
 `edit=` is the edit folder the page already made and listed in the library: use it, never make
@@ -194,6 +194,15 @@ skill this session doesn't have as the Skill style section does.
 "Anything to add?", and review.py `wait` then prints an `assets:` line). Images are in `<edit>/assets/`. Hand the
 file to visual-prep and style-edit: each item goes in first, as a card on its `say` words (else the line it is
 about), before anything is searched for.
+`instructions=`: the page's "Additional instructions for Claude", the user's own words about this video. Read the file
+before the cut and follow it through every step (the cut, the edit, b-roll, captions, length); it beats a default,
+never a rule in `PRINCIPLES.md`. Say on the page what you did with it.
+`mode=broll-reel`: the user pasted a reel on New video to copy onto their b-roll ("Copy a reel"). The clip is that reel.
+No cut and no style-edit: run the broll-reel skill (`skills/broll-reel/SKILL.md`) on `edit=`, with the job's `broll=` and
+`instructions=`. The editor is already open on the reel at the edit stage.
+`broll=`: the page's B-roll ticks (`broll.py`): `{"auto", "libraries": [{"name", "folder"}]}`. Hand it to visual-prep
+and style-edit. `"auto": true` ("Claude decides") lists every library: use the ones this video fits (none fits: no
+b-roll). `"auto": false`: only the ticked libraries. No `broll=`: no b-roll from the user's folders.
 
 The page already opened the editor on the raw clip when the user pressed Make my video (round 0, "Your
 clip, before the cut", `review.json` is there) and lists every step of the cut beside it, ticked as the

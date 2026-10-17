@@ -85,6 +85,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import askhook  # noqa: E402
 import assets  # noqa: E402
+import broll  # noqa: E402
 import custom  # noqa: E402
 import keys  # noqa: E402
 import library  # noqa: E402
@@ -1641,7 +1642,10 @@ def job_line(j, root):
         return f"JOB video {src} as={a['as']} aspect={a['aspect']}" + (f" edit={a['edit']}" if a.get("edit") else "") + \
             (f" script={a['script']}" if a.get("script") else "") + (f" skill={a['skill']}" if a.get("skill") else "") + \
             (f" chain={a['chain']}" if a.get("chain") else "") + (" sample=1" if a.get("sample") else "") + \
-            (f" assets={Path(a['edit']) / 'assets.json'}" if a.get("edit") and (Path(a["edit"]) / "assets.json").exists() else "") + f" root={root}"
+            (f" assets={Path(a['edit']) / 'assets.json'}" if a.get("edit") and (Path(a["edit"]) / "assets.json").exists() else "") + \
+            (f" broll={a['broll']}" if a.get("broll") else "") + (f" instructions={a['instructions']}" if a.get("instructions") else "") + \
+            (f" mode={a['mode']}" if a.get("mode") else "") + \
+            f" root={root}"
     if j["type"] == "skill-change":
         return f"JOB skill-change {a['skill']} path={a['path']} text={a['text']}"
     if j["type"] == "skill-new":
@@ -2046,6 +2050,16 @@ def make_handler(token):
                     dict(r, duration=m["duration"], vertical=bool(m["h"] and m["w"] and m["h"] > m["w"]),
                          raw=not is_output(Path(r["path"]).resolve(), eds),
                          thumb=f"/thumb?p={quote(r['path'])}&m={int(r['mtime'])}") for r, m in zip(rs, ms)]})
+            if path == "/broll":   # New video's B-roll: the saved libraries and the Drive app's mounts
+                rows = broll.listing()
+                return self.send(200, {"libraries": [dict(r, thumb=f"/thumb?p={quote(r['first'])}" if r["first"] else "") for r in rows],
+                                       "drives": broll.drives()})
+            if path == "/broll/browse":   # one level of a Drive folder, for Connect a folder
+                f = Path(q.get("p", [""])[0])
+                roots = [Path(x["path"]) for x in broll.drives()]
+                if not any(f == r or r in f.parents for r in roots) or not f.is_dir():
+                    return self.send(404, {"msg": "That folder is not in Google Drive."})
+                return self.send(200, broll.browse(f))
             if path == "/motion/thumb":   # a saved motion clip's thumbnail
                 try:
                     mid = q.get("id", [""])[0]
@@ -2424,6 +2438,22 @@ def make_handler(token):
                     return self.send(200, {"ok": False, "msg": "It could not be moved to the Trash."})
                 update(lambda d: d.__setitem__("picked", [x for x in d.get("picked") or [] if Path(x).resolve() != f]))
                 return self.send(200, {"ok": True})
+            if path == "/reel/fetch":   # New video's "Copy a reel": the reel into the library, as a clip the page picks
+                url = str(body.get("url") or "").strip()
+                it = links.classify(url) if url else {"kind": ""}
+                if it["kind"] not in ("video", "own"):
+                    return self.send(400, {"ok": False, "msg": "Paste a link to one reel or TikTok video."})
+                d = Path(read()["root"]) / "videos" / "reels" / links._slug(urlsplit(url).path.rstrip("/").split("/")[-1] or "reel")
+                d.mkdir(parents=True, exist_ok=True)
+                code, msg = links.fetch(url, d, cookies="chrome" if body.get("cookies") is True else None, max_height=1920)
+                if code:
+                    return self.send(200, {"ok": False, "code": code, "msg": msg})
+                m = library.meta(msg)
+                return self.send(200, {"ok": True, "path": msg, "name": d.name, "duration": m["duration"],
+                                       "thumb": f"/thumb?p={quote(msg)}"})
+            if path == "/broll/add":   # Connect a folder: a Drive folder picked in the browser, or a path typed in
+                err = broll.add(body.get("name"), body.get("folder"))
+                return self.send(400 if err else 200, {"ok": not err, "msg": err})
             if path == "/scanhome":   # the one-time opt-in: recent clips from Movies, Desktop and Downloads
                 update(lambda d: d.__setitem__("scan_home", body.get("on") is True))
                 return self.send(200, {})
@@ -2603,6 +2633,9 @@ def make_handler(token):
             adds = [x for x in b.get("assets") or [] if isinstance(x, dict)][:askhook.MAX_IMAGES + assets.MAX_LINKS]
             if sum(bool(x.get("image")) for x in adds) > askhook.MAX_IMAGES:
                 return self.send(400, {"ok": False, "msg": f"{askhook.MAX_IMAGES} images at most."})
+            reel = b.get("mode") == "broll-reel"   # a reel to copy onto the user's b-roll (broll-reel skill)
+            if reel and (len(ps) != 1 or not broll.libraries()):
+                return self.send(400, {"ok": False, "msg": "Connect a b-roll folder first." if len(ps) == 1 else "Copy one reel at a time."})
             groups = [ps] if b.get("join") and len(ps) > 1 else [[p] for p in ps]
             ids, edits = [], []
 
@@ -2614,7 +2647,8 @@ def make_handler(token):
             # the same clips in the same style while their video waits for its Claude (Make pressed again because that
             # Terminal window did not start): that video again, never a second job and a second Claude
             making = {tuple(j["args"].get("paths") or [j["args"].get("path")]): j for j in d["jobs"]
-                      if j["type"] == "video" and j["state"] == "queued" and j["args"].get("as") == style}
+                      if j["type"] == "video" and j["state"] == "queued" and j["args"].get("as") == style
+                      and j["args"].get("mode") == ("broll-reel" if reel else None)}
             again = []
             for g in groups:
                 same = making.get(tuple(p["path"] for p in g))
@@ -2622,10 +2656,14 @@ def make_handler(token):
                     ids.append(same["id"])
                     edits.append(same["args"]["edit"])
                     again.append(same["id"])
+                    extra = broll.brief(same["args"]["edit"], [str(x) for x in b.get("broll") or []], b.get("note"), b.get("broll_auto") is True)
+                    if extra:   # the B-roll and instructions of this press, not only the first one's
+                        update(lambda d, i=same["id"], x=extra: next(j for j in d["jobs"] if j["id"] == i)["args"].update(x))
                     continue
                 edit = new_edit(Path(d["root"]), SAMPLE_NAME if sample else g[0]["name"])
-                args = {"path": g[0]["path"], "paths": [p["path"] for p in g], "as": style, "aspect": aspect, "edit": str(edit),
-                        **({"skill": skill} if skill else {}), **({"chain": chain} if chain else {})}
+                args = {"path": g[0]["path"], "paths": [p["path"] for p in g], "as": style, "aspect": "9:16" if reel else aspect,
+                        "edit": str(edit), **({"skill": skill} if skill else {}), **({"chain": chain} if chain else {}),
+                        **({"mode": "broll-reel"} if reel else {})}
                 if len(g) > 1:
                     t = edit / "takes.txt"
                     t.write_text("\n".join(p["path"] for p in g) + "\n", encoding="utf-8")
@@ -2634,6 +2672,7 @@ def make_handler(token):
                     (edit / "script.md").write_text(script + "\n", encoding="utf-8")
                     args["script"] = str(edit / "script.md")
                 assets.add(edit, adds)   # "Add images or links": edit/assets/ + assets.json, before the job line is read
+                args.update(broll.brief(edit, [str(x) for x in b.get("broll") or []], b.get("note"), b.get("broll_auto") is True))   # B-roll ticks + Additional instructions
                 if not sample:   # the style the user picked, in the edit before any Claude takes it (the sample ships its own)
                     seed_style(args, d["root"])
                 if sample:   # its transcript, cut, style and visuals, so Claude skips transcribing, deciding and judging
@@ -2646,7 +2685,7 @@ def make_handler(token):
                 ids.append(update(lambda d: queue(d, "video", args))["id"])
                 edits.append(str(edit))
                 # the editor opens at once on the clip (round 0, "The cut / your clip"); Claude's cut lands there
-                subprocess.run([sys.executable, str(REVIEW), str(edit), "start", "--raw", "--video", g[0]["path"], "--stage", "cut"],
+                subprocess.run([sys.executable, str(REVIEW), str(edit), "start", "--raw", "--video", g[0]["path"], "--stage", "edit" if reel else "cut"],
                                capture_output=True, timeout=60)
                 if sample:   # its name in Your videos and on the editor
                     rj = edit / "review.json"
@@ -3414,6 +3453,31 @@ def demo():
         assert [x.get("url") or x["name"] for x in items] == ["https://github.com/a/b", "chart.png", "big.png"], items
         assert items[0]["site"] == "github" and items[1]["say"] == "the chart" and (Path(e) / items[1]["src"]).is_file()
         assert f" assets={Path(e) / 'assets.json'} " in job_line(next(j for j in read()["jobs"] if j["id"] == jid), root)
+    # B-roll: a library connected from the page, ticked (or Claude decides) and the Additional instructions, with the job
+    assert get("/broll")["libraries"] == []
+    assert post("/broll/add", {"name": "Desk", "folder": str(vid.parent)})["ok"]
+    lib = get("/broll")["libraries"][0]
+    assert lib["name"] == "Desk" and lib["clips"] >= 1 and lib["thumb"].startswith("/thumb?p="), lib
+    try:
+        get("/broll/browse?p=" + quote(str(vid.parent)))
+        raise AssertionError("a folder outside Google Drive was browsed")
+    except urllib.error.HTTPError as e:
+        assert e.code == 404
+    r4 = post("/job", {"type": "video", "path": str(vid), "as": "mine", "broll": ["Desk", "Nope"], "note": "Desk for the intro."})
+    e4, line = Path(r4["edits"][0]), job_line(latest(read(), "video"), root)
+    assert json.loads((e4 / "broll.json").read_text(encoding="utf-8")) == {"auto": False, "libraries": [{"name": "Desk", "folder": str(vid.parent)}]}
+    assert f" broll={e4 / 'broll.json'} instructions={e4 / 'instructions.md'} " in line, line
+    r5 = post("/job", {"type": "video", "path": str(vid), "as": "mine", "broll_auto": True})   # Make again on the waiting job: its new picks
+    assert r5["edits"] == r4["edits"] and json.loads((e4 / "broll.json").read_text(encoding="utf-8"))["auto"] is True
+    # Copy a reel: the same clip as a b-roll reel is its own job, editor open at the edit stage, mode= on the line
+    r6 = post("/job", {"type": "video", "path": str(vid), "as": "mine", "mode": "broll-reel", "broll_auto": True})
+    assert r6["edits"] != r4["edits"] and " mode=broll-reel " in job_line(latest(read(), "video"), root)
+    assert json.loads((Path(r6["edits"][0]) / "review.json").read_text(encoding="utf-8"))["stage"] == "edit"
+    try:
+        post("/reel/fetch", {"url": "not a link"})
+        raise AssertionError("a non-link was fetched")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
     assert takeable(next(j for j in read()["jobs"] if j["id"] == r2["ids"][0]), "sess-L", read())
     assert not takeable(next(j for j in read()["jobs"] if j["id"] == r2["ids"][1]), "sess-L", read()), "the other Claude's job"
     try:

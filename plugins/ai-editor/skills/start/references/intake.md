@@ -54,6 +54,7 @@ python3 "$P" set audience '"developers who use Claude"'
 python3 "$P" set goal '"follow, then comment router for the guide"'   # saved with audience
 python3 "$P" set brand '{"use_creator": true}'           # or {"colors": ["#F2EEE6", "#E5482C"], "font": "Archivo", "logo": "/path/logo.svg"}
 python3 "$P" set assets_dir '"/Users/me/Pictures/screens"'
+python3 "$P" set 'broll.travel="/Users/me/Library/CloudStorage/GoogleDrive-me@gmail.com/My Drive/B-roll/Travel"'   # a b-roll library per type of video (lib/ai_editor/broll.py); set when the user names one
 python3 "$P" set names '[{"name": "Jev", "domain": "typesafe.ai"}, {"name": "Claude", "domain": "claude.com"}]'
 python3 "$P" set avoid '{"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"]}'
 python3 "$P" set captions '{"on": true, "style": "creator"}'   # creator | plain | bold | karaoke | minimal; "on": false for none

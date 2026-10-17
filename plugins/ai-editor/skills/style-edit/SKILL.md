@@ -57,6 +57,13 @@ Follow every taste rule; the scripts read the settings themselves. When the user
   they hand over, goes in `edits/<name>/images/` and `images.json`:
   `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `hold_s`,
   `entrance`; transparent PNG and Lottie `.json` work).
+- **The user's b-roll libraries:** from the page, the job's `EDIT/broll.json` (`"auto": true` = Claude decides: use the
+  libraries this video fits; `false`: only those listed; no file: none). Asked in chat with no page job, the profile's
+  `broll` (`python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/broll.py" list`): pick the one that fits from the transcript
+  (the user named one: that one; none fits: skip; two fit equally: ask in the question box). `EDIT/instructions.md`
+  (Additional instructions for Claude) can say which folder goes where: follow it. `broll.py sheet <name>` prints numbered contact sheets: look at
+  every sheet, copy the clips that show what a line says into `images/` (paths in its `index.json`) and use
+  each as a `video_card` on that line. Never a clip that does not match the words.
 - **What the user added on the page** (`assets.json`, review.py `wait`'s `assets:` line): first, before any search,
   each on its `say` words, as `agents/visual-prep.md` step 2 says. One not in images.json or visuals.json yet is new.
 

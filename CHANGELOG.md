@@ -4,6 +4,7 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- New video has a B-roll section (tick your Drive folders, or leave Claude decides on) and an Additional instructions for Claude box. Copy a reel takes a reel link and remakes it with your b-roll, the reel's words on screen and its sound, then opens it in the editor.
 - A video's versions are one Version dropdown beside Watch and Compare, so long names no longer squeeze the player bar.
 - A finished reel gets a Trial reels tab: Claude's spare hooks and versions, a type menu per version (pick several, or let Claude decide), Add a version, Ask Claude, and Make. Trial reels list under their own heading in the Version dropdown.
 

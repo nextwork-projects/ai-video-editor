@@ -24,6 +24,7 @@ Read a skill's `SKILL.md` in full before doing its task.
 | `overlays` | `plugins/ai-editor/skills/overlays/` | after a render: "add an animation here", "this card is wrong", "the card covers my face", "swap the logo", "show the real page instead", "fewer cards" |
 | `taste` | `plugins/ai-editor/skills/taste/` | a reaction to an edit: "captions too small", "fewer zooms"; "learn from my edit" (a raw take and the posted cut) |
 | `product-video` | `plugins/ai-editor/skills/product-video/` | "make a launch video for <url>", "product video of my site", pastes a website |
+| `broll-reel` | `plugins/ai-editor/skills/broll-reel/` | a home page job with `mode=broll-reel`, "copy this reel with my b-roll" |
 | `clips` | `plugins/ai-editor/skills/clips/` | "clip this video", "make shorts from my podcast", drops a long video or YouTube link |
 | `improve` | `plugins/ai-editor/skills/improve/` | maintainers: "improve the editor", "turn feedback into fixes", "process suggestions" |
 | `update` | `plugins/ai-editor/skills/update/` | "update the editor", "get the latest version", "sync my fork" |

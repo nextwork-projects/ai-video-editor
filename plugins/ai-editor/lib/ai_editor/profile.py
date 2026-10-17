@@ -27,6 +27,7 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "audience": "developers who use Claude", "goal": "follow + comment for the guide",
    "brand": {"colors": ["#F2EEE6", "#E5482C"], "font": "Archivo", "logo": "/path/logo.svg"}  or {"use_creator": true},
    "assets_dir": "/path/to/my/screenshots",
+   "broll": {"travel": "/path/to/Drive/B-roll/Travel"},  b-roll libraries by type of video (broll.py)
    "names": [{"name": "Claude", "domain": "claude.com"}],
    "avoid": {"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"], "notes": ""},
    "captions": {"on": true, "style": "creator"},     style: creator | plain | bold | karaoke | minimal

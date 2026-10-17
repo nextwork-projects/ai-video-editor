@@ -253,6 +253,28 @@ body.dragging #dropov{display:flex}
 .shape{flex:1;display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);text-align:left}
 .shape.on{border:1.5px solid var(--ink)}
 .shape i{display:block;border:2px solid var(--t4);border-radius:4px}.shape.on i{border-color:var(--ink)}
+/* B-roll (New video): Claude decides + one tile per library folder, ticked ones Claude can pull clips from */
+.bgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.btile{position:relative;min-width:0;display:flex;flex-direction:column;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);text-align:left;color:var(--ink)}
+.btile.on{border:1.5px solid var(--ink)}
+.btile .bp{height:62px;background:var(--tile) center/cover no-repeat;display:grid;place-items:center;color:var(--t2)}
+.btile:not(.on) .bp.ph{opacity:.6}
+.btile .bt{padding:8px 10px 9px;min-width:0}.btile .bt b{display:block;font-size:14px;line-height:18px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btile .bt span{display:block;font-size:12px;line-height:16px;color:var(--t3)}
+.btile .ck{position:absolute;top:7px;right:7px;width:20px;height:20px;border-radius:6px;border:1.5px solid var(--t2);background:var(--dotbg);display:grid;place-items:center;color:var(--onink)}
+.btile.on .ck{background:var(--ink);border-color:var(--ink)}
+.btile.add{border-style:dashed;align-items:center;justify-content:center;gap:6px;min-height:104px;color:var(--t2);font-size:13px;font-weight:500}
+.bsrch{display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid var(--line);border-radius:10px;flex:1;min-width:0;color:var(--t3)}
+.bsrch input{border:0;background:none;outline:none;flex:1;min-width:0;font:14px/18px system-ui,sans-serif;color:var(--ink)}
+.binstr{width:100%;min-height:64px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:9px 12px;font:14px/20px system-ui,sans-serif;color:var(--ink);resize:vertical}
+.bseg{display:flex;padding:3px;border-radius:10px;background:var(--soft)}.bseg button{flex:1;height:34px;border:0;border-radius:8px;background:none;color:var(--t2);font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:8px}
+.bseg button.on{background:var(--segon);color:var(--ink);font-weight:600}
+.blist{border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:290px}
+.brow2{display:flex;align-items:center;gap:12px;width:100%;min-height:42px;padding:0 6px 0 14px;border:0;border-top:1px solid var(--soft);background:none;color:var(--ink);font-size:14px;text-align:left}
+.brow2:first-child{border-top:0}.brow2.on{background:var(--act);font-weight:600}.brow2 .grow{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow2 .bin{width:30px;height:30px;border:0;background:none;padding:0;border-radius:8px;display:grid;place-items:center;color:var(--t3)}
+.modal .col>.input{flex:none}.brow2 .bin:hover{background:var(--soft);color:var(--ink)}
+.bcrumb{display:flex;flex-wrap:wrap;gap:4px;padding:10px 14px;font-size:13px;color:var(--t3);border-bottom:1px solid var(--line)}.bcrumb button{border:0;background:none;padding:0;color:inherit;font:inherit}.bcrumb button:hover{color:var(--ink);text-decoration:underline}
 .go{height:52px;border-radius:14px;background:var(--ink);color:var(--onink);border:0;font-size:16px;font-weight:600;width:100%}
 .go:disabled{opacity:.4;cursor:default}
 .scard{width:300px;flex-shrink:0;border:1px solid var(--line);border-radius:20px;background:var(--panel);padding:12px;display:flex;flex-direction:column;text-align:left;cursor:pointer}
@@ -1125,7 +1147,8 @@ const HASHV=['home','videos','mystyle','skills','settings','new'];
 let L=null, R=null, rv=null;
 {const h=decodeURIComponent(location.hash.slice(1));if(h.startsWith('style/')){rv='stylepage';ui.sp=h.slice(6)}else if(HASHV.includes(h))rv=h}
 function setHash(){const h=rv==='stylepage'&&ui.sp?'#style/'+encodeURIComponent(ui.sp):HASHV.includes(rv)&&rv!=='home'?'#'+rv:'';if(location.hash!==h)history.replaceState(null,'',location.pathname+location.search+h)}
-const nv={sel:[],clips:{},join:true,aspect:'9:16',style:'mine',filter:'all',up:[],script:'',scriptName:'',scriptMsg:'',draft:null,assets:[],assetMsg:''};
+const nv={sel:[],clips:{},join:true,aspect:'9:16',style:'mine',filter:'all',up:[],script:'',scriptName:'',scriptMsg:'',draft:null,assets:[],assetMsg:'',broll:[],brollAuto:true,brollAll:false,brollQ:'',note:'',reel:null,reelMsg:'',reelBusy:false,reelLogin:false};
+let BR={libraries:null,drives:[]};
 const CMD='nextwork-editor';
 const UP='<svg width="22" height="22" viewBox="0 0 22 22"><path d="M11 15V5M7 9l4-4 4 4M4 15v2a1 1 0 001 1h12a1 1 0 001-1v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const FOLDER='<svg width="14" height="14" viewBox="0 0 14 14"><path d="M1.5 3.5a1 1 0 011-1h3l1.2 1.5h4.8a1 1 0 011 1v5.5a1 1 0 01-1 1h-9a1 1 0 01-1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
@@ -1137,7 +1160,7 @@ const clipOf=p=>nv.clips[p]||(R&&R.videos.find(v=>v.path===p))||{path:p,name:p.s
 const aspectOf=()=>{if(nv.aspectSet||!nv.sel.length)return nv.aspect;const c=clipOf(nv.sel[0]);return c.vertical===false?'16:9':c.vertical?'9:16':nv.aspect};
 const total=()=>nv.sel.reduce((a,p)=>a+(clipOf(p).duration||0),0);
 const styleName=id=>((L&&L.styles||[]).find(c=>c.id===id)||{}).name||(id==='mine'?'My style':id==='defaults'?'the default style':/^@links-/.test(id)?'New format':id);
-function rgo(v){rv=v;setHash();ui.forceR=true;ui.cmenu=null;if(v==='new'||v==='home')loadRecent();if(v==='skills')loadSkills();render();window.scrollTo(0,0)}
+function rgo(v){rv=v;setHash();ui.forceR=true;ui.cmenu=null;if(v==='new'||v==='home')loadRecent();if(v==='new')loadBroll();if(v==='skills')loadSkills();render();window.scrollTo(0,0)}
 const SMP=/^@sample-/;   // a sample keeps its id after the user changes it, so it stays a sample on every page
 let PH=null;   // each video's phase at the last read: a video that leaves Claude's work chimes once (none on the first read)
 function watchDone(){const A=window.aveAlert;if(!A)return;const now=Object.fromEntries(L.videos.map(v=>[v.dir,vPh(v)]));if(!PH){PH=now;return}
@@ -1163,7 +1186,7 @@ function trashRow(){
   const c=clipOf(p);
   return `<div class="confirm"><b>Move ${esc(c.name)} to the Trash?</b><div class="sub">It leaves ${esc(c.where||'its folder')}. You can put it back from the Trash.</div><div class="row"><button class="btn dark sm" onclick="clipAct('trash',${esc(JSON.stringify(p))})">Move to Trash</button><button class="btn quiet sm" onclick="ui.cliptrash=null;render()">Keep</button></div></div>`;
 }
-function toggleClip(p){const i=nv.sel.indexOf(p);if(i>=0)nv.sel.splice(i,1);else nv.sel.push(p);render()}
+function toggleClip(p){if(nv.reel){nv.reel=null;nv.sel=[]}const i=nv.sel.indexOf(p);if(i>=0)nv.sel.splice(i,1);else nv.sel.push(p);render()}
 function vNew(){
   const fresh=Object.values(nv.clips).filter(c=>c.fresh&&!(R&&R.videos.some(v=>v.path===c.path)));
   const vids=[...fresh,...(R?R.videos:[])].filter(v=>nv.filter==='all'||v.where===nv.filter);
@@ -1172,7 +1195,7 @@ function vNew(){
     :`<button class="pill" onclick="scanHome(true)">Show recent clips from Movies, Desktop and Downloads</button>`;
   const ups=nv.up.map(u=>`<div class="clip" id="up-${u.id}"><div class="pic upic">${u.bad?`<span>${esc(u.bad)}</span><button class="more" style="opacity:1" aria-label="Dismiss" title="Dismiss" onclick="nv.up=nv.up.filter(x=>x.id!==${u.id});render()">${CROSS}</button>`
     :`<span class="uptxt">${u.msg==='Adding...'?`Adding... ${u.pct}%`:esc(u.msg)}</span><div class="upbar"><div style="width:${u.pct}%"></div></div>`}</div><div class="nm">${esc(u.name)}</div></div>`).join('');
-  const side=`<div class="panel rv-side" style="width:520px;flex-shrink:0">
+  const side=nv.reel?reelSide():`<div class="panel rv-side" style="width:520px;flex-shrink:0">
     ${n>=2?`<div class="sec"><div class="h">These ${n} clips are</div><div style="display:flex;flex-direction:column;gap:8px">
       <button class="opt ${nv.join?'on':''}" onclick="nv.join=true;render()"><div class="radio"></div><div class="grow"><div class="row" style="gap:8px"><b style="font-size:14px">One video, joined in this order</b><span class="rec">Recommended</span></div><div class="sub" style="font-size:13px;line-height:18px">${nv.sel.map((p,i)=>i+1).join(', ')} play back to back.${total()?` About ${fmtT(total())} long.`:''}</div></div></button>
       <button class="opt ${nv.join?'':'on'}" onclick="nv.join=false;render()"><div class="radio"></div><div class="grow"><b style="font-size:14px">Separate videos</b><div class="sub" style="font-size:13px;line-height:18px">Each clip becomes its own video. ${n} in total.</div></div></button></div></div>`:''}
@@ -1181,12 +1204,15 @@ function vNew(){
     <div class="sec"><div class="h">Shape</div><div class="row">${[['9:16','Tall · 9:16','TikTok, Reels, Shorts',18,32],['16:9','Wide · 16:9','YouTube',28,17]].map(([a,t,s,w,h])=>`<button class="shape ${aspectOf()===a?'on':''}" onclick="nv.aspect='${a}';nv.aspectSet=1;render()"><div style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i style="width:${w}px;height:${h}px"></i></div><div><b style="font-size:14px">${t}</b><div class="sub" style="font-size:12px;line-height:16px">${s}</div></div></button>`).join('')}</div></div>
     ${scriptSec()}
     ${assetSec()}
+    ${brollSec()}
+    ${instrSec()}
     <div class="sec stick" style="margin-top:auto;padding:18px 24px 22px"><div class="between"><span class="sub" style="font-size:13px">${n?summary():'No clips picked yet'}</span><span class="muted">Step 1 of 2</span></div>
       <button class="go" id="next" ${n&&!nv.up.some(u=>!u.bad)?'':'disabled'} onclick="rgo('style')">Next: pick a style</button>
       <div class="muted faint" style="line-height:18px">Nothing starts until you pick a style.</div></div></div>`;
   return `<div class="col grow" style="gap:22px;min-width:0;padding:12px 14px 0">
     <div><h1>New video</h1><p class="lede" style="margin-top:8px;font-size:16px;line-height:22px">Click the clips you want, in the order they play.</p></div>
     <div class="between" style="align-items:center;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap">${chips}</div><label class="choose">${FOLDER}Choose files...<input type="file" id="pickm" multiple accept="video/*,.mov,.mkv,.mp4" class="hide" onchange="chooseFiles(this.files);this.value=''"></label></div>
+    ${reelRow()}
     ${trashRow()}<div class="grid"><div class="droptile" id="droptile" onclick="$('#pickm').click()">${UP}<div style="font-weight:500;font-size:13px;line-height:17px">Drop files here</div><div class="muted" style="font-size:12px">or anywhere on this window</div></div>${ups}${vids.map(clipCard).join('')}</div>
     ${!vids.length&&!nv.up.length&&R?`<div class="muted">No clips here yet. Choose files or drop them in.</div>`:''}
     <div class="row" style="gap:8px"><b style="font-weight:500;font-size:13px;white-space:nowrap;flex-shrink:0">${n} picked</b><span class="muted">Click a clip again to take it out. The numbers are the order they play.</span></div>
@@ -1266,6 +1292,101 @@ async function addImages(files){
     if(data){nv.assets.push({kind:'image',data,name:f.name||'image.png',say:''});nv.assetMsg=''}
   }
   render();
+}
+// B-roll: the user's own clip folders (broll.py libraries, often Google Drive through the Drive app). "Claude decides"
+// (the default) lets Claude pick from every folder; ticking folders limits it to those; nothing at all: no b-roll.
+// They go with the job as edits/<name>/broll.json. Additional instructions for Claude go as edits/<name>/instructions.md.
+const SPARK='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c.5 4.2 2.8 6.5 7 7-4.2.5-6.5 2.8-7 7-.5-4.2-2.8-6.5-7-7 4.2-.5 6.5-2.8 7-7z"/></svg>';
+const SRCH='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>';
+async function loadBroll(){try{const r=await fetch('/broll');if(r.ok){BR=await r.json();nv.broll=nv.broll.filter(n=>BR.libraries.some(l=>l.name===n));render()}}catch(e){}}
+function bTick(n){nv.brollAuto=false;nv.broll=nv.broll.includes(n)?nv.broll.filter(x=>x!==n):[...nv.broll,n];render()}
+function bAuto(){nv.brollAuto=!nv.brollAuto;if(nv.brollAuto)nv.broll=[];render()}
+function bTile(l){const on=!nv.brollAuto&&nv.broll.includes(l.name);
+  return `<button class="btile ${on?'on':''}" aria-pressed="${on}" onclick="bTick(${J(l.name)})" title="${esc(l.folder)}"><span class="bp ph" style="${l.thumb?`background-image:url('${esc(l.thumb)}')`:''}">${l.thumb?'':ic('folder',20)}</span>
+    <span class="bt"><b>${esc(l.name)}</b><span>${l.missing?'Folder not found':l.clips+' clip'+(l.clips===1?'':'s')}</span></span><span class="ck">${on?ic('check',12,2.6):''}</span></button>`}
+function brollSec(){
+  const libs=BR.libraries;if(!libs)return '';
+  const conn=`<button class="btn quiet sm" style="height:30px;padding:0 12px;font-size:13px" onclick="openBconn()">${ic('plus',12,2)}Connect a folder</button>`;
+  if(!libs.length)return `<div class="sec"><div class="between"><span class="h">B-roll</span>${conn}</div><div class="muted">Optional. Connect a folder of your own clips, like one in Google Drive. Claude puts them on the lines they fit.</div></div>`;
+  const auto=`<button class="btile ${nv.brollAuto?'on':''}" aria-pressed="${nv.brollAuto}" onclick="bAuto()"><span class="bp">${SPARK}</span><span class="bt"><b>Claude decides</b><span>From all ${libs.length}</span></span><span class="ck">${nv.brollAuto?ic('check',12,2.6):''}</span></button>`;
+  const count=`<span class="muted" style="font-size:13px">${nv.brollAuto?'Claude decides':nv.broll.length?`${nv.broll.length} of ${libs.length} picked`:'No b-roll'}</span>`;
+  if(nv.brollAll){
+    const q=nv.brollQ.trim().toLowerCase(),shown=libs.filter(l=>!q||l.name.toLowerCase().includes(q));
+    return `<div class="sec"><div class="between"><div class="row" style="gap:8px;align-items:baseline"><span class="h">B-roll</span>${count}</div><div class="row" style="gap:8px"><button class="btn quiet sm" style="height:30px;padding:0 12px;font-size:13px" onclick="nv.brollAll=false;nv.brollQ='';render()">Show less</button>${conn}</div></div>
+      <div class="row" style="gap:8px"><label class="bsrch">${SRCH}<input id="brq" placeholder="Search folders" value="${esc(nv.brollQ)}" oninput="nv.brollQ=this.value;render()" aria-label="Search folders"></label>
+        <button class="btn quiet sm" style="height:36px;padding:0 12px;font-size:13px" onclick="nv.brollAuto=false;nv.broll=libs_names();render()">Select all</button><button class="btn quiet sm" style="height:36px;padding:0 12px;font-size:13px" onclick="nv.brollAuto=false;nv.broll=[];render()">Clear</button></div>
+      <div class="bgrid">${q?'':auto}${shown.map(bTile).join('')}<button class="btile add" onclick="openBconn()">${ic('plus',16,2)}Connect a folder</button></div>
+      ${q&&!shown.length?'<div class="muted">No folder has that name.</div>':''}
+      <div class="muted">Optional. Tick the folders Claude can pull from. None ticked: no b-roll.</div></div>`;
+  }
+  const order=[...libs].sort((a,b)=>(nv.broll.includes(b.name)-nv.broll.includes(a.name))),more=libs.length>2,lead=order.slice(0,more?1:2);
+  const rest=order.slice(more?1:2),seeAll=more?`<button class="btile" onclick="nv.brollAll=true;render()"><span class="bp ph" style="${rest[0].thumb?`background-image:url('${esc(rest[0].thumb)}')`:''}">${rest[0].thumb?'':ic('folder',20)}</span><span class="bt"><b>See all ${libs.length}</b><span>${rest.length} more folder${rest.length===1?'':'s'}</span></span></button>`:'';
+  return `<div class="sec"><div class="between"><div class="row" style="gap:8px;align-items:baseline"><span class="h">B-roll</span>${count}</div>${conn}</div>
+    <div class="bgrid">${auto}${lead.map(bTile).join('')}${seeAll}</div></div>`;
+}
+const libs_names=()=>(BR.libraries||[]).map(l=>l.name);
+function instrSec(){
+  return `<div class="sec"><span class="h">Additional instructions for Claude</span>
+    <textarea class="binstr" id="instrin" maxlength="4000" placeholder="Anything about this video: which b-roll where, captions, length, what to cut." oninput="nv.note=this.value">${esc(nv.note)}</textarea></div>`;
+}
+// Connect a folder: a Google Drive folder through the Drive app (browsed here), or any folder path on this computer
+function openBconn(){const d=BR.drives||[];ui.bconn={tab:d.length?'drive':'mac',drive:0,path:d.length?d[0].path:'',data:null,sel:null,name:'',typed:'',msg:''};render();if(d.length)bBrowse(d[0].path)}
+async function bBrowse(p){const b=ui.bconn;if(!b)return;b.path=p;b.data=null;b.sel=null;render();
+  try{const r=await fetch('/broll/browse?p='+encodeURIComponent(p));const j=await r.json();if(ui.bconn===b){b.data=r.ok?j:{folders:[],msg:j.msg||'That folder could not be read.'};render()}}catch(e){if(ui.bconn===b){b.data={folders:[],msg:'That folder could not be read.'};render()}}}
+function bPick(i){const b=ui.bconn,f=b.data.folders[i];if(b.sel===f.path){b.sel=null}else{b.sel=f.path;if(!b.nameSet)b.name=f.name}render()}
+async function bConnect(){
+  const b=ui.bconn,folder=b.tab==='drive'?(b.sel||b.path):b.typed.trim(),name=(b.name||'').trim()||(folder.split(/[\\/]/).filter(Boolean).pop()||'');
+  if(!folder){b.msg='Pick a folder first.';return render()}
+  b.busy=true;render();const j=await post('/broll/add',{name,folder});b.busy=false;
+  if(!j._ok){b.msg=j.msg||'That folder could not be added.';return render()}
+  ui.bconn=null;await loadBroll();nv.brollAuto=false;if(!nv.broll.includes(name))nv.broll.push(name);toast('Connected '+name);render();
+}
+function bconnModal(){
+  const b=ui.bconn,d=BR.drives||[],root=b.tab==='drive'&&d[b.drive]?d[b.drive].path:'';
+  const parts=root?b.path.slice(root.length).split(/[\\/]/).filter(Boolean):[],crumbs=root?[['My Drive',root],...parts.map((x,i)=>[x,root+'/'+parts.slice(0,i+1).join('/')])]:[];
+  const drive=!d.length?`<div class="muted" style="line-height:20px">Google Drive is not on this computer yet. Install <a href="https://www.google.com/drive/download/" target="_blank" rel="noopener">Google Drive for desktop</a>, sign in, then open this again. Or use a folder on this computer.</div>`
+    :`${d.length>1?`<div class="row" style="gap:8px;flex-wrap:wrap">${d.map((x,i)=>`<button class="btn quiet sm ${i===b.drive?'on':''}" style="height:30px;padding:0 12px;font-size:13px;${i===b.drive?'border-color:var(--ink);color:var(--ink)':''}" onclick="ui.bconn.drive=${i};bBrowse(${J(x.path)})">${esc(x.label)}</button>`).join('')}</div>`:''}
+      <div class="blist"><div class="bcrumb">${crumbs.map(([t,p],i)=>`${i?'<span>›</span>':''}<button onclick="bBrowse(${J(p)})">${esc(t)}</button>`).join('')}</div>
+      ${!b.data?'<div class="muted" style="padding:14px">Loading...</div>':b.data.msg?`<div class="muted" style="padding:14px">${esc(b.data.msg)}</div>`:!b.data.folders.length?`<div class="muted" style="padding:14px">No folders in here.${b.data.videos?` ${b.data.videos} video${b.data.videos===1?'':'s'}: Connect uses this folder.`:''}</div>`
+        :b.data.folders.map((f,i)=>`<div class="brow2 ${b.sel===f.path?'on':''}" role="button" tabindex="0" onclick="bPick(${i})" ondblclick="bBrowse(${J(f.path)})">${ic('folder',16)}<span class="grow">${esc(f.name)}</span>${f.videos?`<span class="muted" style="font-size:13px">${f.videos} video${f.videos===1?'':'s'}</span>`:''}${b.sel===f.path?`<span class="ck" style="width:18px;height:18px;border-radius:9px;background:var(--ink);color:var(--onink);display:grid;place-items:center">${ic('check',11,2.6)}</span>`:''}<button class="bin" title="Open ${esc(f.name)}" aria-label="Open ${esc(f.name)}" onclick="event.stopPropagation();bBrowse(${J(f.path)})">${ic('chev',16,2)}</button></div>`).join('')}</div>`;
+  const mac=`<div class="col" style="gap:6px"><span style="font-size:13px;font-weight:600;color:var(--t2)">Folder</span><input class="input" id="bfolder" placeholder="/Users/you/Movies/B-roll" value="${esc(b.typed)}" oninput="ui.bconn.typed=this.value;if(!ui.bconn.nameSet)ui.bconn.name=this.value.split(/[\\/]/).filter(Boolean).pop()||''"></div>`;
+  return `<div class="modalbg" onclick="if(event.target===this){ui.bconn=null;render()}"><div class="modal" style="width:min(620px,100%);gap:16px" role="dialog" aria-modal="true" aria-labelledby="btitle">
+    <div class="row" style="justify-content:space-between;align-items:flex-start"><div><b class="mt2" id="btitle">Connect a b-roll folder</b><div class="muted" style="margin-top:4px">Claude pulls clips from it for videos it fits.</div></div><button class="mx2" aria-label="Close" title="Close" onclick="ui.bconn=null;render()">${ic('x',18,2)}</button></div>
+    <div class="bseg"><button class="${b.tab==='drive'?'on':''}" onclick="ui.bconn.tab='drive';ui.bconn.msg='';render()">Google Drive</button><button class="${b.tab==='mac'?'on':''}" onclick="ui.bconn.tab='mac';ui.bconn.msg='';render()">Folder on this computer</button></div>
+    ${b.tab==='drive'?drive:mac}
+    <div class="col" style="gap:6px"><span style="font-size:13px;font-weight:600;color:var(--t2)">Name</span><input class="input" style="font-family:inherit" maxlength="40" placeholder="Desk" value="${esc(b.name)}" oninput="ui.bconn.name=this.value;ui.bconn.nameSet=true"></div>
+    ${b.msg?`<div class="msg bad">${CROSS}<span>${esc(b.msg)}</span></div>`:''}
+    <div class="between" style="gap:12px;flex-wrap:wrap"><span class="muted">${b.tab==='drive'?'Read through the Google Drive app. Nothing is uploaded.':'Read from this computer. Nothing is uploaded.'}</span>
+      <div class="row" style="gap:10px"><button class="btn quiet sm" onclick="ui.bconn=null;render()">Cancel</button><button class="btn dark sm" ${b.busy?'disabled':''} onclick="bConnect()">${b.busy?'Connecting...':'Connect'}</button></div></div></div></div>`;
+}
+// Copy a reel (broll-reel skill): a pasted reel comes into the library and becomes the one clip of this video. Claude
+// copies its cuts, its words and its sound onto the user's b-roll; the editor opens on it like any video.
+function reelRow(){
+  return `<div class="col" style="gap:8px"><div class="row" style="gap:8px;max-width:640px"><input id="reelin" class="input" style="height:38px;font-family:inherit" placeholder="Or paste a reel to copy onto your b-roll (Instagram or TikTok)" onkeydown="if(event.key==='Enter')copyReel()" ${nv.reelBusy?'disabled':''}>
+    <button class="btn quiet sm" ${nv.reelBusy?'disabled':''} onclick="copyReel()">${nv.reelBusy?'Getting the reel...':'Copy a reel'}</button></div>
+    ${nv.reelMsg?`<div class="msg bad">${CROSS}<span>${esc(nv.reelMsg)}</span></div>${nv.reelLogin?`<div><button class="btn quiet sm" onclick="copyReel(true)">Use my Chrome login for this one</button></div>`:''}`:''}</div>`;
+}
+async function copyReel(cookies){
+  const e=$('#reelin'),url=cookies?nv.reelUrl:(e?e.value.trim():'');if(!url||nv.reelBusy)return;
+  Object.assign(nv,{reelUrl:url,reelBusy:true,reelMsg:'',reelLogin:false});render();
+  const j=await post('/reel/fetch',{url,cookies:!!cookies});nv.reelBusy=false;
+  if(j.ok){nv.clips[j.path]={path:j.path,name:j.name,duration:j.duration,where:'Your videos',mtime:Date.now()/1000,raw:true,fresh:true,vertical:true,thumb:j.thumb};
+    Object.assign(nv,{reel:j.path,sel:[j.path],aspect:'9:16'});toast('Got the reel')}
+  else Object.assign(nv,{reelMsg:j.msg||'That reel could not be downloaded.',reelLogin:j.code===3});
+  render();
+}
+function reelSide(){
+  const c=clipOf(nv.reel),libs=(BR.libraries||[]).length,ok=libs&&(nv.brollAuto||nv.broll.length);
+  return `<div class="panel rv-side" style="width:520px;flex-shrink:0">
+    <div class="sec"><div class="between"><span class="h">Reel to copy</span><button class="hlink" style="font-size:13px" onclick="nv.reel=null;nv.sel=[];render()">Remove</button></div>
+      <div class="row" style="gap:12px;align-items:center"><span style="width:54px;height:96px;border-radius:8px;flex-shrink:0;background:var(--tile) center/cover no-repeat;background-image:url('${esc(c.thumb||'')}')"></span>
+        <div style="min-width:0"><b style="font-size:14px">${esc(c.name||'Reel')}</b><div class="muted">${c.duration?fmtT(Math.round(c.duration))+' · ':''}Tall 9:16</div>
+        <div class="muted" style="margin-top:6px;line-height:18px">Claude copies its cuts, its words and its sound onto your b-roll.</div></div></div></div>
+    ${brollSec()}
+    ${instrSec()}
+    <div class="sec stick" style="margin-top:auto;padding:18px 24px 22px"><div class="between"><span class="sub" style="font-size:13px">${libs?(nv.brollAuto?'B-roll: Claude decides':nv.broll.length?`B-roll: ${nv.broll.map(esc).join(', ')}`:'Tick a b-roll folder'):'Connect a b-roll folder first'}</span></div>
+      <button class="go" id="make" ${ok?'':'disabled'} onclick="makeVideo()">Make my video</button>
+      <div class="muted faint" style="line-height:18px">It opens in the editor, so you can change anything.</div></div></div>`;
 }
 async function scanHome(on){await post('/scanhome',{on});await loadRecent()}
 // dropped or chosen files: a card at the front of the grid right away, with its copy progress; once in, it is
@@ -1691,8 +1812,9 @@ function vStyle(){
 }
 async function makeVideo(){
   const assets=nv.assets.map(a=>a.kind==='link'?{url:a.url,say:a.say}:{image:a.data,name:a.name,say:a.say});
-  const r=await queue({type:'video',paths:nv.sel,join:nv.join,as:nv.style,aspect:aspectOf(),script:nv.script,assets});
-  if(!r._ok)return;nv.sel=[];nv.script='';nv.scriptName='';nv.assets=[];nv.assetMsg='';
+  const r=await queue({type:'video',paths:nv.sel,join:nv.join,as:nv.style,aspect:aspectOf(),script:nv.script,assets,
+    broll:nv.brollAuto?[]:nv.broll,broll_auto:nv.brollAuto&&!!(BR.libraries||[]).length,note:nv.note,...(nv.reel?{mode:'broll-reel'}:{})});
+  if(!r._ok)return;nv.sel=[];nv.script='';nv.scriptName='';nv.assets=[];nv.assetMsg='';nv.note='';nv.brollAll=false;nv.brollQ='';nv.reel=null;
   toEditor(r);
 }
 
@@ -2257,7 +2379,7 @@ function askTrash(dir){ui.edittrash=dir;if(rv!=='videos')rgo('videos');else rend
 document.addEventListener('click',()=>{if(ui.cmenu||ui.clipmenu){ui.cmenu=ui.clipmenu=null;render()}});
 // the page scrolls under an open menu: it follows its button, and closes once the button leaves the window
 document.addEventListener('scroll',e=>{const ms=[...$('#menus').children];if(ms.length&&!(e.target.closest&&e.target.closest('.cmenu'))&&!ms.every(placeMenu)){ui.cmenu=ui.clipmenu=null;render()}},true);
-addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(ui.skdel){ui.skdel=null;render()}else if(ui.del){ui.del=null;render()}else if(ui.create){ui.create=false;render()}else if(ui.cmenu||ui.clipmenu){ui.cmenu=ui.clipmenu=null;render()}});
+addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(ui.skdel){ui.skdel=null;render()}else if(ui.del){ui.del=null;render()}else if(ui.create){ui.create=false;render()}else if(ui.bconn){ui.bconn=null;render()}else if(ui.cmenu||ui.clipmenu){ui.cmenu=ui.clipmenu=null;render()}});
 // ---- Settings: keys (each with its own status), updates, the videos folder, the theme, this computer
 const FINDER=()=>/Mac/.test(navigator.platform)?'Finder':'Explorer';
 const ST_HINT={gemini:'Paste the key. It starts with AIza or AQ.'};
@@ -2395,7 +2517,7 @@ function rrender(){
   if(rv==='home'&&askRow())h=h.replace(/^\s*(<div class="pgc[^"]*">)/,'$1'+askRow());   // Home's first row
   $('#main').classList.toggle('pg',['home','videos','settings','mystyle','style','stylepage','skills'].includes(rv));
   paint($('#main'),h,rv+'|'+ui.sp);$('#main').classList.toggle('spwrap',rv==='stylepage');
-  const md=ui.skdel?skDelModal():ui.del?delModal():ui.create?createModal():'';paint($('#modal'),md,'m');document.documentElement.style.overflow=md?'hidden':'';$('#main').classList.toggle('hmain',rv==='home');
+  const md=ui.skdel?skDelModal():ui.del?delModal():ui.create?createModal():ui.bconn?bconnModal():'';paint($('#modal'),md,'m');document.documentElement.style.overflow=md?'hidden':'';$('#main').classList.toggle('hmain',rv==='home');
   if(rv==='mystyle'||rv==='style')flashBuilt();
   const o=$('#order');if(o)o.querySelectorAll('[draggable]').forEach(el=>{
     el.ondragstart=e=>{e.dataTransfer.setData('text/plain',el.dataset.i)};el.ondragover=e=>e.preventDefault();
@@ -2502,7 +2624,7 @@ const canReload=()=>{const a=document.activeElement;return !(a&&/^(INPUT|TEXTARE
 function keepView(){try{sessionStorage.setItem('ave-home-keep',JSON.stringify({rv,sp:ui.sp,y:scrollY,nv:{sel:nv.sel,style:nv.style,aspect:nv.aspect,aspectSet:nv.aspectSet,join:nv.join}}))}catch(e){}}
 try{const k=JSON.parse(sessionStorage.getItem('ave-home-keep')||'null');sessionStorage.removeItem('ave-home-keep');if(k){rv=k.rv;ui.sp=k.sp;Object.assign(nv,k.nv);keepY=k.y}}catch(e){}
 window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>e.preventDefault());
-load().then(loadRecent);setInterval(load,1500);setInterval(loadLib,4000);
+load().then(loadRecent).then(loadBroll);setInterval(load,1500);setInterval(loadLib,4000);
 </script>
 <script src="/ask.js"></script>
 </body>

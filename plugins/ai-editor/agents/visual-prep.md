@@ -22,7 +22,10 @@ local, so they are made now and made again if the cut changes.
 2. **Style and images:** only when `EDIT/style.json` is missing, `python3 "<ROOT>/lib/ai_editor/profile.py" style EDIT`
    (the window wrote the style the user picked: never rewrite it, never pass `--as` yourself); copy the images in the
    profile's `assets_dir` that fit a line into `EDIT/images/` and write `EDIT/images.json`
-   (`<ROOT>/skills/style-edit/references/shapes.md`, each with `word` and `nth`).
+   (`<ROOT>/skills/style-edit/references/shapes.md`, each with `word` and `nth`). B-roll: `EDIT/broll.json` when the job
+   has one (`"auto": true`: the libraries this transcript fits; `false`: only those listed; none clearly fits or no file:
+   skip, never ask), following `EDIT/instructions.md` when it says which folder goes where,
+   `broll.py sheet <name>`, look at every sheet and copy the clips that match a line into `EDIT/images/` as `video_card`s.
    **What the user added comes first:** `EDIT/assets.json` (the page's "Add images or links", `assets.py`) lists
    images (`src` in `EDIT/assets/`) and links (`url`, `site`), each with optional `say` words. Every item becomes a
    card on its `say` words (the first time they are said after the previous card; no `say`: the line it is about,
