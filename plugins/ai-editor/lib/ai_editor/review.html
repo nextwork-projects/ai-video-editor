@@ -91,6 +91,7 @@ header{position:relative;height:56px;flex-shrink:0;display:flex;align-items:cent
 .status.work i{display:inline-flex;color:var(--ink);animation:spin .9s linear infinite}
 .status .stp{font-weight:400;color:var(--body)}
 .status span{overflow:hidden;text-overflow:ellipsis}
+#newclaude{flex-shrink:0;white-space:nowrap;margin:0;padding:0;border:0;background:none;color:var(--ink);font:inherit;text-decoration:underline 1px;text-underline-offset:3px;cursor:pointer}
 #howbtn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line2);display:grid;place-items:center;color:var(--ink);flex-shrink:0}
 #howbtn:hover{border-color:var(--ink)}
 .mtheme{display:none}
@@ -544,7 +545,7 @@ body.making #making{display:flex}
 <header>
  <div class="brand"><button id="homebtn" class="homebtn" title="Back to your videos"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your videos</button><span class="sl">/</span><span id="name"></span><span id="homemsg" class="homemsg" hidden></span></div>
  <div class="seg" id="stages"><button id="st1" data-go="cut"></button><svg class="chev" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><button id="st2" data-go="edit"></button></div>
- <div class="status" id="statusbox"><i></i><span id="listen"></span><button id="howbtn" aria-label="how this works and shortcuts" title="how this works (?)"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="8.3"/><path d="M7.7 7.6a2.4 2.4 0 1 1 3.3 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.4" r=".4" fill="currentColor"/></svg></button></div>
+ <div class="status" id="statusbox"><i></i><span id="listen"></span><button id="newclaude" hidden title="start a Claude that carries on with this video">Stopped? Open a new Claude</button><button id="howbtn" aria-label="how this works and shortcuts" title="how this works (?)"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="8.3"/><path d="M7.7 7.6a2.4 2.4 0 1 1 3.3 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.4" r=".4" fill="currentColor"/></svg></button></div>
  <div class="mhead"><b id="mstage"></b><span id="msub"></span></div><button class="themebtn mtheme"></button><button id="mapprove"></button>
 </header>
 <section id="how" aria-label="how this works"><ol>
@@ -675,6 +676,7 @@ let updating=false,updWas=false;
 $('railupd').onclick=async()=>{updating=true;renderRail();setTimeout(()=>{updating=false;if(S)renderRail()},15000);try{const r=await fetch('/update',{method:'POST',body:'{}'});if(!r.ok){updating=false;alert('The window is not open, so it cannot update. Open cooked. and press Update in Settings.')}}catch(e){updating=false}renderRail()};
 let railx=false;try{railx=localStorage.getItem('review-railx')==='1'}catch(e){}
 document.body.classList.toggle('railx',railx);
+$('newclaude').onclick=async()=>{$('newclaude').disabled=true;await post('/claude',{});await load(true);$('newclaude').disabled=false};
 $('railtog').onclick=()=>{railx=!railx;document.body.classList.toggle('railx',railx);try{localStorage.setItem('review-railx',railx?'1':'0')}catch(e){}
   $('railtog').title=$('railtog').ariaLabel=railx?'Collapse the sidebar':'Expand the sidebar'};
 let PV=null,followNew=false;   // followNew: Go back was pressed, so show the round it opens wherever the page was
@@ -785,15 +787,18 @@ function steps(){
     $(id).disabled=!has(st);
   });
 }
+// the new Claude review.py opened for this edit in the last 15 min (Submit with no Claude on it, or Open a new Claude)
+const newClaude=S=>!S.listening&&S.claude&&Date.now()/1000-S.claude.at<900?(S.claude.opened?'A new Claude is starting in its own Terminal window':'Run this in a terminal to start Claude: '+S.claude.command):'';
 function listenText(S){
   const e=S.events[S.events.length-1],picked=!!(S.sent&&e&&e.handled);
   if(picked&&e.type==='approve')return e.stills?'Claude is making the video':e.stage==='cut'?(S.stage==='cut'&&!S.final?'Claude is making the edit':'The cut is approved'):'Approved';
   if(picked)return S.raw?(S.cut_steps&&S.cut_steps.state==='queued'?((S.cut_steps.claude||{}).opened?'Claude is working in its own Terminal window':'Waiting for Claude'):'Claude is making the cut'):e.type==='edits'?'Claude is applying your changes':'Claude is working on the next draft';
+  if(S.sent&&newClaude(S))return newClaude(S);
   if(S.sent)return e&&e.type==='edits'?'Changes sent':e&&e.type==='approve'?(e.stills?'Preview approved':e.stage==='cut'?'Cut approved':'Approved'):'Notes sent';
   const first=!(S.rounds||[]).some(r=>r.stage===S.stage&&r.round>=1&&r.round<S.round&&!r.stills);   // the first video of the cut or the edit (the stills before it are not one)
   if(S.listening)return S.round>1&&!S.comments.some(c=>c.stage===S.stage&&c.round===S.round)?(first?(S.stage==='edit'?(S.stills?'The preview is ready':'The edit is ready'):'The cut is ready'):cap(dn(S))+' is ready'):'Claude is listening';
-  if(S.busy)return 'Claude is working. Notes you send now are next.';
-  return 'Claude is not listening. Notes still save.';
+  if(S.busy)return 'Claude is working.';   // notes sent now are next; #newclaude beside it if it stopped
+  return 'Claude is not listening. Submitting opens a new Claude.';
 }
 function render(){
   if(!S)return;
@@ -804,6 +809,7 @@ function render(){
   const nowAct=busyNow&&(S.activity||[]).filter(x=>x.round===S.round&&!x.done).pop();
   const asking=!!document.documentElement.dataset.ask;   // ask.js: Claude's question box is open on this page
   $('listen').innerHTML=asking?'<b>Claude is asking you something</b>':esc(approving?(S.stills?'Preview approved':'Cut approved'):idleEdit?'Claude is not working on the edit':listenText(S))+(!asking&&nowAct&&nowAct.text?` <span class="stp">· ${esc(nowAct.text)}</span>`:'');
+  $('newclaude').hidden=asking||!S.busy||S.listening||picked||!!newClaude(S);   // the Claude working here may have stopped
   $('statusbox').classList.toggle('work',busyNow&&!asking);$('statusbox').querySelector('i').innerHTML=busyNow&&!asking?SPIN:'';
   $('mstage').textContent=STAGE[view.stage];$('msub').textContent=S.name+' · '+rn(view).toLowerCase();
   const mine=S.comments.filter(c=>c.stage===S.stage&&c.round===S.round).length,live=isCur()&&!p;
@@ -944,7 +950,7 @@ function workHtml(){
   if(S.raw&&S.cut_steps)return cutHtml(S.cut_steps);
   if(p!=='send'&&(!live||S.stage==='cut'))return '';   // the cut is ready: what Claude does next is the edit's prep, not this round
   const ed=editsSent()?S.events[S.events.length-1]:null,nch=ed?plural(ed.n,'transcript change'):'';
-  const head=S.raw?'Making the cut. Your clip plays meanwhile. Notes you leave now go on the cut.':ed?(act.length?`Claude is applying your changes (${nch}). The next draft opens here.`:picked?`Claude has your ${nch} and is starting ${nextDn()}.`:S.listening||S.busy?`${nch} saved. Waiting for Claude to pick them up.`:`${nch} saved, but Claude is not listening. Ask Claude in the terminal to apply them.`):p==='send'?(act.length?`Making ${nextDn()}.`:picked?`Claude has your notes and is starting ${nextDn()}.`:'Notes sent. Waiting for Claude to pick them up.'+(S.listening||!S.busy?'':' Claude is finishing something and takes them next.')):'Still coming in this draft:';
+  const head=S.raw?'Making the cut. Your clip plays meanwhile. Notes you leave now go on the cut.':ed?(act.length?`Claude is applying your changes (${nch}). The next draft opens here.`:picked?`Claude has your ${nch} and is starting ${nextDn()}.`:S.listening||S.busy?`${nch} saved. Waiting for Claude to pick them up.`:`${nch} saved. Submit opens a new Claude to apply them.`):p==='send'?(act.length?`Making ${nextDn()}.`:picked?`Claude has your notes and is starting ${nextDn()}.`:(newClaude(S)||'Notes sent. Waiting for Claude to pick them up.')+(S.listening||!S.busy?'':' Claude is finishing something and takes them next.')):'Still coming in this draft:';
   if(p!=='send'&&!ed&&!S.raw&&!act.some(x=>x.step||x.pct!=null))   // the draft is out: a plain line from Claude is a remark, not work still coming
     return `<div class="claude"><div><b>Claude</b>${act.map(x=>`<p>${esc(x.text)}</p>`).join('')}</div></div>`;
   const li=act.map(x=>x.done?`<li><span class="ic">${TICK}</span>${esc(x.text)}</li>`

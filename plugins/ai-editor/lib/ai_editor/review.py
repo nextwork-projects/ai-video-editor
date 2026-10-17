@@ -850,6 +850,23 @@ def busy(folder):
         return False
 
 
+REOPEN_S = 900   # one new Claude per edit this often at most (a trust prompt can hold it in its Terminal)
+
+
+def reopen(folder, rj, force=False):
+    """Notes sent or approved with no Claude on this edit: a new Terminal with a Claude that carries on with it
+    (`/ai-editor:start carry on edits/<name>`, in the library). Never while a `wait` listens; force (the page's
+    "Open a new Claude") also when a Claude worked here lately, since it may have stopped. Kept on review.json as
+    "claude": {opened, command, at} so the page says where it is, or shows the command where no terminal opened."""
+    if listening(folder) or not force and (busy(folder) or time.time() - ((load(rj).get("claude") or {}).get("at") or 0) < REOPEN_S):
+        return None
+    import launcher
+    opened, cmd = launcher.open_claude(folder.parent.parent, f"/ai-editor:start carry on edits/{folder.name}")
+    r = {"opened": opened, "command": cmd, "at": time.time()}
+    update(rj, lambda d: d.update(claude=r))
+    return r
+
+
 def log_pct(path):
     """The last "N/M" in a render log (Remotion prints "Rendered 812/3255"), as a percent."""
     try:
@@ -1415,7 +1432,11 @@ def make_handler(folder, token):
                     return self.send(409, {"error": "Claude is applying your transcript changes."})
                 if body["type"] == "send" and load(rj).get("stills"):   # notes on the stills: that render is not the one
                     drop_spec(folder)
+                with contextlib.suppress(Exception):   # the notes are saved either way
+                    reopen(folder, rj)   # no Claude on this edit any more: a new one takes the notes
                 return self.send(200, {})
+            if path == "/claude":   # "Open a new Claude": the one working here stopped
+                return self.send(200, reopen(folder, rj, force=True) or {})
             self.send(404, {})
 
         def comment(self, body):
@@ -1602,11 +1623,9 @@ def asker(folder, started):
         own = session_of(folder) or started
         if own:
             return folder.name if sid == own else None
-        try:   # no session known here: anyone's, unless that session is working on another edit
-            others = [f for f in folder.parent.iterdir() if f != folder and f.is_dir()]
-        except OSError:
-            others = []
-        return None if sid and any(session_of(f) == sid for f in others) else folder.name
+        # no session known here: only a question with no session. A Claude on this video names it (askhook's
+        # asking_edit), so a session that never touched it is another project's
+        return None if sid else folder.name
     return owner
 
 
@@ -2635,6 +2654,23 @@ def demo():
     tmp = Path(tempfile.mkdtemp(prefix="review_demo_"))
     os.environ["AI_EDITOR_HOME"] = str(tmp / "home")   # start records the folder in the library index there
     demo_timings(tmp)
+    # notes sent with no Claude on the edit: a new one opens in the library to carry on; never twice, never over a listener
+    import launcher
+    opened = []
+    launcher.open_claude = lambda folder, prompt: (opened.append((folder, prompt)) or True, "claude '" + prompt + "'")
+    rf = tmp / "lib" / "edits" / "solo"
+    (rf / "review").mkdir(parents=True)
+    save(rf / "review.json", {})
+    assert reopen(rf, rf / "review.json")["opened"] and opened == [(tmp / "lib", "/ai-editor:start carry on edits/solo")]
+    assert reopen(rf, rf / "review.json") is None and len(opened) == 1, "one per 15 min"
+    (rf / "review" / ".listening").touch()
+    assert reopen(rf, rf / "review.json", force=True) is None, "a listening Claude takes the notes"
+    (rf / "review" / ".listening").unlink()
+    (rf / "review" / ".claude").touch()
+    update(rf / "review.json", lambda d: d.pop("claude"))
+    assert reopen(rf, rf / "review.json") is None and reopen(rf, rf / "review.json", force=True) and len(opened) == 2, "busy: only the button"
+    # a page no session owns takes only questions with no session: another project's Claude never asks there
+    assert asker(rf, "")("sess-other") is None and asker(rf, "")("") == "solo"
     # the skills on a video: ran (the last one now while it is made), then the style's and chained ones still to run
     ve = tmp / "edits" / "sk"
     (ve / "review").mkdir(parents=True)
@@ -2728,7 +2764,8 @@ def demo():
         assert e.code == 403
     os.environ.pop("CLAUDE_CODE_SESSION_ID")
     (folder / "review" / ".session").unlink(missing_ok=True)
-    assert asker(folder, "")("sess-anyone") == "demo", "no session known (older Claude Code): any question"
+    assert asker(folder, "")("") == "demo", "no session known (older Claude Code): a question with no session"
+    assert asker(folder, "")("sess-anyone") is None, "a session that never touched this video: another project's"
     assert asker(folder, "sess-review")("sess-anyone") is None
     hs = Path(os.environ["AI_EDITOR_HOME"]) / "home" / "state.json"   # the home page's job for this video: its Claude asks here
     hs.parent.mkdir(parents=True, exist_ok=True)
@@ -2742,7 +2779,7 @@ def demo():
     assert asker(folder, "")("sess-job") == "demo" and asker(folder, "")("sess-two") is None, "the job's own edit page only"
     (other / "review").mkdir(parents=True, exist_ok=True)
     (other / "review" / ".session").write_text("sess-three", encoding="utf-8")
-    assert asker(folder, "")("sess-three") is None and asker(folder, "")("sess-old") == "demo", "working on another edit: not here"
+    assert asker(folder, "")("sess-three") is None and asker(folder, "")("sess-old") is None, "working on another edit, or on none: not here"
     shutil.rmtree(other)
     hs.write_bytes(had) if had is not None else hs.unlink()
     os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-review"
@@ -2857,6 +2894,7 @@ def demo():
     post("/event", {"type": "stop"})
     assert not load(folder / "review.json")["sent"]
     post("/event", {"type": "send"})
+    assert post("/claude", {})["opened"] and load(folder / "review.json")["claude"]["command"] == f"claude '/ai-editor:start carry on edits/{folder.name}'"
     cq = post("/comment", {"t": 2.0, "text": "queued then stopped"})   # with Claude: queued for the next round
     assert cq["queued"] and cq["round"] == 2, cq
     post("/event", {"type": "stop"})
@@ -3150,9 +3188,12 @@ def demo():
         ev = lambda t, n: {"listening": False, "sent": True, "round": n, "comments": [],
                            "events": [{"type": t, "stage": "edit", "handled": True}]}
         mid = {"listening": False, "busy": True, "sent": False, "round": 1, "stage": "edit", "comments": [], "events": []}
-        o = subprocess.run(["node", "-e", js.group(0) + "for(const s of " + json.dumps([ev("approve", 0), ev("send", 1), mid])
+        nc = re.search(r"^const newClaude=.*$", HTML.read_text(encoding="utf-8"), re.M).group(0)   # notes sent, a new Claude opened
+        fresh = dict(ev("send", 1), events=[{"type": "send", "stage": "edit", "handled": False}], claude={"opened": True, "at": time.time()})
+        o = subprocess.run(["node", "-e", nc + js.group(0) + "for(const s of " + json.dumps([ev("approve", 0), ev("send", 1), mid, fresh])
                             + ")console.log(listenText(s))"], capture_output=True, text=True, check=True).stdout
-        assert o.splitlines() == ["Approved", "Claude is working on the next draft", "Claude is working. Notes you send now are next."], o
+        assert o.splitlines() == ["Approved", "Claude is working on the next draft", "Claude is working.",
+                                 "A new Claude is starting in its own Terminal window"], o
     # approve on the cut: the style-edit's scripts fill the page's "Making the edit" steps, in place, never twice
     sf = tmp / "edits" / "steps"
     sf.mkdir(parents=True)

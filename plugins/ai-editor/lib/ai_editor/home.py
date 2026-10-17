@@ -387,7 +387,8 @@ def adopt(j, sid):
 
 def asks_for(sid):
     """askhook's owner rule for the home page: the job sid is working on, "" when it only listens, else None.
-    With no session known at all (Claude Code without CLAUDE_CODE_SESSION_ID): any question, as before."""
+    Nobody listening and no job owned: only the session that started this server, or a question with no session
+    (Claude Code without CLAUDE_CODE_SESSION_ID). Another project's Claude never asks here."""
     d = read()
     taken = [j for j in reversed(d["jobs"]) if j["state"] == "taken"]
     j = next((j for j in taken if sid and j.get("owner") == sid), None)
@@ -396,7 +397,7 @@ def asks_for(sid):
     lis = listener()
     if sid and sid == lis:
         return ""
-    if not lis and not any(j.get("owner") for j in taken):
+    if not lis and not any(j.get("owner") for j in taken) and (not sid or sid == askhook.session()):
         return job_name(taken[0]) if taken else ""
     return None
 

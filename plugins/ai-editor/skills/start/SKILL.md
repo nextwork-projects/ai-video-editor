@@ -16,7 +16,7 @@ Every question goes in the question box: the AskUserQuestion tool (2-4 options, 
 The user's whole job: drop a video, answer a few questions, approve the cut, approve the stills, both on
 the review page. Everything else is this skill's job.
 
-`P="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py"`. Run it with `python3` on Mac and Linux, `py` on Windows.
+`P="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/profile.py"`. Run it with `python3` (`py` on Windows).
 
 **First run** (the session-start line says so, or `setup.py doctor --quiet` prints a line): the
 setup skill's step 0 first (window, then installs in the background), then carry on here.
@@ -52,7 +52,7 @@ Only download what the user may edit; a creator's video is for the teardown, not
 
 ## 1. The video
 
-"Open the home page" (`nextwork-editor`, `/ai-editor:start`), "listen for jobs" or "take job <id>": `references/home.md`. No video,
+"Open the home page" (`nextwork-editor`, `/ai-editor:start`), "listen for jobs", "take job <id>", "carry on <edit>": `references/home.md`. No video,
 link or creator (a bare "edit my video"): ask **Open the home page (Recommended)** / **I'll give
 the path** / **Use the sample take** (cut's "No video yet?"). Edit folder: `IMG_1234.MOV` -> `edits/img-1234`.
 

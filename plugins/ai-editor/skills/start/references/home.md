@@ -57,6 +57,11 @@ open (Linux without x-terminal-emulator), the editor shows that command to run i
 job's line (or `GONE` when it is done or another session has it), then do the job as below. Do not start a
 plain `wait` afterwards unless the user asks for more.
 
+"carry on edits/<name>" (`/ai-editor:start carry on edits/<name>`): the video's review page opened this Claude (the user sent notes or approved with no Claude on
+that video, or pressed Open a new Claude). With `R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"`, run
+`python3 "$R" edits/<name> serve --no-open` and `python3 "$R" edits/<name> wait` (both in the background), then do what
+`wait` hands back, the same as after any round, with no intake.
+
 ## Questions
 
 Ask with AskUserQuestion as usual. When the home page or a review page is open and showing, a hook
