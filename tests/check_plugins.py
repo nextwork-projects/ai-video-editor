@@ -254,6 +254,7 @@ def main():
     # Personal names and test-file names never ship. Stored as hashes so this file does not name them.
     import hashlib
     PRIVATE = {'8e3c16abe7053e2a', '73ea4d074e1e099e', '34517c83d2a1c75c', 'f2486dfd64f3a9a7', 'f68d9243b3f95c38', 'aef9b0cbd5d5c214', '9ba138bfd348ae5e', '085caa96e51d45cd', 'a4ba610f97acea14', '97599235748ff4a0', 'f5f9cc117d31860b'}
+    REFERRAL = {'527a778497bd1a9c'}
     for p in ROOT.rglob("*"):
         if p.suffix not in (".md", ".json", ".py", ".mjs", ".ts", ".tsx", ".yml") or "node_modules" in p.parts or ".git" in p.parts or p.name.endswith("lock.json"):
             continue
@@ -267,6 +268,8 @@ def main():
             errors.append(f"{p}: a font falls back to system-ui alone; fall back to a Google font every renderer loads")
         if re.search(r"\bIMG[-_](?!1234\b)\d{4}\b", text, re.I):
             errors.append(f"{p}: names a personal test file (IMG_####); say 'the sample take'")
+        # The one shipped referral link (post.py's Zernio sign-up), allowed by its hash, never a name on its own
+        text = re.sub(r"https://zernio\.link/[\w-]+", lambda m: "" if hashlib.sha256(m.group().encode()).hexdigest()[:16] in REFERRAL else m.group(), text)
         for w in set(re.findall(r"[a-z0-9]{4,}", text.lower())):
             if hashlib.sha256(w.encode()).hexdigest()[:16] in PRIVATE:
                 errors.append(f"{p}: contains a private name; keep public files generic")

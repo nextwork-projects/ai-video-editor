@@ -87,6 +87,7 @@ import askhook  # noqa: E402
 import assets  # noqa: E402
 import custom  # noqa: E402
 import keys  # noqa: E402
+import post  # noqa: E402
 import library  # noqa: E402
 import links  # noqa: E402
 import live  # noqa: E402
@@ -1980,6 +1981,13 @@ def make_handler(token):
                 return
             if path == "/":
                 return self.send(200, themed(HTML.read_bytes()), "text/html; charset=utf-8", cookie=True)
+            if path == "/post/accounts":   # Settings, Auto-post your videos: asked when the card opens and on return from a sign-in, never per poll
+                try:
+                    return self.send(200, {"accounts": post.accounts()})
+                except post.NoKey:
+                    return self.send(200, {"accounts": [], "nokey": True})
+                except post.Refused as e:
+                    return self.send(200, {"accounts": [], "msg": str(e)})
             if path == "/state":
                 d = read()
                 d["listening"], d["keys"], d["theme"] = listening(), key_rows(d), theme()
@@ -2011,7 +2019,8 @@ def make_handler(token):
                 root, jobs = read()["root"], read()["jobs"]
                 raw = {str(Path(j["args"]["edit"]).resolve()): j for j in jobs if j["type"] == "video" and j["args"].get("edit")}
                 # no cut yet: the raw clip's frame (as New video shows it), and the job the card follows
-                vids = [dict(e, thumb=f"/thumb?p={quote(e['video'] or raw[e['dir']]['args']['path'])}&u={int(e['updated'])}"
+                names = read().get("edit_names") or {}   # Rename on the card: a name for this window, the folder keeps its own
+                vids = [dict(e, name=names.get(e["dir"]) or e["name"], thumb=f"/thumb?p={quote(e['video'] or raw[e['dir']]['args']['path'])}&u={int(e['updated'])}"
                              if e["video"] or e["dir"] in raw else None,
                              media=e["video"] and "/media?p=" + quote(e["video"]), job=(raw.get(e["dir"]) or {}).get("id"))
                         for e in library.entries() if e["dir"] not in set(read().get("hidden_edits") or [])]   # Remove from this list
@@ -2154,6 +2163,11 @@ def make_handler(token):
                 return self.send(400, {"error": "not json"})
             if askhook.route(self, "POST", path, {}, body):
                 return
+            if path == "/post/connect":   # one more account: Zernio's sign-in opens in a new tab, Settings re-lists on return
+                try:
+                    return self.send(200, {"url": post.connect_url(str(body.get("platform") or ""))})
+                except (post.NoKey, post.Refused) as e:
+                    return self.send(400, {"msg": str(e)})
             if path == "/theme":   # the toggle: one choice for the window and every review page (review.py)
                 try:
                     set_theme(body.get("theme"))
@@ -2402,6 +2416,13 @@ def make_handler(token):
                     return self.send(200, {"ok": True, "removed": delete_style(root, sid, body.get("measured") is True)})
                 except ValueError as e:
                     return self.send(400, {"error": str(e)})
+            if path == "/edit/rename":   # {dir, name}: the card's name; empty puts the folder's name back
+                d, name = Path(str(body.get("dir") or "")).resolve(), " ".join(str(body.get("name") or "").split())
+                if d not in library.edit_dirs() or len(name) > 80:
+                    return self.send(400, {"ok": False, "msg": "That is not one of your videos." if len(name) <= 80 else "Keep it under 80 characters."})
+                update(lambda x: x.__setitem__("edit_names", {**{k: v for k, v in (x.get("edit_names") or {}).items() if k != str(d)},
+                                                              **({str(d): name} if name else {})}))
+                return self.send(200, {"ok": True})
             if path in ("/clip/hide", "/clip/trash", "/edit/trash", "/edit/hide"):   # only what the page listed; Trash, never a delete
                 st = read()
                 if path in ("/edit/trash", "/edit/hide"):
@@ -3030,6 +3051,13 @@ def demo():
     except urllib.error.HTTPError as e:
         assert e.code == 400
     post("/theme", {"theme": "system"})
+    # Settings, Auto-post your videos with no Zernio key: an empty list that says so, no request leaves the computer
+    assert get("/post/accounts") == {"accounts": [], "nokey": True} and "zernio" in get("/state")["keys"]
+    try:
+        post("/post/connect", {"platform": "tiktok"})
+        raise AssertionError("a connect link without a key")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
     # Claude's question (askhook.py): the hook posts it, the showing page polls it and answers, the hook clears it
     assert b'src="/ask.js"' in HTML.read_bytes() and b"askq" in urllib.request.urlopen(base + "/ask.js?t=" + tok).read()
     assert askhook.live() == []   # served, but no page has polled yet
@@ -4009,6 +4037,16 @@ def demo():
         hid.mkdir(parents=True)
         shutil.copyfile(vid, hid / "cut.mp4")
         assert str(hid.resolve()) in [v["dir"] for v in get("/library")["videos"]]
+        assert post("/edit/rename", {"dir": str(hid), "name": "  My   first video "})["ok"]
+        assert next(v for v in get("/library")["videos"] if v["dir"] == str(hid.resolve()))["name"] == "My first video"
+        assert post("/edit/rename", {"dir": str(hid), "name": ""})["ok"]
+        assert next(v for v in get("/library")["videos"] if v["dir"] == str(hid.resolve()))["name"] == "hide-me"
+        for bad in ({"dir": str(tmp), "name": "x"}, {"dir": str(hid), "name": "x" * 81}):
+            try:
+                post("/edit/rename", bad)
+                raise AssertionError(bad)
+            except urllib.error.HTTPError as e:
+                assert e.code == 400, bad
         assert post("/edit/hide", {"dir": str(hid)})["ok"] and (hid / "cut.mp4").exists() and str(hid.resolve()) not in [v["dir"] for v in get("/library")["videos"]]
         gone = root / "edits" / "old-edit"
         gone.mkdir(parents=True)

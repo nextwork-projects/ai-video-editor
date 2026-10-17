@@ -34,15 +34,15 @@ def key_file():
     """$AI_EDITOR_HOME/.env when AI_EDITOR_HOME is set, else the shared KEY_FILE."""
     home = os.environ.get("AI_EDITOR_HOME", "").strip()
     return Path(home) / ".env" if home else KEY_FILE
-VARS = {"gemini": "GEMINI_API_KEY", "elevenlabs": "ELEVENLABS_API_KEY"}
+VARS = {"gemini": "GEMINI_API_KEY", "elevenlabs": "ELEVENLABS_API_KEY", "zernio": "ZERNIO_API_KEY"}
 # The fixed start of each vendor's key, checked before any request. Google keys start with AQ. or AIza
 # (creator-teardown references/setup.md). ElevenLabs' older keys have none.
 PREFIX = {"gemini": ("AIza", "AQ.")}   # AI Studio issues AQ. keys since mid-2026; older keys start AIza
-NAMES = {"gemini": "Gemini", "elevenlabs": "ElevenLabs"}
+NAMES = {"gemini": "Gemini", "elevenlabs": "ElevenLabs", "zernio": "Zernio"}
 
 
 def get(name):
-    """(key, where it came from) or (None, None). `name` is gemini or elevenlabs.
+    """(key, where it came from) or (None, None). `name` is gemini, elevenlabs or zernio.
     Never a .env in the working folder: that is another project's, and its key would be billed."""
     var, p = VARS[name], key_file()
     if os.environ.get(var, "").strip():
@@ -140,6 +140,8 @@ def verify(name, key):
     if name == "gemini":
         code, body = _get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
                           {"x-goog-api-key": key})
+    elif name == "zernio":   # the posting key (post.py): listing the connected accounts is free
+        code, body = _get("https://zernio.com/api/v1/profiles", {"Authorization": f"Bearer {key}"})
     else:
         code, body = _get("https://api.elevenlabs.io/v1/user", {"xi-api-key": key})
         # A key restricted to Speech to Text (what setup asks for) may not read /v1/user.

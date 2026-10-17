@@ -4,6 +4,7 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Settings has an Auto-post your videos card: paste a Zernio key, connect any number of Instagram, TikTok, YouTube and other accounts, and Claude posts an approved video now or at a set time. A video's ⋯ menu has Rename.
 - A video's versions are one Version dropdown beside Watch and Compare, so long names no longer squeeze the player bar.
 - A finished reel gets a Trial reels tab: Claude's spare hooks and versions, a type menu per version (pick several, or let Claude decide), Add a version, Ask Claude, and Make. Trial reels list under their own heading in the Version dropdown.
 
